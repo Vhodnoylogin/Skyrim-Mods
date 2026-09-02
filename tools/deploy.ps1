@@ -1,9 +1,14 @@
-﻿# Раскладка Envoy в mods\. Все пути и имена - в config/build.json, в коде их нет.
+﻿# Раскладка моста Envoy в mods\. Все пути и имена - в config/build.json, в коде их нет.
 #
 #   tools\deploy.ps1            показать, что будет сделано
 #   tools\deploy.ps1 -Apply     выполнить
 #
-# Состав профилей этот скрипт НЕ трогает: включение мода делается через мост MO2Bridge.
+# Мост выкладывает только себя. Адаптер и слушатель - отдельные модули на своих
+# ветках, и файлов соседа здесь просто нет. Общее у них одно - контракт, и мост
+# отдаёт его папкой SDK внутри собственного мода: против неё собираются и наши
+# два тестовых модуля, и любой чужой мод, который захочет говорить с Envoy.
+#
+# Состав профилей этот скрипт НЕ трогает: включение мода делается через мост MO2.
 param([switch]$Apply, [switch]$NoIndex)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
@@ -14,112 +19,64 @@ $enc  = New-Object Text.UTF8Encoding($false)
 $game = @(Get-Process -Name SkyrimVR,SkyrimSE -ErrorAction SilentlyContinue)
 if ($game.Count) { throw "Игра запущена ($($game.Name -join ', ')) - раскладка запрещена" }
 
+function Expand-Path([string]$p) { $p.Replace('{root}', $root) }
+
 $pex = Join-Path $root 'build\pex'
 if (-not (Test-Path -LiteralPath $pex)) { throw "Нет собранных скриптов. Сначала tools\build-papyrus.ps1" }
 
 $dist = Join-Path $root 'dist'
 Remove-Item -LiteralPath $dist -Recurse -Force -ErrorAction SilentlyContinue
+$mod = Join-Path $dist $d.modName
+New-Item -ItemType Directory -Force (Join-Path $mod 'Scripts\Source') | Out-Null
 
-function New-Mod([string]$name, [string[]]$scripts, [string]$esp, [string]$notes) {
-    $mod = Join-Path $dist $name
-    New-Item -ItemType Directory -Force (Join-Path $mod 'Scripts\Source') | Out-Null
-    foreach ($s in $scripts) {
-        Copy-Item -LiteralPath (Join-Path $pex "$s.pex")            -Destination (Join-Path $mod 'Scripts') -Force
-        Copy-Item -LiteralPath (Join-Path $root "papyrus\$s.psc")   -Destination (Join-Path $mod 'Scripts\Source') -Force
-    }
-    Copy-Item -LiteralPath (Join-Path $root "esp\$esp") -Destination $mod -Force
+foreach ($s in $d.scripts) {
+    Copy-Item -LiteralPath (Join-Path $pex "$s.pex")          -Destination (Join-Path $mod 'Scripts') -Force
+    Copy-Item -LiteralPath (Join-Path $root "papyrus\$s.psc") -Destination (Join-Path $mod 'Scripts\Source') -Force
+}
+Copy-Item -LiteralPath (Join-Path $root "esp\$($d.esp)") -Destination $mod -Force
 
-    $dll = Join-Path $root 'build\Release\Envoy.dll'
-    if ((Test-Path -LiteralPath $dll) -and $name -eq $d.modName) {
-        New-Item -ItemType Directory -Force (Join-Path $mod 'SKSE\Plugins\envoy') | Out-Null
-        Copy-Item -LiteralPath $dll -Destination (Join-Path $mod 'SKSE\Plugins') -Force
-        Copy-Item -LiteralPath (Join-Path $root 'config\envoy.default.json') `
-                  -Destination (Join-Path $mod 'SKSE\Plugins\envoy\envoy.json') -Force
-    }
-
-    $meta = @(
-        '[General]'
-        'gameName=SkyrimSE'
-        'modid=0'
-        "version=$($d.version)"
-        "newestVersion=$($d.version)"
-        'category="0,"'
-        'installationFile='
-        "notes=$notes"
-        ''
-        '[installedFiles]'
-        'size=0'
-    )
-    [IO.File]::WriteAllLines((Join-Path $mod 'meta.ini'), $meta, $enc)
-    return $mod
+$dll = Expand-Path $d.dll
+if (Test-Path -LiteralPath $dll) {
+    New-Item -ItemType Directory -Force (Join-Path $mod 'SKSE\Plugins\envoy') | Out-Null
+    Copy-Item -LiteralPath $dll -Destination (Join-Path $mod 'SKSE\Plugins') -Force
+    Copy-Item -LiteralPath (Expand-Path $d.defaultConfig) `
+              -Destination (Join-Path $mod 'SKSE\Plugins\envoy\envoy.json') -Force
+} else {
+    Write-Warning "библиотека моста не собрана: $dll"
 }
 
-function New-AdapterMod {
-    # Адаптер - такой же мод, как остальные: он несёт сам себя и конфиг,
-    # описывающий, где лежит модель. Включается и выключается галочкой.
-    $mod = Join-Path $dist $d.adapterModName
-    $inner = Join-Path $mod $d.adapterTargetRel
-    New-Item -ItemType Directory -Force $inner | Out-Null
+# SDK - единственное, что мост отдаёт наружу. Адаптеры и слушатели собираются
+# против него, а не против нашего репозитория.
+$sdk = Join-Path $mod 'SDK'
+New-Item -ItemType Directory -Force $sdk | Out-Null
+foreach ($f in $d.sdk) { Copy-Item -LiteralPath (Expand-Path $f) -Destination $sdk -Force }
 
-    # Адаптер теперь плагин SKSE: рядом с настройками едет его библиотека.
-    $src = $d.adapterSource.Replace('{root}', $root)
-    Get-ChildItem -LiteralPath $src -File -Filter '*.json' |
-        ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $inner -Force }
-
-    $dll = $d.adapterDll.Replace('{root}', $root)
-    if (Test-Path -LiteralPath $dll) {
-        $plugins = Join-Path $mod 'SKSE\Plugins'
-        New-Item -ItemType Directory -Force $plugins | Out-Null
-        Copy-Item -LiteralPath $dll -Destination $plugins -Force
-    } else {
-        Write-Warning "библиотека адаптера не собрана: $dll"
-    }
-
-    $meta = @(
-        '[General]'
-        'gameName=SkyrimSE'
-        'modid=0'
-        "version=$($d.version)"
-        "newestVersion=$($d.version)"
-        'category="0,"'
-        'installationFile='
-        'notes=Адаптер Envoy к службе распознавания и синтеза речи. Знает обе стороны; мост о модели не знает.'
-        ''
-        '[installedFiles]'
-        'size=0'
-    )
-    [IO.File]::WriteAllLines((Join-Path $mod 'meta.ini'), $meta, $enc)
-    return $mod
-}
-
-$made = @()
-$made += New-Mod $d.modName     @('Envoy','EnvoyQuest') 'Envoy.esp'     'Envoy Framework. Собран из Envoy Framework/, версия по config/build.json.'
-$made += New-Mod $d.demoModName @('EnvoyDemoObserver','EnvoyDemoGreedy','EnvoyDemoShared') 'EnvoyDemo.esp' 'Демонстрационные подписчики Envoy: наблюдатель, жадный и делящийся. В рабочие профили не нужны.'
-$made += New-AdapterMod
+$meta = @(
+    '[General]'
+    'gameName=SkyrimSE'
+    'modid=0'
+    "version=$($d.version)"
+    "newestVersion=$($d.version)"
+    'category="0,"'
+    'installationFile='
+    'notes=Envoy Framework - мост. Контракт для адаптеров и слушателей лежит в папке SDK.'
+    ''
+    '[installedFiles]'
+    'size=0'
+)
+[IO.File]::WriteAllLines((Join-Path $mod 'meta.ini'), $meta, $enc)
 
 '--- будет разложено ---'
-foreach ($m in $made) {
-    $rel = $m.Substring($dist.Length + 1)
-    $n = @(Get-ChildItem -LiteralPath $m -Recurse -File).Count
-    '  {0,-40} {1} файлов' -f $rel, $n
-}
+'  {0,-40} {1} файлов' -f $d.modName, @(Get-ChildItem -LiteralPath $mod -Recurse -File).Count
+'  в том числе SDK: {0}' -f ((Get-ChildItem -LiteralPath $sdk -File).Name -join ', ')
 if (-not $Apply) { ''; 'сухой прогон - добавь -Apply'; return }
 
-foreach ($m in $made) {
-    $name = Split-Path -Leaf $m
-    $target = Join-Path $d.modsRoot $name
-    New-Item -ItemType Directory -Force $target | Out-Null
-    Copy-Item -LiteralPath (Join-Path $m '*') -Destination $target -Recurse -Force
-    "  разложено: $name"
-}
+$target = Join-Path $d.modsRoot $d.modName
+New-Item -ItemType Directory -Force $target | Out-Null
+Copy-Item -LiteralPath (Join-Path $mod '*') -Destination $target -Recurse -Force
+"  разложено: $($d.modName)"
 
 if (-not $NoIndex) {
-    & $d.indexScript -Owner $d.indexOwner -Mods $d.modName, $d.demoModName -Note "Envoy Framework deploy $($d.version)"
+    & $d.indexScript -Owner $d.indexOwner -Mods $d.modName -Note "Envoy Framework deploy $($d.version)"
 }
-
 ''
-'Мод разложен, но НЕ включён. Включение и порядок - через мост MO2Bridge.'
-
-
-
-

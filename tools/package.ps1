@@ -1,4 +1,4 @@
-﻿# Упаковка Envoy в архивы и установка из них, как любого другого мода.
+﻿# Упаковка модуля в архив и установка из него, как любого другого мода.
 # Все пути - в config/build.json.
 #
 #   tools\package.ps1           показать, что будет сделано
@@ -85,5 +85,5 @@ try {
     "  мост не ответил, обнови список в MO2 вручную: $($_.Exception.Message)"
 }
 
-& $d.indexScript -Owner $d.indexOwner -Mods $plan.Name -Note "Envoy Framework $($d.version) установлен из архива"
+& $d.indexScript -Owner $d.indexOwner -Mods $plan.Name -Note "$($d.modName) $($d.version) установлен из архива"
 

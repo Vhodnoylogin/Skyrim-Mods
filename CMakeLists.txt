@@ -135,4 +135,5 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 # писать в сборку при запущенной игре нельзя.
 
 add_subdirectory(providers)
-add_subdirectory(adapters/voice)
+# Адаптер здесь больше не собирается: это отдельный модуль на своей ветке.
+# Мост о нём не знает вовсе - он отдаёт контракт папкой SDK, и этого достаточно.
