@@ -16,11 +16,11 @@
       "listenTimeoutSec": 30,
       "autoStart": {
         "enabled": true,
-        "exec": "D:/Modding/Claude Code/Skyrim VR/voice/.venv/Scripts/pythonw.exe",
+        "exec": "D:/Skyrim VR Modding/Claude Code/Skyrim VR/dev/voice/.venv/Scripts/pythonw.exe",
         "args": [
-          "D:/Modding/Claude Code/Skyrim VR/voice/voice-service.py"
+          "D:/Skyrim VR Modding/Claude Code/Skyrim VR/dev/voice/voice-service.py"
         ],
-        "workingDir": "D:/Modding/Claude Code/Skyrim VR/voice",
+        "workingDir": "D:/Skyrim VR Modding/Claude Code/Skyrim VR/dev/voice",
         "waitSec": 240,
         "parentPidArg": "--parent-pid"
       }
