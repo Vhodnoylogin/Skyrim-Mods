@@ -1,0 +1,50 @@
+{
+  "adapter": {
+    "id": "voice",
+    "name": "Голосовые модели",
+    "provides": "asr,tts"
+  },
+  "models": [
+    {
+      "id": "accurate",
+      "class": "accurate",
+      "enabled": true,
+      "url": "http://127.0.0.1:8931",
+      "mode": "listen",
+      "language": "ru",
+      "deadlineMs": 1500,
+      "listenTimeoutSec": 30,
+      "autoStart": {
+        "enabled": true,
+        "exec": "D:/Modding/Claude Code/Skyrim VR/voice/.venv/Scripts/pythonw.exe",
+        "args": [
+          "D:/Modding/Claude Code/Skyrim VR/voice/voice-service.py"
+        ],
+        "workingDir": "D:/Modding/Claude Code/Skyrim VR/voice",
+        "waitSec": 240,
+        "parentPidArg": "--parent-pid"
+      }
+    },
+    {
+      "id": "fast",
+      "class": "fast",
+      "enabled": false,
+      "url": "http://127.0.0.1:8933",
+      "mode": "listen",
+      "language": "ru",
+      "deadlineMs": 150,
+      "listenTimeoutSec": 30,
+      "autoStart": {
+        "enabled": false,
+        "exec": "",
+        "args": [],
+        "workingDir": "",
+        "waitSec": 60,
+        "parentPidArg": ""
+      }
+    }
+  ],
+  "correlateMs": 2500,
+  "retryDelayMs": 2000,
+  "speakModel": "accurate"
+}
