@@ -52,11 +52,12 @@ in `PATH`). Every other route works without it.
 ## Tests
 
 ```
-python tests/run.py
+python ../tests/run.py
 ```
 
 Four suites: the busy-state logic runs without MO2, the other three need a running manager and
-are skipped with a clear message when it is absent. Details in `tests/README.md`.
+are skipped with a clear message when it is absent. They live **outside** this package, in
+`tests\` next to it, and are never shipped to MO2. Details in `..	ests\README.md`.
 
 ---
 
