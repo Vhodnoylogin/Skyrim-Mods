@@ -12,7 +12,6 @@
   "deploy": {
     "modsRoot": "D:/Skyrim VR Modding/MO2/ModOrganizer/Skyrim VR/mods",
     "modName": "Envoy Framework",
-    "demoModName": "Envoy Framework - Demo Subscriber",
     "version": "0.1.0",
     "indexScript": "D:/Skyrim VR Modding/Claude Code/Skyrim VR/index/update-index.ps1",
     "indexOwner": "chat-envoy-bridge",
@@ -20,9 +19,16 @@
     "sevenZip": "C:/Program Files/7-Zip/7z.exe",
     "bridgeUrl": "http://127.0.0.1:8930",
     "bridgeToken": "D:/Skyrim VR Modding/Claude Code/Skyrim VR/dev/mo2ailink/mo2ailink-token.txt",
-    "adapterModName": "Envoy Framework - Voice Adapter",
-    "adapterSource": "{root}/adapters/voice",
-    "adapterTargetRel": "SKSE/Plugins/envoy/adapters/voice",
-    "adapterDll": "{root}/build/adapters/voice/Release/EnvoyVoiceAdapter.dll"
+    "scripts": ["Envoy", "EnvoyQuest"],
+    "esp": "Envoy.esp",
+    "dll": "{root}/build/Release/Envoy.dll",
+    "defaultConfig": "{root}/config/envoy.default.json",
+    "sdk": [
+      "{root}/contract/envoy-adapter.h",
+      "{root}/contract/envoy-abi.h",
+      "{root}/papyrus/Envoy.psc",
+      "{root}/contract/envoy-keys.md",
+      "{root}/contract/envoy-papyrus.md"
+    ]
   }
 }
