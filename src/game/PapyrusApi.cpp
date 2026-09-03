@@ -38,7 +38,11 @@ namespace Envoy
 
 	void PapyrusApi::Subscribe(Tag, Str a_ns, std::vector<Str> a_topics)
 	{
-		SubscriptionRegistry::Get().Subscribe(a_ns.c_str(), ToStrings(a_topics));
+		const auto topics = ToStrings(a_topics);
+		SubscriptionRegistry::Get().Subscribe(a_ns.c_str(), topics);
+		std::string joined;
+		for (const auto& t : topics) { joined += joined.empty() ? t : ", " + t; }
+		SKSE::log::info("участник {} подписался на темы: {}", a_ns.c_str(), joined);
 	}
 
 	void PapyrusApi::Unsubscribe(Tag, Str a_ns)
@@ -53,7 +57,9 @@ namespace Envoy
 
 	void PapyrusApi::RegisterVocabulary(Tag, Str a_ns, std::vector<Str> a_phrases)
 	{
-		SubscriptionRegistry::Get().SetVocabulary(a_ns.c_str(), ToStrings(a_phrases));
+		const auto phrases = ToStrings(a_phrases);
+		SubscriptionRegistry::Get().SetVocabulary(a_ns.c_str(), phrases);
+		SKSE::log::info("участник {} объявил словарь: {} фраз", a_ns.c_str(), phrases.size());
 		// Словарь нужен той стороне, которая слушает: пусть адаптеры узнают сразу.
 		AdapterHost::Get().SendVocabulary(SubscriptionRegistry::Get().MergedVocabulary());
 	}
@@ -148,7 +154,16 @@ namespace Envoy
 	float PapyrusApi::GetVocabularyScore(Tag, std::int32_t a_id, Str a_ns)
 	{
 		auto item = UtteranceStore::Get().Find(a_id);
-		return item ? SubscriptionRegistry::Get().Match(a_ns.c_str(), item->text).score : 0.0f;
+		if (!item) {
+			SKSE::log::info("участник {} спросил совпадение по реплике {} - реплики нет", a_ns.c_str(), a_id);
+			return 0.0f;
+		}
+		const auto match = SubscriptionRegistry::Get().Match(a_ns.c_str(), item->text);
+		// Самая важная строка журнала: она доказывает, что событие дошло до скрипта.
+		// Без неё "скрипт промолчал" и "событие не дошло" неразличимы.
+		SKSE::log::info("участник {} спросил совпадение по реплике {}: {:.2f} на фразе \"{}\"",
+			a_ns.c_str(), a_id, match.score, match.phrase);
+		return match.score;
 	}
 
 	float PapyrusApi::GetVocabularyMargin(Tag, std::int32_t a_id, Str a_ns)
