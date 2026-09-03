@@ -1,0 +1,62 @@
+[
+  {
+    "morph": "CLAWEars",
+    "shapes": [
+      "head",
+      "fur_face",
+      "FurfaceBlend",
+      "ScalpFurBlend",
+      "fur_shoulders",
+      "fur_back"
+    ],
+    "parts": [
+      {
+        "bones": [
+          "NPC EarL [EarL]Bone01",
+          "NPC EarL [EarL]Bone02"
+        ],
+        "mode": "grow",
+        "amount": 3.4,
+        "pivot": "NPC EarL [EarL]Bone01"
+      },
+      {
+        "bones": [
+          "NPC EarR [EarR]Bone01",
+          "NPC EarR [EarR]Bone02"
+        ],
+        "mode": "grow",
+        "amount": 3.4,
+        "pivot": "NPC EarR [EarR]Bone01"
+      }
+    ]
+  },
+  {
+    "morph": "CLAWBuild",
+    "shapes": [
+      "body",
+      "fur_belly",
+      "fur_chest",
+      "fur_back"
+    ],
+    "parts": [
+      {
+        "mode": "region",
+        "axis": [
+          0.0,
+          -2.0
+        ],
+        "zRange": [
+          58.0,
+          102.0
+        ],
+        "zFade": 9.0,
+        "amount": 2.2,
+        "includeContains": [
+          "NPC Pelvis",
+          "NPC Spine"
+        ],
+        "maxShift": 24.0
+      }
+    ]
+  }
+]

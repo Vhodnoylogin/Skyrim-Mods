@@ -37,8 +37,10 @@ BODYTRI пишется обрезкой пути по этому имени.
 с каждым ползунком по отдельности и со всеми сразу. Рамка кадра берётся ОДНА
 на все состояния -- иначе камера отъезжает от разбухшего тела и сравнение врёт.
 """
-import sys, json, bpy, addon_utils
-from mathutils import Vector
+import sys, os, json, bpy, addon_utils
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import morphlib
 
 _v = bpy.context.preferences.view
 try:
@@ -59,114 +61,8 @@ for o in list(bpy.data.objects):
 bpy.ops.import_scene.pynifly(filepath=SRC)
 arm = next((o for o in bpy.data.objects if o.type == 'ARMATURE'), None)
 
-
-def bone_head(name):
-    if arm is None or name not in arm.data.bones:
-        return None
-    return arm.matrix_world @ arm.data.bones[name].head_local
-
-
-def smooth(t):
-    """Плавная ступенька 0..1: без неё край области видно швом."""
-    t = 0.0 if t < 0.0 else (1.0 if t > 1.0 else t)
-    return t * t * (3.0 - 2.0 * t)
-
-
-def weight_of(v, gi):
-    return min(1.0, sum(g.weight for g in v.groups if g.group in gi))
-
-
-for item in spec:
-    morph = item['morph']
-    for shape in item['shapes']:
-        obj = bpy.data.objects.get(shape)
-        if obj is None:
-            print("BUILD|%-12s нет формы %s" % (morph, shape))
-            continue
-
-        # плановый сдвиг на каждую вершину, накопленный по всем частям
-        delta = {}
-        for part in item['parts']:
-            amount = float(part['amount'])
-            mode = part.get('mode', 'barrel')
-
-            if mode == 'region':
-                # Раздувание задаётся МНОЖИТЕЛЕМ обхвата, а не сдвигом в единицах.
-                # Сдвиг на одинаковую величину переставляет вершины местами:
-                # внутренняя, сдвинутая на 22, обгоняет внешнюю, сдвинутую на 0,
-                # и на силуэте появляется жёсткий бортик. Растяжение порядок
-                # сохраняет, и поверхность остаётся гладкой.
-                ax = Vector(part.get('axis', [0.0, 0.0]))
-                z0, z1 = part['zRange']
-                fade = float(part.get('zFade', 8.0))
-                cap = float(part.get('maxShift', 1e9))
-                # Принадлежность к области задаётся СПИСКОМ СВОИХ костей, а не
-                # списком чужих. Отрицательный список приходится держать полным,
-                # и он однажды пропустил пальцы: у вервольфа кисти висят на
-                # уровне живота, кость называется Finger, и раздувание утащило
-                # когти на полметра в стороны.
-                good = [g.index for g in obj.vertex_groups
-                        if any(k.lower() in g.name.lower()
-                               for k in part.get('includeContains', []))]
-                for i, v in enumerate(obj.data.vertices):
-                    co = obj.matrix_world @ v.co
-                    wz = smooth((co.z - z0) / fade) * smooth((z1 - co.z) / fade)
-                    if wz <= 0.01:
-                        continue
-                    wb = min(1.0, sum(g.weight for g in v.groups
-                                      if g.group in good))
-                    w = wz * wb
-                    if w <= 0.01:
-                        continue
-                    r = Vector((co.x - ax.x, co.y - ax.y, 0.0))
-                    if r.length < 1e-4:
-                        continue
-                    # потолок сдвига держит гриву: она висит вчетверо дальше от
-                    # оси, чем кожа, и тот же множитель разносит её пряди врозь.
-                    # min от двух растущих функций сам растёт, поэтому порядок
-                    # вершин по радиусу не переставляется и бортика не будет
-                    shift = min(r.length * (amount - 1.0), cap)
-                    delta[i] = delta.get(i, Vector((0, 0, 0))) +                         r.normalized() * (shift * w)
-                continue
-
-            gi = [obj.vertex_groups[b].index for b in part['bones']
-                  if b in obj.vertex_groups]
-            if not gi:
-                continue
-            pivot = bone_head(part.get('pivot') or part['bones'][0])
-            if pivot is None:
-                print("BUILD|%-12s %s: нет кости-опоры" % (morph, shape))
-                continue
-            for i, v in enumerate(obj.data.vertices):
-                w = weight_of(v, gi)
-                if w <= 0.01:
-                    continue
-                co = obj.matrix_world @ v.co
-                if mode == 'grow':
-                    # удлинение: растяжение от основания кости
-                    d = (co - pivot) * ((amount - 1.0) * w)
-                else:
-                    # бочка: наружу от вертикальной оси, проходящей через опору
-                    r = Vector((co.x - pivot.x, co.y - pivot.y, 0.0))
-                    if r.length < 1e-4:
-                        continue
-                    d = r.normalized() * (amount * w)
-                delta[i] = delta.get(i, Vector((0, 0, 0))) + d
-
-        if not delta:
-            print("BUILD|%-12s %-14s костей нет, пропуск" % (morph, shape))
-            continue
-
-        if obj.data.shape_keys is None:
-            obj.shape_key_add(name='Basis', from_mix=False)
-        sk = obj.shape_key_add(name='>' + morph, from_mix=False)
-        inv = obj.matrix_world.inverted()
-        mx = 0.0
-        for i, d in delta.items():
-            sk.data[i].co = inv @ ((obj.matrix_world @ obj.data.vertices[i].co) + d)
-            mx = max(mx, d.length)
-        print("BUILD|%-12s %-14s сдвинуто %6d из %6d, макс %6.2f"
-              % (morph, shape, len(delta), len(obj.data.vertices), mx))
+morphlib.apply_recipe(spec, {o.name: o for o in bpy.data.objects
+                             if o.type == 'MESH'}, arm)
 
 for o in bpy.data.objects:
     o.select_set(True)

@@ -21,10 +21,19 @@
    означала бы новый файл, новый материал и новый повод разойтись с телом по
    цвету. Пятно кожи ищется по вершинам тела вокруг основания ножен.
 
-  blender.exe --background --python build-genitals.py -- <тело.nif> <скелет.nif> <выход.nif> <рецепт.json> [папка_показа]
+  blender.exe --background --python build-genitals.py -- \
+      <тело.nif> <скелет.nif> <выход.nif> <рецепт-анатомии.json> \
+      [--body-morphs <рецепт-морфов-тела.json>] [папка_показа]
+
+Рецепт морфов тела подключается тем же проходом нарочно. Файл морфов пишется
+один на весь меш, и два раздельных прогона затирали его друг другу: в моде
+оставался только последний собранный набор ползунков.
 """
-import sys, json, math, bpy, addon_utils
+import sys, os, json, math, bpy, addon_utils
 from mathutils import Vector
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import morphlib
 
 _v = bpy.context.preferences.view
 try:
@@ -36,6 +45,11 @@ except Exception:
 addon_utils.enable("io_scene_nifly", default_set=False, persistent=True)
 
 argv = sys.argv[sys.argv.index("--") + 1:]
+BODYMORPHS = None
+if '--body-morphs' in argv:
+    k = argv.index('--body-morphs')
+    BODYMORPHS = argv[k + 1]
+    argv = argv[:k] + argv[k + 2:]
 BODY, SKEL, OUT, SPEC = argv[0], argv[1], argv[2], argv[3]
 PREVIEW = argv[4] if len(argv) > 4 else None
 spec = json.load(open(SPEC, encoding='utf-8'))
@@ -338,6 +352,12 @@ for i in range(n_tube, len(mesh.vertices)):
     c3 = Vector((sx, cen.y, cen.z))
     balls[i] = c3 + (co - c3) * bs['scale']
 add_key('CLAWBallsSize', balls)
+
+# ------------------------------------------------- морфы самого тела ---------
+if BODYMORPHS:
+    meshes = {o.name: o for o in bpy.data.objects if o.type == 'MESH'}
+    morphlib.apply_recipe(json.load(open(BODYMORPHS, encoding='utf-8')),
+                          meshes, arm)
 
 # ------------------------------------------------------- проверка -----------
 # Деталь должна быть СПРЯТАНА в покое и ВИДНА в вытянутом состоянии. Глазом это
