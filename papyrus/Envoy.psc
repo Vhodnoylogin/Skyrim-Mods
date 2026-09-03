@@ -89,6 +89,14 @@ string Function GetOutcome(int aiUtteranceId) global native
 ; Ответ модели на Ask и исход озвучки. Приходят событиями Envoy_Answer
 ; и Envoy_SpeechDone, в которых лежит только номер запроса.
 string Function GetAnswer(int aiRequestId) global native
+
+; Самопроверка рассылки событий. SelfTest зовёт квест-носитель при запуске;
+; мост в ответ шлёт Envoy_Ping, а скрипт обязан вызвать Pong с той же меткой.
+; Ответ или его отсутствие мост записывает в свой журнал - иначе узнать,
+; доходят ли события до Papyrus, из C++ невозможно.
+Function SelfTest() global native
+Function Pong(int aiToken) global native
+
 string Function GetSpeechResult(int aiSpeechId) global native
 
 string Function GetTopic(int aiUtteranceId) global native
