@@ -70,8 +70,8 @@ body_objs = [o for o in bpy.data.objects if o.type == 'MESH']
 # иначе развесить ствол не на что.
 before = {o.name for o in bpy.data.objects}
 bpy.ops.import_scene.pynifly(filepath=SKEL)
-skel_arm = next(o for o in bpy.data.objects
-                if o.type == 'ARMATURE' and o.name not in before)
+skel_objs = [o for o in bpy.data.objects if o.name not in before]
+skel_arm = next(o for o in skel_objs if o.type == 'ARMATURE')
 
 wanted = list(spec['weights']['chain']) + list(spec['weights']['knot']) \
     + list(spec['weights']['ballsBones']) + ['WWD 1']
@@ -96,6 +96,18 @@ for n, (h, t, _q) in rest.items():
         eb.tail = h + Vector((0, 0, 1))
 bpy.ops.object.mode_set(mode='OBJECT')
 print("GEN|перенесено костей из скелета: %d" % len(rest))
+
+# Скелет свою службу отслужил, и в сцене ему делать нечего. Убирается ЦЕЛИКОМ,
+# а не только его арматура: вместе с ним приходят корень, BSXFlags, BSBound и
+# SkeletonID, и при выгрузке они уезжают в тело. Тело актёра с зашитым внутрь
+# корнем чужого скелета игра при вызове зверя не переживает -- ровно на этом
+# упали оба захода 04.09.
+for o in skel_objs:
+    try:
+        bpy.data.objects.remove(o, do_unlink=True)
+    except Exception:
+        pass
+print("GEN|скелет убран из сцены: %d объектов" % len(skel_objs))
 
 
 # ------------------------------------------------------------- развёртка -----
@@ -404,16 +416,7 @@ report_hidden('покой', {})
 report_hidden('вытянуто', {'CLAWGenitalState': 1.0})
 
 # ---------------------------------------------------------------- вывод ------
-for o in bpy.data.objects:
-    o.select_set(o.type == 'MESH' or o is arm)
-skel_arm.select_set(False)
-for o in bpy.data.objects:
-    if o.type == 'ARMATURE' and o is not arm:
-        bpy.data.objects.remove(o, do_unlink=True)
-for o in bpy.data.objects:
-    o.select_set(True)
-bpy.ops.export_scene.pynifly(filepath=OUT, target_game='SKYRIMSE',
-                             write_tris=True, write_bodytri=True)
+morphlib.export_clean(OUT)
 print("GEN|экспорт ok ->", OUT)
 
 if not PREVIEW:

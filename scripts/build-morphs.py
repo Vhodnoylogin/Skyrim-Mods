@@ -64,10 +64,7 @@ arm = next((o for o in bpy.data.objects if o.type == 'ARMATURE'), None)
 morphlib.apply_recipe(spec, {o.name: o for o in bpy.data.objects
                              if o.type == 'MESH'}, arm)
 
-for o in bpy.data.objects:
-    o.select_set(True)
-bpy.ops.export_scene.pynifly(filepath=OUT, target_game='SKYRIMSE',
-                             write_tris=True, write_bodytri=True)
+morphlib.export_clean(OUT)
 print("BUILD|экспорт ok ->", OUT)
 
 if not PREVIEW:

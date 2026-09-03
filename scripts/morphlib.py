@@ -127,3 +127,39 @@ def apply_recipe(spec, objects, arm, log=print):
                 mx = max(mx, d.length)
             log("MORPH|%-16s %-14s сдвинуто %6d из %6d, макс %6.2f"
                 % (morph, shape, len(delta), len(obj.data.vertices), mx))
+
+
+def export_clean(out_path, log=print):
+    """Выгружает сцену в NIF, выбросив мусор, который накапливает PyNifly.
+
+    PyNifly заводит объект Blender на КАЖДЫЙ узел нифа, включая служебные:
+    метку BODYTRI, флаги BSXFlags, границы BSBound, опознание скелета
+    SkeletonID и корни. На выгрузке он пишет их все обратно, поэтому метки
+    множатся от прогона к прогону -- в теле, собранном третьим поколением,
+    их оказалось тридцать штук.
+
+    Само по себе это ещё не смертельно, но если в сцену импортировали ЧУЖОЙ
+    файл (скелет, чтобы взять из него кости), то его корень и его служебные
+    узлы уедут в тело. Тело актёра с зашитым внутрь корнем скелета и его
+    опознанием игра при загрузке зверя не переживает.
+
+    Поэтому: метки BODYTRI сносятся все -- нужную запишет сам экспорт по
+    ключу write_bodytri, -- а выбор объектов делается явным, а не «выделить
+    всё подряд».
+    """
+    import bpy
+    dropped = []
+    for o in list(bpy.data.objects):
+        if o.type == 'EMPTY' and 'BODYTRI' in o.name:
+            dropped.append(o.name)
+            bpy.data.objects.remove(o, do_unlink=True)
+    if dropped:
+        log("EXPORT|снято старых меток BODYTRI: %d" % len(dropped))
+    left = {}
+    for o in bpy.data.objects:
+        o.select_set(True)
+        left[o.type] = left.get(o.type, 0) + 1
+    log("EXPORT|в выгрузку идёт: %s"
+        % ", ".join("%s %d" % (t, n) for t, n in sorted(left.items())))
+    bpy.ops.export_scene.pynifly(filepath=out_path, target_game='SKYRIMSE',
+                                 write_tris=True, write_bodytri=True)
