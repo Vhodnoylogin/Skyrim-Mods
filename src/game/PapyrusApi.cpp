@@ -2,6 +2,11 @@
 
 #include "bus/StateStore.h"
 #include "bus/SubscriptionRegistry.h"
+#include <atomic>
+#include <chrono>
+#include <thread>
+
+#include "ModEventBus.h"
 #include "bus/Auction.h"
 #include "bus/UtteranceStore.h"
 #include "core/Config.h"
@@ -38,7 +43,15 @@ namespace Envoy
 
 	void PapyrusApi::Subscribe(Tag, Str a_ns, std::vector<Str> a_topics)
 	{
-		const auto topics = ToStrings(a_topics);
+		// BSFixedString хранит строки в общем пуле без учёта регистра: движок уже
+		// держит "Dialogue", и объявленное скриптом "dialogue" возвращается из
+		// пула с чужим написанием. Сравнивать темы после этого нельзя, поэтому
+		// приводим их к нижнему регистру на входе - имя темы наше, не движка.
+		auto topics = ToStrings(a_topics);
+		for (auto& t : topics) {
+			std::transform(t.begin(), t.end(), t.begin(),
+				[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+		}
 		SubscriptionRegistry::Get().Subscribe(a_ns.c_str(), topics);
 		std::string joined;
 		for (const auto& t : topics) { joined += joined.empty() ? t : ", " + t; }
@@ -228,6 +241,51 @@ namespace Envoy
 		}
 		auto it = item->denied.find(a_ns.c_str());
 		return it == item->denied.end() ? RE::BSFixedString{} : RE::BSFixedString{ it->second };
+	}
+
+	namespace
+	{
+		std::atomic_int32_t                    g_pingToken{ 0 };
+		std::atomic<std::chrono::steady_clock::time_point> g_pingSentAt{};
+		std::atomic_bool                       g_pongHeard{ false };
+	}
+
+	// Круг замыкается так: мост шлёт событие, скрипт квеста-носителя его ловит
+	// и зовёт Pong. Ответ доказывает, что события доходят до Papyrus; молчание
+	// доказывает обратное. Ни то, ни другое иначе из журнала моста не видно.
+	void PapyrusApi::SelfTest(Tag)
+	{
+		const auto token = ++g_pingToken;
+		g_pongHeard.store(false);
+		SKSE::log::info("самопроверка рассылки: метка {}, звонок через 2 с", token);
+
+		// Звонок отложен нарочно. Скрипт подписывается на Envoy_Ping в той же
+		// строке, где просит самопроверку, и мгновенная рассылка обогнала бы
+		// его подписку - получилось бы ложное "не доходит". Две секунды с запасом.
+		std::thread([token]() {
+			std::this_thread::sleep_for(std::chrono::seconds(2));
+			if (auto* task = SKSE::GetTaskInterface()) {
+				task->AddTask([token]() {
+					g_pingSentAt.store(std::chrono::steady_clock::now());
+					SKSE::log::info("самопроверка рассылки: посылаю Envoy_Ping, метка {}", token);
+					ModEventBus::Send("Envoy_Ping", "", static_cast<float>(token));
+				});
+			}
+			std::this_thread::sleep_for(std::chrono::seconds(5));
+			if (!g_pongHeard.load()) {
+				SKSE::log::error("самопроверка рассылки: ответа на метку {} нет за 5 с - "
+				                 "события моста до скриптов Papyrus НЕ ДОХОДЯТ", token);
+			}
+		}).detach();
+	}
+
+	void PapyrusApi::Pong(Tag, std::int32_t a_token)
+	{
+		g_pongHeard.store(true);
+		const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+			std::chrono::steady_clock::now() - g_pingSentAt.load()).count();
+		SKSE::log::info("самопроверка рассылки: ответ на метку {} пришёл через {} мс - "
+		                "события моста до скриптов Papyrus доходят", a_token, ms);
 	}
 
 	RE::BSFixedString PapyrusApi::GetAnswer(Tag, std::int32_t a_requestId)
@@ -432,6 +490,8 @@ namespace Envoy
 		a_vm->RegisterFunction("GetDenyReason", kScriptName, GetDenyReason);
 		a_vm->RegisterFunction("GetOutcome", kScriptName, GetOutcome);
 		a_vm->RegisterFunction("GetAnswer", kScriptName, GetAnswer);
+		a_vm->RegisterFunction("SelfTest", kScriptName, SelfTest);
+		a_vm->RegisterFunction("Pong", kScriptName, Pong);
 		a_vm->RegisterFunction("GetSpeechResult", kScriptName, GetSpeechResult);
 		a_vm->RegisterFunction("GetTopic", kScriptName, GetTopic);
 		a_vm->RegisterFunction("GetRepeats", kScriptName, GetRepeats);
