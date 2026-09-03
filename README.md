@@ -8,9 +8,7 @@
 | Папка | Ветка | Что это |
 |---|---|---|
 | `dev\repo\` | `master` | ствол, здесь физически лежит `.git` |
-| `dev\envoy\` | `envoy` | Envoy Framework: мост, шина сообщений SKSE |
-| `dev\envoy-voice\` | `envoy-voice` | Envoy: тестовый адаптер к голосовой службе |
-| `dev\envoy-demo\` | `envoy-demo` | Envoy: тестовый слушатель, три участника разбора |
+| `dev\envoy\` | `envoy` | Envoy Framework: мост и два тестовых модуля рядом с ним |
 | `dev\voice\` | `voice` | голосовая служба: распознавание и синтез речи |
 | `dev\mo2ailink\` | `mo2ailink` | плагин MO2 AI Link Assistant |
 | `dev\wt\<задача>\` | временная | ветка под одну задачу внутри модуля |
