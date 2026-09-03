@@ -161,8 +161,12 @@ namespace Envoy
 
 		// Наблюдатели видят каждую реплику независимо от темы - именно так мод
 		// может показать, что до него что-то не дошло и почему.
-		ModEventBus::Send("Envoy_Speech_Any", item.topic, static_cast<float>(a_id));
-		ModEventBus::Send(TopicRouter::EventName(item.topic), item.text, static_cast<float>(a_id));
+		// Событие - звонок в дверь: в нём только номер реплики. Тему подписчик
+		// узнаёт по имени события, а для Envoy_Speech_Any - вызовом GetTopic.
+		// Текст всегда берётся из моста: точная модель может уточнить его уже
+		// после рассылки, и копия в событии разошлась бы с истиной.
+		ModEventBus::Send("Envoy_Speech_Any", "", static_cast<float>(a_id));
+		ModEventBus::Send(TopicRouter::EventName(item.topic), "", static_cast<float>(a_id));
 
 		const auto window = Config::Get().Value<std::int32_t>("/auction/bidWindowMs").value_or(150);
 
@@ -207,12 +211,17 @@ namespace Envoy
 		SKSE::log::info("реплика {} тема {} ставок {} -> {} ({})", a_id, stored->topic,
 			stored->bids.size(), outcome, result.reason);
 
-		for (const auto& winner : result.winners) {
-			ModEventBus::Send("Envoy_Award", winner, static_cast<float>(a_id));
+		// По одной рассылке на исход, а не на получателя: имени в событии больше
+		// нет, и каждый участник сам спрашивает IsWinner или GetDenyReason.
+		// Три имени сохранены не ради содержимого - оно у всех одно, - а ради
+		// условия: Envoy_Award молчит, когда никто не выиграл, Envoy_Denied -
+		// когда никому не отказано, а Envoy_Settled звучит всегда.
+		if (!result.winners.empty()) {
+			ModEventBus::Send("Envoy_Award", "", static_cast<float>(a_id));
 		}
-		for (const auto& entry : result.denied) {
-			ModEventBus::Send("Envoy_Denied", entry.first, static_cast<float>(a_id));
+		if (!result.denied.empty()) {
+			ModEventBus::Send("Envoy_Denied", "", static_cast<float>(a_id));
 		}
-		ModEventBus::Send("Envoy_Settled", outcome, static_cast<float>(a_id));
+		ModEventBus::Send("Envoy_Settled", "", static_cast<float>(a_id));
 	}
 }

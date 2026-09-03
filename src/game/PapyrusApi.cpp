@@ -230,6 +230,16 @@ namespace Envoy
 		return it == item->denied.end() ? RE::BSFixedString{} : RE::BSFixedString{ it->second };
 	}
 
+	RE::BSFixedString PapyrusApi::GetAnswer(Tag, std::int32_t a_requestId)
+	{
+		return RE::BSFixedString{ AdapterHost::Get().Answer(a_requestId) };
+	}
+
+	RE::BSFixedString PapyrusApi::GetSpeechResult(Tag, std::int32_t a_speechId)
+	{
+		return RE::BSFixedString{ AdapterHost::Get().SpeechResult(a_speechId) };
+	}
+
 	RE::BSFixedString PapyrusApi::GetOutcome(Tag, std::int32_t a_id)
 	{
 		auto item = UtteranceStore::Get().Find(a_id);
@@ -421,6 +431,8 @@ namespace Envoy
 		a_vm->RegisterFunction("IsWinner", kScriptName, IsWinner);
 		a_vm->RegisterFunction("GetDenyReason", kScriptName, GetDenyReason);
 		a_vm->RegisterFunction("GetOutcome", kScriptName, GetOutcome);
+		a_vm->RegisterFunction("GetAnswer", kScriptName, GetAnswer);
+		a_vm->RegisterFunction("GetSpeechResult", kScriptName, GetSpeechResult);
 		a_vm->RegisterFunction("GetTopic", kScriptName, GetTopic);
 		a_vm->RegisterFunction("GetRepeats", kScriptName, GetRepeats);
 		a_vm->RegisterFunction("Say", kScriptName, Say);

@@ -55,6 +55,8 @@ namespace Envoy
 		static bool             IsWinner(Tag, std::int32_t a_id, Str a_ns);
 		static Str              GetDenyReason(Tag, std::int32_t a_id, Str a_ns);
 		static Str              GetOutcome(Tag, std::int32_t a_id);
+		static Str              GetAnswer(Tag, std::int32_t a_requestId);
+		static Str              GetSpeechResult(Tag, std::int32_t a_speechId);
 		static Str              GetTopic(Tag, std::int32_t a_id);
 		static std::int32_t     GetRepeats(Tag, std::int32_t a_id, Str a_ns);
 

@@ -33,6 +33,11 @@ namespace Envoy
 		std::vector<std::string> AdapterIds() const;
 		void                     ReloadConfig();
 
+		// Ответ модели и исход озвучки: событие несёт только номер, поэтому
+		// подписчик приходит за содержимым сюда.
+		std::string Answer(std::int32_t a_requestId) const;
+		std::string SpeechResult(std::int32_t a_speechId) const;
+
 		void PushAnswer(const char* a_adapterId, std::int32_t a_requestId, bool a_ok,
 			const char* a_payload) override;
 		void PushSpeechDone(const char* a_adapterId, std::int32_t a_speechId, bool a_ok,
@@ -63,6 +68,11 @@ namespace Envoy
 		std::unordered_map<std::string, std::string> _sources;
 		std::unordered_map<std::string, std::string> _overrides;
 		mutable std::string                          _sourceScratch;
+
+		// Событие несёт только номер, поэтому сам ответ и исход озвучки должны
+		// где-то лежать, пока подписчик за ними не придёт.
+		std::unordered_map<std::int32_t, std::string> _answers;
+		std::unordered_map<std::int32_t, std::string> _speechResults;
 		std::uint64_t                                _order{ 0 };
 		std::int32_t                                 _nextSpeech{ 1 };
 		std::int32_t                                 _nextRequest{ 1 };
