@@ -11,6 +11,7 @@
 
 #include "core/Config.h"
 #include "core/Log.h"
+#include "game/GameLoadWatch.h"
 #include "game/ModEventBus.h"
 #include "game/PapyrusApi.h"
 #include "wire/AdapterHost.h"
@@ -59,15 +60,11 @@ namespace
 			SKSE::log::info("интерфейс моста разослан адаптерам");
 		}
 
-		// Подписки и словари живут в памяти плагина и умирают вместе с процессом,
-		// а RegisterForModEvent, наоборот, переживает сохранение. Значит, объявить
-		// себя один раз при первом запуске квеста недостаточно: после следующей
-		// загрузки мост уже ничего об участнике не знает, хотя событие ему дойдёт.
-		// Поэтому мост сам зовёт всех перечислиться заново - на каждой загрузке.
-		if (a_message->type == SKSE::MessagingInterface::kPostLoadGame ||
-			a_message->type == SKSE::MessagingInterface::kNewGame) {
-			Envoy::ModEventBus::Send("Envoy_Ready", "", static_cast<float>(EnvoyAPI::kInterfaceVersion));
-			SKSE::log::info("игра загружена: зову участников объявиться заново");
+		// Загрузку игры мост узнаёт не от SKSE, а от самого движка: в VR
+		// сообщения kPostLoadGame нет вовсе, и эта ветка молчала бы всегда.
+		// Держатель игровых событий появляется к kDataLoaded, тогда и подписываемся.
+		if (a_message->type == SKSE::MessagingInterface::kDataLoaded) {
+			Envoy::GameLoadWatch::Install();
 		}
 	}
 }
