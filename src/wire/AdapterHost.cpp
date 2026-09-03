@@ -320,16 +320,33 @@ namespace Envoy
 		return requestId;
 	}
 
+	std::string AdapterHost::Answer(std::int32_t a_requestId) const
+	{
+		std::scoped_lock lock(_mutex);
+		auto it = _answers.find(a_requestId);
+		return it == _answers.end() ? std::string{} : it->second;
+	}
+
+	std::string AdapterHost::SpeechResult(std::int32_t a_speechId) const
+	{
+		std::scoped_lock lock(_mutex);
+		auto it = _speechResults.find(a_speechId);
+		return it == _speechResults.end() ? std::string{} : it->second;
+	}
+
 	void AdapterHost::PushAnswer(const char* a_adapterId, std::int32_t a_requestId, bool a_ok,
 		const char* a_payload)
 	{
-		const std::string payload = Safe(a_payload);
+		{
+			std::scoped_lock lock(_mutex);
+			_answers[a_requestId] = Safe(a_payload);
+		}
 		SKSE::log::info("ответ {} от адаптера {}: {}", a_requestId, Safe(a_adapterId),
 			a_ok ? "успех" : "неудача");
 
 		if (auto* task = SKSE::GetTaskInterface()) {
-			task->AddTask([a_requestId, payload]() {
-				ModEventBus::Send("Envoy_Answer", payload, static_cast<float>(a_requestId));
+			task->AddTask([a_requestId]() {
+				ModEventBus::Send("Envoy_Answer", "", static_cast<float>(a_requestId));
 			});
 		}
 	}
@@ -338,11 +355,15 @@ namespace Envoy
 		bool a_interrupted)
 	{
 		const std::string how = a_interrupted ? "interrupted" : (a_ok ? "ok" : "failed");
+		{
+			std::scoped_lock lock(_mutex);
+			_speechResults[a_speechId] = how;
+		}
 		SKSE::log::info("озвучка {} у адаптера {}: {}", a_speechId, Safe(a_adapterId), how);
 
 		if (auto* task = SKSE::GetTaskInterface()) {
-			task->AddTask([a_speechId, how]() {
-				ModEventBus::Send("Envoy_SpeechDone", how, static_cast<float>(a_speechId));
+			task->AddTask([a_speechId]() {
+				ModEventBus::Send("Envoy_SpeechDone", "", static_cast<float>(a_speechId));
 			});
 		}
 	}

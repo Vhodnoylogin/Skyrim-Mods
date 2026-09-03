@@ -85,6 +85,12 @@ string[] Function GetWinners(int aiUtteranceId) global native
 bool Function IsWinner(int aiUtteranceId, string asNamespace) global native
 string Function GetDenyReason(int aiUtteranceId, string asNamespace) global native
 string Function GetOutcome(int aiUtteranceId) global native
+
+; Ответ модели на Ask и исход озвучки. Приходят событиями Envoy_Answer
+; и Envoy_SpeechDone, в которых лежит только номер запроса.
+string Function GetAnswer(int aiRequestId) global native
+string Function GetSpeechResult(int aiSpeechId) global native
+
 string Function GetTopic(int aiUtteranceId) global native
 
 ; ---------------------------------------------------------------- из игры в модель
