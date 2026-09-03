@@ -94,6 +94,11 @@ string Function GetAnswer(int aiRequestId) global native
 ; мост в ответ шлёт Envoy_Ping, а скрипт обязан вызвать Pong с той же меткой.
 ; Ответ или его отсутствие мост записывает в свой журнал - иначе узнать,
 ; доходят ли события до Papyrus, из C++ невозможно.
+; Кто объявился мосту и на какие темы. Нужно затем, чтобы участник мог показать
+; игроку то, чего тот не знает, вместо повторения версии контракта.
+string[] Function GetNamespaces() global native
+string[] Function GetTopicsOf(string asNamespace) global native
+
 Function SelfTest() global native
 Function Pong(int aiToken) global native
 

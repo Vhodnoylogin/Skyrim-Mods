@@ -143,6 +143,25 @@ namespace Envoy
 		return count;
 	}
 
+	std::vector<std::string> SubscriptionRegistry::Namespaces() const
+	{
+		std::scoped_lock lock(_mutex);
+		std::vector<std::string> out;
+		out.reserve(_entries.size());
+		for (const auto& entry : _entries) {
+			out.push_back(entry.first);
+		}
+		std::sort(out.begin(), out.end());
+		return out;
+	}
+
+	std::vector<std::string> SubscriptionRegistry::TopicsOf(const std::string& a_ns) const
+	{
+		std::scoped_lock lock(_mutex);
+		auto it = _entries.find(a_ns);
+		return it == _entries.end() ? std::vector<std::string>{} : it->second.topics;
+	}
+
 	std::vector<std::string> SubscriptionRegistry::MergedVocabulary() const
 	{
 		std::scoped_lock lock(_mutex);

@@ -250,6 +250,24 @@ namespace Envoy
 		std::atomic_bool                       g_pongHeard{ false };
 	}
 
+	std::vector<RE::BSFixedString> PapyrusApi::GetNamespaces(Tag)
+	{
+		std::vector<RE::BSFixedString> out;
+		for (const auto& ns : SubscriptionRegistry::Get().Namespaces()) {
+			out.emplace_back(ns);
+		}
+		return out;
+	}
+
+	std::vector<RE::BSFixedString> PapyrusApi::GetTopicsOf(Tag, Str a_ns)
+	{
+		std::vector<RE::BSFixedString> out;
+		for (const auto& t : SubscriptionRegistry::Get().TopicsOf(a_ns.c_str())) {
+			out.emplace_back(t);
+		}
+		return out;
+	}
+
 	// Круг замыкается так: мост шлёт событие, скрипт квеста-носителя его ловит
 	// и зовёт Pong. Ответ доказывает, что события доходят до Papyrus; молчание
 	// доказывает обратное. Ни то, ни другое иначе из журнала моста не видно.
@@ -490,6 +508,8 @@ namespace Envoy
 		a_vm->RegisterFunction("GetDenyReason", kScriptName, GetDenyReason);
 		a_vm->RegisterFunction("GetOutcome", kScriptName, GetOutcome);
 		a_vm->RegisterFunction("GetAnswer", kScriptName, GetAnswer);
+		a_vm->RegisterFunction("GetNamespaces", kScriptName, GetNamespaces);
+		a_vm->RegisterFunction("GetTopicsOf", kScriptName, GetTopicsOf);
 		a_vm->RegisterFunction("SelfTest", kScriptName, SelfTest);
 		a_vm->RegisterFunction("Pong", kScriptName, Pong);
 		a_vm->RegisterFunction("GetSpeechResult", kScriptName, GetSpeechResult);
