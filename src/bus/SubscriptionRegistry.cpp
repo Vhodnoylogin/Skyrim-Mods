@@ -7,20 +7,93 @@ namespace Envoy
 {
 	namespace
 	{
-		std::string Normalize(const std::string& a_text)
+		// Кодовые точки, а не байты. Кириллица в UTF-8 занимает два байта, и
+		// std::tolower их не трогает, а расстояние редактирования по байтам
+		// назначает заглавной букве цену от того, в какой половине блока она
+		// стоит: "З" стоила 1 байт из 23, а "Ч" - 2 из 19. Регистронезависимость
+		// для русского не работала вовсе, и все пороги значили не то, чем казались.
+		std::u32string Decode(const std::string& a_text)
 		{
-			std::string out;
+			std::u32string out;
 			out.reserve(a_text.size());
-			for (unsigned char ch : a_text) {
-				if (std::isspace(ch)) {
-					if (!out.empty() && out.back() != ' ') {
-						out.push_back(' ');
+			for (std::size_t i = 0; i < a_text.size();) {
+				const auto lead = static_cast<unsigned char>(a_text[i]);
+				std::size_t extra = 0;
+				char32_t    point = lead;
+				if (lead >= 0xF0) {
+					extra = 3;
+					point = lead & 0x07u;
+				} else if (lead >= 0xE0) {
+					extra = 2;
+					point = lead & 0x0Fu;
+				} else if (lead >= 0xC0) {
+					extra = 1;
+					point = lead & 0x1Fu;
+				} else if (lead >= 0x80) {
+					// Одиночный продолжающий байт - строка битая; пропускаем.
+					++i;
+					continue;
+				}
+				if (i + extra >= a_text.size()) {
+					break;
+				}
+				for (std::size_t k = 1; k <= extra; ++k) {
+					point = (point << 6) | (static_cast<unsigned char>(a_text[i + k]) & 0x3Fu);
+				}
+				out.push_back(point);
+				i += extra + 1;
+			}
+			return out;
+		}
+
+		char32_t Lower(char32_t a_point)
+		{
+			if (a_point >= U'A' && a_point <= U'Z') {
+				return a_point + 0x20;
+			}
+			if (a_point >= 0x0410 && a_point <= 0x042F) {   // А-Я
+				return a_point + 0x20;
+			}
+			if (a_point >= 0x0400 && a_point <= 0x040F) {   // Ѐ-Џ, сюда же Ё
+				return a_point + 0x50;
+			}
+			return a_point;
+		}
+
+		bool IsSpace(char32_t a_point)
+		{
+			// Пробельные - числами: табулятор, перевод строки, возврат каретки
+			// и неразрывный пробел.
+			return a_point == U' ' || a_point == 0x09 || a_point == 0x0A ||
+			       a_point == 0x0D || a_point == 0x00A0;
+		}
+
+		bool IsPunct(char32_t a_point)
+		{
+			if (a_point < 0x80) {
+				return std::ispunct(static_cast<int>(a_point)) != 0;
+			}
+			// Знаки, которые в самом деле приходят от распознавания: кавычки-ёлочки,
+			// типографские кавычки и тире, многоточие.
+			return a_point == 0x00AB || a_point == 0x00BB ||
+			       (a_point >= 0x2010 && a_point <= 0x2015) ||
+			       (a_point >= 0x2018 && a_point <= 0x201F) ||
+			       a_point == 0x2026;
+		}
+
+		std::u32string Normalize(const std::string& a_text)
+		{
+			std::u32string out;
+			for (const auto point : Decode(a_text)) {
+				if (IsSpace(point)) {
+					if (!out.empty() && out.back() != U' ') {
+						out.push_back(U' ');
 					}
-				} else if (!std::ispunct(ch)) {
-					out.push_back(static_cast<char>(std::tolower(ch)));
+				} else if (!IsPunct(point)) {
+					out.push_back(Lower(point));
 				}
 			}
-			while (!out.empty() && out.back() == ' ') {
+			while (!out.empty() && out.back() == U' ') {
 				out.pop_back();
 			}
 			return out;
@@ -28,7 +101,7 @@ namespace Envoy
 
 		// Похожесть строк без внешних библиотек: расстояние редактирования,
 		// приведённое к доле от длины. Для команд и коротких фраз этого хватает.
-		float Similarity(const std::string& a_left, const std::string& a_right)
+		float Similarity(const std::u32string& a_left, const std::u32string& a_right)
 		{
 			if (a_left.empty() || a_right.empty()) {
 				return 0.0f;
@@ -55,7 +128,7 @@ namespace Envoy
 			const auto distance = static_cast<float>(previous[a_right.size()]);
 			const auto longest = static_cast<float>(std::max(a_left.size(), a_right.size()));
 			return std::max(0.0f, 1.0f - distance / longest);
-		}
+			}
 	}
 
 	SubscriptionRegistry& SubscriptionRegistry::Get()
