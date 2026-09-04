@@ -243,13 +243,6 @@ namespace Envoy
 		return it == item->denied.end() ? RE::BSFixedString{} : RE::BSFixedString{ it->second };
 	}
 
-	namespace
-	{
-		std::atomic_int32_t                    g_pingToken{ 0 };
-		std::atomic<std::chrono::steady_clock::time_point> g_pingSentAt{};
-		std::atomic_bool                       g_pongHeard{ false };
-	}
-
 	std::vector<RE::BSFixedString> PapyrusApi::GetNamespaces(Tag)
 	{
 		std::vector<RE::BSFixedString> out;
@@ -268,54 +261,6 @@ namespace Envoy
 		return out;
 	}
 
-	// Круг замыкается так: мост шлёт событие, скрипт квеста-носителя его ловит
-	// и зовёт Pong. Ответ доказывает, что события доходят до Papyrus; молчание
-	// доказывает обратное. Ни то, ни другое иначе из журнала моста не видно.
-	void PapyrusApi::SelfTest(Tag)
-	{
-		const auto token = ++g_pingToken;
-		g_pongHeard.store(false);
-		SKSE::log::info("самопроверка рассылки: метка {}, звонок через 2 с", token);
-
-		// Звонок отложен нарочно. Скрипт подписывается на Envoy_Ping в той же
-		// строке, где просит самопроверку, и мгновенная рассылка обогнала бы
-		// его подписку - получилось бы ложное "не доходит". Две секунды с запасом.
-		std::thread([token]() {
-			std::this_thread::sleep_for(std::chrono::seconds(2));
-			if (auto* task = SKSE::GetTaskInterface()) {
-				task->AddTask([token]() {
-					g_pingSentAt.store(std::chrono::steady_clock::now());
-					SKSE::log::info("самопроверка рассылки: посылаю Envoy_Ping, метка {}", token);
-					ModEventBus::Send("Envoy_Ping", "", static_cast<float>(token));
-				});
-			}
-			std::this_thread::sleep_for(std::chrono::seconds(5));
-			if (!g_pongHeard.load()) {
-				SKSE::log::error("самопроверка рассылки: ответа на метку {} нет за 5 с - "
-				                 "события моста до скриптов Papyrus НЕ ДОХОДЯТ", token);
-			}
-		}).detach();
-	}
-
-	void PapyrusApi::Pong(Tag, std::int32_t a_token)
-	{
-		g_pongHeard.store(true);
-		const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-			std::chrono::steady_clock::now() - g_pingSentAt.load()).count();
-		SKSE::log::info("самопроверка рассылки: ответ на метку {} пришёл через {} мс - "
-		                "события моста до скриптов Papyrus доходят", a_token, ms);
-	}
-
-	RE::BSFixedString PapyrusApi::GetAnswer(Tag, std::int32_t a_requestId)
-	{
-		return RE::BSFixedString{ AdapterHost::Get().Answer(a_requestId) };
-	}
-
-	RE::BSFixedString PapyrusApi::GetSpeechResult(Tag, std::int32_t a_speechId)
-	{
-		return RE::BSFixedString{ AdapterHost::Get().SpeechResult(a_speechId) };
-	}
-
 	RE::BSFixedString PapyrusApi::GetOutcome(Tag, std::int32_t a_id)
 	{
 		auto item = UtteranceStore::Get().Find(a_id);
@@ -332,55 +277,6 @@ namespace Envoy
 	// ядро и внешние поставщики появятся отдельно, и до тех пор их ключи честно
 	// отвечают "спросить некому", а не подставляют ложь.
 
-	std::int32_t PapyrusApi::GetStateStatus(Tag, std::int32_t, Str a_key)
-	{
-		return StateStore::Get().Status(a_key.c_str());
-	}
-
-	float PapyrusApi::GetStateAge(Tag, std::int32_t, Str a_key)
-	{
-		return StateStore::Get().Age(a_key.c_str());
-	}
-
-	bool PapyrusApi::GetStateBool(Tag, std::int32_t, Str a_key, bool a_default)
-	{
-		auto entry = StateStore::Get().Value(a_key.c_str());
-		return entry.hasValue ? entry.boolean : a_default;
-	}
-
-	std::int32_t PapyrusApi::GetStateInt(Tag, std::int32_t, Str a_key, std::int32_t a_default)
-	{
-		auto entry = StateStore::Get().Value(a_key.c_str());
-		return entry.hasValue ? entry.integer : a_default;
-	}
-
-	float PapyrusApi::GetStateFloat(Tag, std::int32_t, Str a_key, float a_default)
-	{
-		auto entry = StateStore::Get().Value(a_key.c_str());
-		return entry.hasValue ? entry.number : a_default;
-	}
-
-	RE::BSFixedString PapyrusApi::GetStateString(Tag, std::int32_t, Str a_key, Str a_default)
-	{
-		auto entry = StateStore::Get().Value(a_key.c_str());
-		return entry.hasValue ? RE::BSFixedString{ entry.text } : a_default;
-	}
-
-	RE::TESForm* PapyrusApi::GetStateForm(Tag, std::int32_t, Str a_key)
-	{
-		auto entry = StateStore::Get().Value(a_key.c_str());
-		return entry.hasValue ? RE::TESForm::LookupByID(entry.formId) : nullptr;
-	}
-
-	std::vector<RE::BSFixedString> PapyrusApi::GetKeys(Tag)
-	{
-		std::vector<RE::BSFixedString> out;
-		for (const auto& key : StateStore::Get().Keys()) {
-			out.emplace_back(key);
-		}
-		return out;
-	}
-
 	bool PapyrusApi::WonPrevious(Tag, Str a_ns)
 	{
 		return UtteranceStore::Get().WonPrevious(a_ns.c_str());
@@ -389,79 +285,6 @@ namespace Envoy
 	float PapyrusApi::SecondsSinceWin(Tag, Str a_ns)
 	{
 		return UtteranceStore::Get().SecondsSinceWin(a_ns.c_str());
-	}
-
-	void PapyrusApi::DeclareKey(Tag, Str a_key, Str a_type, float a_ttlSec, Str a_description)
-	{
-		if (!StateStore::Get().Declare(a_key.c_str(), a_type.c_str(), a_ttlSec, a_description.c_str())) {
-			SKSE::log::warn("ключ {} не принят: пустое имя или чужое пространство", a_key.c_str());
-		}
-	}
-
-	void PapyrusApi::RetractKey(Tag, Str a_key) { StateStore::Get().Retract(a_key.c_str()); }
-
-	void PapyrusApi::PublishBool(Tag, Str a_key, bool a_value)
-	{
-		StateStore::Get().PublishBool(a_key.c_str(), a_value);
-	}
-
-	void PapyrusApi::PublishInt(Tag, Str a_key, std::int32_t a_value)
-	{
-		StateStore::Get().PublishInt(a_key.c_str(), a_value);
-	}
-
-	void PapyrusApi::PublishFloat(Tag, Str a_key, float a_value)
-	{
-		StateStore::Get().PublishFloat(a_key.c_str(), a_value);
-	}
-
-	void PapyrusApi::PublishString(Tag, Str a_key, Str a_value)
-	{
-		StateStore::Get().PublishString(a_key.c_str(), a_value.c_str());
-	}
-
-	void PapyrusApi::PublishForm(Tag, Str a_key, RE::TESForm* a_value)
-	{
-		StateStore::Get().PublishForm(a_key.c_str(), a_value ? a_value->GetFormID() : 0);
-	}
-
-	std::vector<RE::BSFixedString> PapyrusApi::GetAdapters(Tag)
-	{
-		std::vector<RE::BSFixedString> out;
-		for (const auto& id : AdapterHost::Get().AdapterIds()) {
-			out.emplace_back(id);
-		}
-		return out;
-	}
-
-	RE::BSFixedString PapyrusApi::GetSource(Tag, Str a_capability)
-	{
-		return RE::BSFixedString{ AdapterHost::Get().Source(a_capability.c_str()) };
-	}
-
-	bool PapyrusApi::SetSource(Tag, Str a_capability, Str a_adapter)
-	{
-		return AdapterHost::Get().SetSource(a_capability.c_str(), a_adapter.c_str());
-	}
-
-	void PapyrusApi::ReloadSettings(Tag)
-	{
-		AdapterHost::Get().ReloadConfig();
-	}
-
-	std::int32_t PapyrusApi::Say(Tag, Str a_text, Str a_voice, std::int32_t a_priority)
-	{
-		return AdapterHost::Get().SendSpeak(a_text.c_str(), a_voice.c_str(), a_priority);
-	}
-
-	void PapyrusApi::StopSpeech(Tag, std::int32_t a_speechId)
-	{
-		AdapterHost::Get().SendStop(a_speechId);
-	}
-
-	std::int32_t PapyrusApi::Ask(Tag, Str a_service, Str a_payload)
-	{
-		return AdapterHost::Get().SendAsk(a_service.c_str(), a_payload.c_str());
 	}
 
 	bool PapyrusApi::Register(RE::BSScript::IVirtualMachine* a_vm)
