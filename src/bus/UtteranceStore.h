@@ -3,8 +3,8 @@
 #include "Utterance.h"
 
 #include <chrono>
+#include <memory>
 #include <mutex>
-#include <optional>
 #include <unordered_map>
 
 namespace Envoy
@@ -22,7 +22,11 @@ namespace Envoy
 		// Уточнение от точной модели: текст и оценки заменяются, ставки и тема
 		// сохраняются - реплика уже разослана и уже разыграна или разыгрывается.
 		bool                     Refine(std::int32_t a_id, const Utterance& a_utterance);
-		std::optional<Utterance> Find(std::int32_t a_id) const;
+		// Реплика отдаётся указателем на неизменяемый снимок, а не значением.
+		// Прежде каждый вопрос о ней - текст, оценка, тема, совпадение, итог -
+		// копировал её целиком вместе со ставками, победителями и картой
+		// отказов; вопросов же на одну реплику приходится по десятку.
+		std::shared_ptr<const Utterance> Find(std::int32_t a_id) const;
 
 		bool AddBid(std::int32_t a_id, BidRecord a_bid);
 		bool SetOutcome(std::int32_t a_id, std::vector<std::string> a_winners,
@@ -41,8 +45,26 @@ namespace Envoy
 	private:
 		UtteranceStore() = default;
 
-		mutable std::mutex                             _mutex;
-		std::unordered_map<std::int32_t, Utterance>    _items;
+		// Копирование при записи: читатели держат снимок и живут с ним сколько
+		// угодно, а писатель делает свою копию и подменяет указатель. Копия
+		// выходит одна на запись вместо одной на каждый вопрос.
+		template <class Fn>
+		bool Mutate(std::int32_t a_id, Fn a_change)
+		{
+			auto it = _items.find(a_id);
+			if (it == _items.end()) {
+				return false;
+			}
+			auto copy = std::make_shared<Utterance>(*it->second);
+			if (!a_change(*copy)) {
+				return false;
+			}
+			it->second = std::move(copy);
+			return true;
+		}
+
+		mutable std::mutex                                              _mutex;
+		std::unordered_map<std::int32_t, std::shared_ptr<const Utterance>> _items;
 		std::string                                    _lastAwardedTo;
 		std::chrono::steady_clock::time_point          _lastAwardAt{};
 		std::int32_t                                   _next{ 1 };
