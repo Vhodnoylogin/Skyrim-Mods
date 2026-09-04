@@ -54,6 +54,7 @@
     },
     "minUtteranceScore": 0.4,
     "debounceSec": 1.0,
+    "sharedWinsTie": true,
     "priority": []
   },
   "utterance": {
