@@ -188,15 +188,25 @@ namespace Envoy
 	void PapyrusApi::Bid(Tag, std::int32_t a_id, Str a_ns, float a_confidence, std::int32_t a_costClass,
 		bool a_greedy)
 	{
+		// Какую фразу узнал заявитель, мост выясняет сам, а не верит на слово:
+		// словари принадлежат ему, и от этого ответа зависит разбор ничьей.
+		// Пустая фраза означала бы "неизвестно", и любая ничья кончалась бы
+		// отказом всем - поэтому она же и в журнале, чтобы молчание было видно.
+		auto        stored = UtteranceStore::Get().Find(a_id);
+		std::string phrase;
+		if (stored) {
+			phrase = SubscriptionRegistry::Get().Match(a_ns.c_str(), stored->text).phrase;
+		}
+
 		const bool accepted = UtteranceStore::Get().AddBid(a_id,
-			BidRecord{ a_ns.c_str(), a_confidence, a_costClass, a_greedy });
+			BidRecord{ a_ns.c_str(), a_confidence, a_costClass, a_greedy, phrase });
 
 		// Отличить "подписчик промолчал" от "подписчик опоздал" по журналу иначе
 		// нечем, а разница решающая: в первом случае до него не дошло событие,
 		// во втором - окно ставок короче, чем задержка Papyrus.
-		SKSE::log::info("ставка {} за реплику {}: уверенность {:.2f}, {}, через {} мс{}",
-			a_ns.c_str(), a_id, a_confidence, a_greedy ? "жадная" : "делится",
-			Auction::MsSinceOffer(a_id), accepted ? "" : " - ОПОЗДАЛА, торги закрыты");
+		SKSE::log::info("ставка {} за реплику {}: уверенность {:.2f}, {}, на фразе \"{}\", через {} мс{}",
+			a_ns.c_str(), a_id, a_confidence, a_greedy ? "жадная" : "делится", phrase,
+			stored ? stored->MsSinceOffer() : -1, accepted ? "" : " - ОПОЗДАЛА, торги закрыты");
 	}
 
 	void PapyrusApi::Done(Tag, std::int32_t a_id, Str a_ns, bool a_succeeded)
