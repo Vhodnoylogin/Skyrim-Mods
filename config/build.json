@@ -18,8 +18,11 @@
     "downloadsRoot": "D:/Skyrim VR Modding/MO2/ModOrganizer/Skyrim VR/downloads",
     "sevenZip": "C:/Program Files/7-Zip/7z.exe",
     "bridgeUrl": "http://127.0.0.1:8930",
-    "bridgeToken": "{root}/../mo2aibridge/mo2aibridge-token.txt",
-    "scripts": ["Envoy", "EnvoyQuest"],
+    "bridgeToken": "D:/Skyrim VR Modding/MO2/plugins/mo2aibridge/mo2aibridge-token.txt",
+    "scripts": [
+      "Envoy",
+      "EnvoyQuest"
+    ],
     "esp": "Envoy.esp",
     "dll": "{root}/build/Release/Envoy.dll",
     "defaultConfig": "{root}/config/envoy.default.json",
