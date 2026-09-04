@@ -75,27 +75,57 @@ skel_arm = next(o for o in skel_objs if o.type == 'ARMATURE')
 
 wanted = list(spec['weights']['chain']) + list(spec['weights']['knot']) \
     + list(spec['weights']['ballsBones']) + ['WWD 1']
+# Кость переносится ЦЕЛИКОМ -- матрицей, а не парой «голова-хвост».
+#
+# Голова и хвост задают направление кости, но не её поворот вокруг собственной
+# оси. Скин пишет в ниф матрицу привязки каждой кости, и если она расходится
+# с той, что стоит в живом скелете, игра при отрисовке применяет разницу:
+# вершину сносит тем сильнее, чем дальше она от своей кости.
+#
+# Ровно это и вышло 04.09. Кольца ствола в покое сжаты к устью, а развешены на
+# кости, стоящие в двадцати единицах впереди. Мелкий поворот у кости давал
+# двадцатикратный вынос вершины, и наружу выходил длинный тонкий шип, да ещё
+# и вбок. При вытянутом ползунке вершины оказывались рядом со своими костями,
+# вынос пропадал -- отсюда наблюдение «длина не изменилась, ширина увеличилась».
 rest = {}
 for n in wanted:
     b = skel_arm.data.bones.get(n)
     if b is None:
         print("GEN|в скелете нет кости %s" % n)
         continue
-    rest[n] = (skel_arm.matrix_world @ b.head_local,
-               skel_arm.matrix_world @ b.tail_local,
-               b.matrix_local.to_quaternion())
+    # родителем годится и кость, которую мы заводим этим же проходом, иначе
+    # цепочка WWD 1..9 разваливается в веер от таза
+    parent, pb = None, b.parent
+    while pb is not None and parent is None:
+        if pb.name in arm.data.bones or pb.name in wanted:
+            parent = pb.name
+        pb = pb.parent
+    rest[n] = (arm.matrix_world.inverted() @ skel_arm.matrix_world @ b.matrix_local,
+               b.length, parent)
 
 bpy.context.view_layer.objects.active = arm
 bpy.ops.object.mode_set(mode='EDIT')
-for n, (h, t, _q) in rest.items():
+made = []
+for n, (m, length, _p) in rest.items():
     if n in arm.data.edit_bones:
         continue
     eb = arm.data.edit_bones.new(n)
-    eb.head, eb.tail = h, t
-    if (t - h).length < 1e-4:
-        eb.tail = h + Vector((0, 0, 1))
+    eb.matrix = m
+    eb.length = max(length, 0.5)
+    made.append(n)
+# родство ставится вторым проходом: родитель мог быть заведён только что
+for n, (_m, _l, parent) in rest.items():
+    eb = arm.data.edit_bones.get(n)
+    if eb is None or parent is None:
+        continue
+    pb = arm.data.edit_bones.get(parent)
+    if pb is not None and pb is not eb:
+        eb.parent = pb
+        eb.use_connect = False
 bpy.ops.object.mode_set(mode='OBJECT')
-print("GEN|перенесено костей из скелета: %d" % len(rest))
+print("GEN|перенесено костей: %d, заведено новых %d" % (len(rest), len(made)))
+for n, (_m, _l, parent) in sorted(rest.items()):
+    print("GEN|   %-10s родитель %s" % (n, parent or "(нет)"))
 
 # Скелет свою службу отслужил, и в сцене ему делать нечего. Убирается ЦЕЛИКОМ,
 # а не только его арматура: вместе с ним приходят корень, BSXFlags, BSBound и
@@ -223,13 +253,33 @@ for (y, r, zc) in ext_only:
                       ret['zCenter']))
 ret_tip = (ry1 + 0.35, ret['zCenter'])
 
-for cen, sgn in ((spec['balls']['center'], -1), (spec['balls']['center'], 1)):
-    c3 = (sgn * cen[0], cen[1], cen[2])
-    bv, bf = ellipsoid(c3, spec['balls']['radii'],
-                       spec['balls']['rings'], spec['balls']['segments'])
+# Мошонка садится по ЛУЧУ, а не по числу из рецепта. Прошлый раз координаты
+# были взяты по «передней точке тела в слое высоты», и этот замер врёт: вершина,
+# сместившись по высоте, переезжает в соседний слой и подменяет собой переднюю.
+# Шары повисли в воздухе с просветом в ладонь. Теперь из каждой точки пускается
+# луч назад и ищется настоящая поверхность паха, а шар ставится так, чтобы
+# задняя его половина ушла в тело на `bury`, и шва не было.
+bspec = spec['balls']
+brx, bry, brz = bspec['radii']
+bury = float(bspec.get('bury', 2.0))
+for sgn in (-1, 1):
+    sx = sgn * bspec['center'][0]
+    cz = bspec['center'][2]
+    hit, loc, _n, _i = body.ray_cast(Vector((sx, 80.0, cz)), Vector((0, -1, 0)),
+                                     distance=200)
+    if hit:
+        cy = loc.y + (bry - bury)
+        print("GEN|мошонка x=%+.1f: поверхность на Y %.2f, центр Y %.2f"
+              % (sx, loc.y, cy))
+    else:
+        cy = bspec['center'][1]
+        print("GEN|мошонка x=%+.1f: поверхность не найдена, беру Y %.2f из рецепта"
+              % (sx, cy))
+    bv, bf = ellipsoid((sx, cy, cz), bspec['radii'],
+                       bspec['rings'], bspec['segments'])
     off = len(verts)
     verts.extend(bv)
-    faces.extend(tuple(i + off for i in f) for f in bf)
+    faces.extend(tuple(k + off for k in f) for f in bf)
 
 mesh = bpy.data.meshes.new(spec['shape'])
 mesh.from_pydata([tuple(v) for v in verts], [], faces)
@@ -256,7 +306,7 @@ mesh.materials.append(body.data.materials[0])
 
 # ------------------------------------------------------------- развеска ------
 w = spec['weights']
-chain = [(n, rest[n][0].y) for n in w['chain'] if n in rest]
+chain = [(n, rest[n][0].translation.y) for n in w['chain'] if n in rest]
 chain.sort(key=lambda t: t[1])
 for n in [w['root']] + [c[0] for c in chain] + list(w['knot']) + list(w['ballsBones']):
     if n not in gen.vertex_groups:

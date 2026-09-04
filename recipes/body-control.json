@@ -36,7 +36,9 @@
       "body",
       "fur_belly",
       "fur_chest",
-      "fur_back"
+      "fur_back",
+      "fur_shoulders",
+      "ChestBlend"
     ],
     "parts": [
       {
