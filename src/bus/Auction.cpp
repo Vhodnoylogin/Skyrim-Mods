@@ -2,7 +2,7 @@
 
 #include "TopicRouter.h"
 #include "UtteranceStore.h"
-#include "core/Config.h"
+#include "core/Settings.h"
 #include "game/ModEventBus.h"
 
 #include <SKSE/SKSE.h>
@@ -22,26 +22,6 @@ namespace Envoy
 			return a_costClass == 1 ? "costly" : "reversible";
 		}
 
-		std::mutex                                                            g_offeredMutex;
-		std::unordered_map<std::int32_t, std::chrono::steady_clock::time_point> g_offered;
-
-		float Threshold(const char* a_group, const char* a_class, float a_fallback)
-		{
-			const auto pointer = std::string{ "/auction/" } + a_group + "/" + a_class;
-			return Config::Get().Value<float>(pointer).value_or(a_fallback);
-		}
-
-		std::size_t PriorityIndex(const std::string& a_ns)
-		{
-			const auto list = Config::Get().Value<std::vector<std::string>>("/auction/priority");
-			if (!list) {
-				return static_cast<std::size_t>(-1);
-			}
-			const auto it = std::find(list->begin(), list->end(), a_ns);
-			return it == list->end() ? static_cast<std::size_t>(-1)
-			                         : static_cast<std::size_t>(std::distance(list->begin(), it));
-		}
-
 		Auction::Result Exclusive(const std::string& a_ns, const std::vector<BidRecord>& a_all,
 			const std::string& a_reason)
 		{
@@ -56,7 +36,7 @@ namespace Envoy
 			return result;
 		}
 
-		constexpr auto kNoPriority = static_cast<std::size_t>(-1);
+		constexpr auto kNoPriority = Settings::kNoPriority;
 
 		// Спорят не все выжившие, а только те, кого от лучшего не отделяет запас.
 		std::vector<BidRecord> Tied(const std::vector<BidRecord>& a_survivors, float a_need)
@@ -101,7 +81,7 @@ namespace Envoy
 			std::size_t      count = 0;
 			const BidRecord* chosen = nullptr;
 			for (const auto& bid : tied) {
-				const auto place = PriorityIndex(bid.ns);
+				const auto place = Settings::Get().PriorityIndex(bid.ns);
 				if (place < best) {
 					best = place;
 					count = 1;
@@ -132,7 +112,7 @@ namespace Envoy
 			// число, - поэтому решает объявленная готовность делиться.
 			// Жадный при этом ничего не теряет: он сам объявил "мне одному или
 			// никак" и при чужой победе выбывает по собственному условию.
-			if (Config::Get().Value<bool>("/auction/sharedWinsTie").value_or(true)) {
+			if (Settings::Get().sharedWinsTie) {
 				Auction::Result shared;
 				for (const auto& bid : a_survivors) {
 					if (bid.greedy) {
@@ -159,8 +139,7 @@ namespace Envoy
 	{
 		Result result;
 
-		const auto minScore = Config::Get().Value<float>("/auction/minUtteranceScore").value_or(0.4f);
-		if (a_utterance.score < minScore) {
+		if (a_utterance.score < Settings::Get().minUtteranceScore) {
 			result.reason = "реплика расслышана хуже порога";
 			for (const auto& bid : a_utterance.bids) {
 				result.denied[bid.ns] = result.reason;
@@ -178,8 +157,7 @@ namespace Envoy
 
 		std::vector<BidRecord> survivors;
 		for (const auto& bid : a_utterance.bids) {
-			const auto need = Threshold("minConfidence", ClassName(bid.costClass), 0.55f);
-			if (bid.confidence >= need) {
+			if (bid.confidence >= Settings::Get().MinConfidence(bid.costClass)) {
 				survivors.push_back(bid);
 			} else {
 				result.denied[bid.ns] = "уверенность ниже порога своего класса";
@@ -195,15 +173,15 @@ namespace Envoy
 			if (a.confidence != b.confidence) {
 				return a.confidence > b.confidence;
 			}
-			const auto pa = PriorityIndex(a.ns);
-			const auto pb = PriorityIndex(b.ns);
+			const auto pa = Settings::Get().PriorityIndex(a.ns);
+			const auto pb = Settings::Get().PriorityIndex(b.ns);
 			return pa != pb ? pa < pb : a.ns < b.ns;
 		});
 
 		const auto top = survivors.front();
 
 		if (survivors.size() > 1) {
-			const auto need = Threshold("minMargin", ClassName(top.costClass), 0.05f);
+			const auto need = Settings::Get().MinMargin(top.costClass);
 			if (top.confidence - survivors[1].confidence < need) {
 				auto tie = BreakTie(survivors, need, a_utterance.bids);
 				tie.denied.insert(result.denied.begin(), result.denied.end());
@@ -239,18 +217,13 @@ namespace Envoy
 
 		auto item = *stored;
 		item.topic = TopicRouter::Pick(item);
+		item.offeredAt = std::chrono::steady_clock::now();
 		UtteranceStore::Get().Update(a_id, item);
 
-		{
-			// Отметка живёт и после итога: опоздавшая ставка должна суметь сказать,
-			// насколько она опоздала. Чистим старое здесь же, чтобы не копилось.
-			const auto now = std::chrono::steady_clock::now();
-			std::scoped_lock lock(g_offeredMutex);
-			std::erase_if(g_offered, [&](const auto& entry) {
-				return now - entry.second > std::chrono::seconds(60);
-			});
-			g_offered[a_id] = now;
-		}
+		// Уборка идёт здесь же: чаще реплик в хранилище ничего не происходит,
+		// а отдельный поток-уборщик пришлось бы ещё и останавливать при выходе.
+		UtteranceStore::Get().PruneIfDue(Settings::Get().utteranceTtlSec,
+			Settings::Get().utteranceMaxStored);
 
 		// Наблюдатели видят каждую реплику независимо от темы - именно так мод
 		// может показать, что до него что-то не дошло и почему.
@@ -261,7 +234,7 @@ namespace Envoy
 		ModEventBus::Send("Envoy_Speech_Any", "", static_cast<float>(a_id));
 		ModEventBus::Send(TopicRouter::EventName(item.topic), "", static_cast<float>(a_id));
 
-		const auto window = Config::Get().Value<std::int32_t>("/auction/bidWindowMs").value_or(150);
+		const auto window = Settings::Get().bidWindowMs;
 
 		std::thread([a_id, window]() {
 			std::this_thread::sleep_for(std::chrono::milliseconds(window));
@@ -273,13 +246,12 @@ namespace Envoy
 
 	std::int64_t Auction::MsSinceOffer(std::int32_t a_id)
 	{
-		std::scoped_lock lock(g_offeredMutex);
-		auto it = g_offered.find(a_id);
-		if (it == g_offered.end()) {
+		auto stored = UtteranceStore::Get().Find(a_id);
+		if (!stored || stored->offeredAt.time_since_epoch().count() == 0) {
 			return -1;
 		}
 		return std::chrono::duration_cast<std::chrono::milliseconds>(
-			std::chrono::steady_clock::now() - it->second).count();
+			std::chrono::steady_clock::now() - stored->offeredAt).count();
 	}
 
 	void Auction::Settle(std::int32_t a_id)

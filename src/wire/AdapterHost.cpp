@@ -4,6 +4,7 @@
 #include "bus/SubscriptionRegistry.h"
 #include "bus/UtteranceStore.h"
 #include "core/Config.h"
+#include "core/Settings.h"
 #include "game/ModEventBus.h"
 
 #include <SKSE/SKSE.h>
@@ -296,6 +297,9 @@ namespace Envoy
 	void AdapterHost::ReloadConfig()
 	{
 		Config::Get().Load(Config::Get().Path());
+		// Снимок настроек живёт отдельно от документа, значит его надо
+		// пересобрать - иначе перечитанный файл ни на что не повлияет.
+		Settings::Reload();
 
 		std::vector<Outgoing> pending;
 		{

@@ -2,6 +2,7 @@
 
 #include "Utterance.h"
 
+#include <chrono>
 #include <mutex>
 #include <optional>
 #include <unordered_map>
@@ -28,6 +29,10 @@ namespace Envoy
 			std::unordered_map<std::string, std::string> a_denied, std::string a_outcome);
 
 		void        Prune(double a_ttlSec, std::size_t a_maxStored);
+		// Уборка по двум дешёвым условиям вместо сметания на каждую реплику:
+		// либо накопилось больше предела, либо с прошлого раза прошла четверть
+		// срока хранения. Обе проверки - за постоянное время.
+		void        PruneIfDue(double a_ttlSec, std::size_t a_maxStored);
 		std::size_t Count() const;
 
 		bool  WonPrevious(const std::string& a_namespace) const;
@@ -41,5 +46,7 @@ namespace Envoy
 		std::string                                    _lastAwardedTo;
 		std::chrono::steady_clock::time_point          _lastAwardAt{};
 		std::int32_t                                   _next{ 1 };
+		// Когда убирались в прошлый раз - чтобы не сметать на каждую реплику.
+		std::chrono::steady_clock::time_point           _lastPrune{};
 	};
 }

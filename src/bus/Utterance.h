@@ -63,5 +63,10 @@ namespace Envoy
 		bool                                         awarded{ false };
 
 		std::chrono::steady_clock::time_point born{ std::chrono::steady_clock::now() };
+		// Когда реплику огласили подписчикам. Отметка нужна и после итога:
+		// опоздавшая ставка должна суметь сказать, насколько опоздала. Раньше
+		// она жила в отдельной карте с собственным мьютексом и собственной
+		// чисткой - хотя это обычное поле реплики.
+		std::chrono::steady_clock::time_point offeredAt{};
 	};
 }
