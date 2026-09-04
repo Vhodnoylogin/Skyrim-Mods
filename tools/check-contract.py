@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 declared = set(re.findall(
     r"^\s*(?:[A-Za-z_]+(?:\[\])?\s+)?Function\s+([A-Za-z_]+)\s*\(",
-    (ROOT / "contract" / "Envoy.psc").read_text(encoding="utf-8"),
+    (ROOT / "papyrus" / "Envoy.psc").read_text(encoding="utf-8"),
     re.MULTILINE))
 
 registered = set(re.findall(
