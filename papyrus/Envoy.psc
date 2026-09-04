@@ -117,7 +117,3 @@ string Function GetTopic(int aiUtteranceId) global native
 int Function Say(string asText, string asVoice = "", int aiPriority = 0) global native
 Function StopSpeech(int aiSpeechId) global native
 int Function Ask(string asService, string asPayload) global native
-
-; Сколько раз лучшая фраза подписчика встречается в реплике. "фаербол фаербол"
-; вернёт 2 - а решать, две это команды или оговорка, мод должен сам.
-int Function GetRepeats(int aiUtteranceId, string asNamespace) global native

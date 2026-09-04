@@ -449,12 +449,6 @@ namespace Envoy
 		AdapterHost::Get().ReloadConfig();
 	}
 
-	std::int32_t PapyrusApi::GetRepeats(Tag, std::int32_t a_id, Str a_ns)
-	{
-		auto item = UtteranceStore::Get().Find(a_id);
-		return item ? SubscriptionRegistry::Get().Repeats(a_ns.c_str(), item->text) : 0;
-	}
-
 	std::int32_t PapyrusApi::Say(Tag, Str a_text, Str a_voice, std::int32_t a_priority)
 	{
 		return AdapterHost::Get().SendSpeak(a_text.c_str(), a_voice.c_str(), a_priority);
@@ -514,7 +508,6 @@ namespace Envoy
 		a_vm->RegisterFunction("Pong", kScriptName, Pong);
 		a_vm->RegisterFunction("GetSpeechResult", kScriptName, GetSpeechResult);
 		a_vm->RegisterFunction("GetTopic", kScriptName, GetTopic);
-		a_vm->RegisterFunction("GetRepeats", kScriptName, GetRepeats);
 		a_vm->RegisterFunction("Say", kScriptName, Say);
 		a_vm->RegisterFunction("StopSpeech", kScriptName, StopSpeech);
 		a_vm->RegisterFunction("Ask", kScriptName, Ask);

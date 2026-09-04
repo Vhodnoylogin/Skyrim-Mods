@@ -122,27 +122,6 @@ namespace Envoy
 		return best;
 	}
 
-	std::int32_t SubscriptionRegistry::Repeats(const std::string& a_ns, const std::string& a_text) const
-	{
-		const auto best = Match(a_ns, a_text);
-		if (best.phrase.empty()) {
-			return 0;
-		}
-
-		const auto text = Normalize(a_text);
-		const auto needle = Normalize(best.phrase);
-		if (needle.empty()) {
-			return 0;
-		}
-
-		std::int32_t count = 0;
-		for (std::size_t at = text.find(needle); at != std::string::npos;
-			 at = text.find(needle, at + needle.size())) {
-			++count;
-		}
-		return count;
-	}
-
 	std::vector<std::string> SubscriptionRegistry::Namespaces() const
 	{
 		std::scoped_lock lock(_mutex);
