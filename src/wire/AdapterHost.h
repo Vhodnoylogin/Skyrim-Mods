@@ -15,6 +15,9 @@ namespace Envoy
 	//
 	// Задания отдаются вызовом обратной функции прямо в потоке вызывающего,
 	// поэтому адаптер обязан лишь положить задание в свою очередь и вернуться.
+	//
+	// Замок при этом всегда отпущен: задания собираются под ним, а рассылаются
+	// после. Иначе адаптер, ответивший мосту из обработчика, вставал бы намертво.
 	class AdapterHost final : public EnvoyAPI::IEnvoy
 	{
 	public:
@@ -25,7 +28,8 @@ namespace Envoy
 		bool         Register(const EnvoyAPI::AdapterInfo& a_info, EnvoyAPI::JobCallback a_onJob, void* a_user) override;
 		void         Unregister(const char* a_id) override;
 		std::int32_t PushUtterance(const char* a_adapterId, const EnvoyAPI::UtteranceIn& a_utterance) override;
-		const char*  SourceOf(const char* a_capability) const override;
+		bool         SourceOf(const char* a_capability, char* a_out,
+		                 std::int32_t a_outSize) const override;
 
 		// Для меню и скриптов.
 		bool                     SetSource(const std::string& a_capability, const std::string& a_adapter);
@@ -59,15 +63,40 @@ namespace Envoy
 			void*                    user{ nullptr };
 			std::uint64_t            order{ 0 };
 			bool                     active{ false };
+			// Версия контракта, объявленная при рукопожатии. Мост не читает
+			// полей, которых в этой версии ещё не было.
+			std::uint32_t            contract{ 0 };
 		};
 
-		void RecomputeSources();
+		// Задание, собранное под замком и разосланное уже без него. Строки
+		// принадлежат ему самому: указатели внутри EnvoyAPI::Job живут только
+		// на время вызова, а вызов случается после того, как замок отпущен.
+		struct Outgoing
+		{
+			EnvoyAPI::JobCallback    onJob{ nullptr };
+			void*                    user{ nullptr };
+			std::int32_t             kind{ 0 };
+			bool                     active{ false };
+			std::string              text;
+			std::string              service;
+			std::string              payload;
+			std::int32_t             speechId{ 0 };
+			std::int32_t             requestId{ 0 };
+			std::vector<std::string> phrases;
+
+			void Send() const;
+		};
+
+		static void Dispatch(const std::vector<Outgoing>& a_jobs);
+
+		// Возвращает задания вместо того, чтобы их рассылать: вызывающий
+		// обязан отпустить замок и только потом звать Dispatch.
+		[[nodiscard]] std::vector<Outgoing> RecomputeSources();
 
 		mutable std::mutex                           _mutex;
 		std::unordered_map<std::string, Entry>       _adapters;
 		std::unordered_map<std::string, std::string> _sources;
 		std::unordered_map<std::string, std::string> _overrides;
-		mutable std::string                          _sourceScratch;
 
 		// Событие несёт только номер, поэтому сам ответ и исход озвучки должны
 		// где-то лежать, пока подписчик за ними не придёт.

@@ -9,6 +9,7 @@
 #include <SKSE/SKSE.h>
 
 #include <algorithm>
+#include <cstring>
 
 namespace Envoy
 {
@@ -46,17 +47,53 @@ namespace Envoy
 		return instance;
 	}
 
+	void AdapterHost::Outgoing::Send() const
+	{
+		if (!onJob) {
+			return;
+		}
+
+		std::vector<const char*> raw;
+		raw.reserve(phrases.size());
+		for (const auto& phrase : phrases) {
+			raw.push_back(phrase.c_str());
+		}
+
+		EnvoyAPI::Job job{};
+		job.kind = kind;
+		job.active = active;
+		job.text = text.c_str();
+		job.service = service.c_str();
+		job.payload = payload.c_str();
+		job.speechId = speechId;
+		job.requestId = requestId;
+		job.phrases = raw.empty() ? nullptr : raw.data();
+		job.phraseCount = static_cast<std::int32_t>(raw.size());
+		onJob(job, user);
+	}
+
+	void AdapterHost::Dispatch(const std::vector<Outgoing>& a_jobs)
+	{
+		for (const auto& job : a_jobs) {
+			job.Send();
+		}
+	}
+
 	bool AdapterHost::Register(const EnvoyAPI::AdapterInfo& a_info, EnvoyAPI::JobCallback a_onJob, void* a_user)
 	{
 		if (!a_info.id || !a_onJob) {
 			return false;
 		}
-		if (a_info.contract != EnvoyAPI::kInterfaceVersion) {
-			SKSE::log::error("адаптер {}: версия контракта {}, мост понимает {}",
+		// Рукопожатие: версию проверяем один раз, здесь, и запоминаем. Адаптер
+		// старее нас - работаем по его версии и не читаем полей, которых в ней
+		// не было. Новее - отказ: неизвестно, что он пришлёт.
+		if (a_info.contract < 1 || a_info.contract > EnvoyAPI::kInterfaceVersion) {
+			SKSE::log::error("адаптер {}: версия контракта {}, мост понимает от 1 до {}",
 				a_info.id, a_info.contract, EnvoyAPI::kInterfaceVersion);
 			return false;
 		}
 
+		std::vector<Outgoing> pending;
 		{
 			std::scoped_lock lock(_mutex);
 			auto& entry = _adapters[a_info.id];
@@ -67,10 +104,13 @@ namespace Envoy
 			entry.provides = Split(a_info.provides);
 			entry.onJob = a_onJob;
 			entry.user = a_user;
-			RecomputeSources();
+			entry.contract = a_info.contract;
+			pending = RecomputeSources();
 		}
+		Dispatch(pending);
 
-		SKSE::log::info("адаптер зарегистрирован: {} ({})", a_info.id, Safe(a_info.name));
+		SKSE::log::info("адаптер зарегистрирован: {} ({}), контракт {}",
+			a_info.id, Safe(a_info.name), a_info.contract);
 
 		const auto phrases = SubscriptionRegistry::Get().MergedVocabulary();
 		SendVocabulary(phrases);
@@ -82,14 +122,20 @@ namespace Envoy
 		if (!a_id) {
 			return;
 		}
-		std::scoped_lock lock(_mutex);
-		_adapters.erase(a_id);
-		RecomputeSources();
+		std::vector<Outgoing> pending;
+		{
+			std::scoped_lock lock(_mutex);
+			_adapters.erase(a_id);
+			pending = RecomputeSources();
+		}
+		Dispatch(pending);
 		SKSE::log::info("адаптер ушёл: {}", a_id);
 	}
 
-	void AdapterHost::RecomputeSources()
+	std::vector<AdapterHost::Outgoing> AdapterHost::RecomputeSources()
 	{
+		std::vector<Outgoing> pending;
+
 		const auto& raw = Config::Get().Raw();
 		nlohmann::json named = nlohmann::json::object();
 		if (raw.contains("adapters") && raw["adapters"].contains("primary")) {
@@ -137,16 +183,18 @@ namespace Envoy
 			}
 			entry.second.active = active;
 
-			const std::string reason = active ? "назначен источником: " + role
-			                                  : "источником назначен другой";
-			EnvoyAPI::Job job{};
-			job.kind = EnvoyAPI::kJobListen;
-			job.active = active;
-			job.text = reason.c_str();
-			entry.second.onJob(job, entry.second.user);
+			Outgoing out;
+			out.onJob = entry.second.onJob;
+			out.user = entry.second.user;
+			out.kind = EnvoyAPI::kJobListen;
+			out.active = active;
+			out.text = active ? "назначен источником: " + role : "источником назначен другой";
+			pending.push_back(std::move(out));
 
 			SKSE::log::info("адаптер {}: {}", entry.first, active ? "источник" : "в запасе");
 		}
+
+		return pending;
 	}
 
 	std::int32_t AdapterHost::PushUtterance(const char* a_adapterId, const EnvoyAPI::UtteranceIn& a_in)
@@ -186,26 +234,43 @@ namespace Envoy
 		return id;
 	}
 
-	const char* AdapterHost::SourceOf(const char* a_capability) const
+	bool AdapterHost::SourceOf(const char* a_capability, char* a_out, std::int32_t a_outSize) const
 	{
+		if (!a_out || a_outSize <= 0) {
+			return false;
+		}
+		a_out[0] = 0;
+
 		std::scoped_lock lock(_mutex);
 		auto it = _sources.find(Safe(a_capability));
-		_sourceScratch = it == _sources.end() ? std::string{} : it->second;
-		return _sourceScratch.c_str();
+		if (it == _sources.end()) {
+			return false;
+		}
+		// Обрезать имя нельзя: получится имя чужого адаптера, и спрашивающий
+		// об этом не узнает. Лучше честный отказ.
+		if (static_cast<std::size_t>(a_outSize) <= it->second.size()) {
+			return false;
+		}
+		std::memcpy(a_out, it->second.c_str(), it->second.size() + 1);
+		return true;
 	}
 
 	bool AdapterHost::SetSource(const std::string& a_capability, const std::string& a_adapter)
 	{
-		std::scoped_lock lock(_mutex);
-		if (!a_adapter.empty() && _adapters.find(a_adapter) == _adapters.end()) {
-			return false;
+		std::vector<Outgoing> pending;
+		{
+			std::scoped_lock lock(_mutex);
+			if (!a_adapter.empty() && _adapters.find(a_adapter) == _adapters.end()) {
+				return false;
+			}
+			if (a_adapter.empty()) {
+				_overrides.erase(a_capability);
+			} else {
+				_overrides[a_capability] = a_adapter;
+			}
+			pending = RecomputeSources();
 		}
-		if (a_adapter.empty()) {
-			_overrides.erase(a_capability);
-		} else {
-			_overrides[a_capability] = a_adapter;
-		}
-		RecomputeSources();
+		Dispatch(pending);
 		return true;
 	}
 
@@ -231,92 +296,121 @@ namespace Envoy
 	void AdapterHost::ReloadConfig()
 	{
 		Config::Get().Load(Config::Get().Path());
-		std::scoped_lock lock(_mutex);
-		RecomputeSources();
+
+		std::vector<Outgoing> pending;
+		{
+			std::scoped_lock lock(_mutex);
+			pending = RecomputeSources();
+		}
+		Dispatch(pending);
 	}
 
 	void AdapterHost::SendVocabulary(const std::vector<std::string>& a_phrases)
 	{
-		std::vector<const char*> raw;
-		raw.reserve(a_phrases.size());
-		for (const auto& phrase : a_phrases) {
-			raw.push_back(phrase.c_str());
+		std::vector<Outgoing> pending;
+		{
+			std::scoped_lock lock(_mutex);
+			for (auto& entry : _adapters) {
+				Outgoing out;
+				out.onJob = entry.second.onJob;
+				out.user = entry.second.user;
+				out.kind = EnvoyAPI::kJobVocabulary;
+				out.phrases = a_phrases;
+				pending.push_back(std::move(out));
+			}
 		}
-
-		EnvoyAPI::Job job{};
-		job.kind = EnvoyAPI::kJobVocabulary;
-		job.phrases = raw.data();
-		job.phraseCount = static_cast<std::int32_t>(raw.size());
-
-		std::scoped_lock lock(_mutex);
-		for (auto& entry : _adapters) {
-			entry.second.onJob(job, entry.second.user);
-		}
+		Dispatch(pending);
 	}
 
 	std::int32_t AdapterHost::SendSpeak(const std::string& a_text, const std::string& a_voice,
 		std::int32_t a_priority)
 	{
-		std::scoped_lock lock(_mutex);
+		std::vector<Outgoing> pending;
+		std::int32_t           speechId = 0;
+		std::string            target;
+		{
+			std::scoped_lock lock(_mutex);
 
-		auto source = _sources.find("tts");
-		if (source == _sources.end()) {
-			SKSE::log::warn("озвучить некому: нет источника tts");
-			return 0;
+			auto source = _sources.find("tts");
+			if (source == _sources.end()) {
+				SKSE::log::warn("озвучить некому: нет источника tts");
+				return 0;
+			}
+			auto adapter = _adapters.find(source->second);
+			if (adapter == _adapters.end()) {
+				return 0;
+			}
+
+			speechId = _nextSpeech++;
+			target = source->second;
+
+			Outgoing out;
+			out.onJob = adapter->second.onJob;
+			out.user = adapter->second.user;
+			out.kind = EnvoyAPI::kJobSpeak;
+			out.text = a_text;
+			out.service = a_voice;
+			out.speechId = speechId;
+			out.requestId = a_priority;
+			pending.push_back(std::move(out));
 		}
-		auto adapter = _adapters.find(source->second);
-		if (adapter == _adapters.end()) {
-			return 0;
-		}
+		Dispatch(pending);
 
-		const auto speechId = _nextSpeech++;
-		EnvoyAPI::Job job{};
-		job.kind = EnvoyAPI::kJobSpeak;
-		job.text = a_text.c_str();
-		job.service = a_voice.c_str();
-		job.speechId = speechId;
-		job.requestId = a_priority;
-		adapter->second.onJob(job, adapter->second.user);
-
-		SKSE::log::info("озвучка {} -> адаптер {}: {}", speechId, source->second, a_text);
+		SKSE::log::info("озвучка {} -> адаптер {}: {}", speechId, target, a_text);
 		return speechId;
 	}
 
 	void AdapterHost::SendStop(std::int32_t a_speechId)
 	{
-		std::scoped_lock lock(_mutex);
-		EnvoyAPI::Job job{};
-		job.kind = EnvoyAPI::kJobStop;
-		job.speechId = a_speechId;
-		for (auto& entry : _adapters) {
-			entry.second.onJob(job, entry.second.user);
+		std::vector<Outgoing> pending;
+		{
+			std::scoped_lock lock(_mutex);
+			for (auto& entry : _adapters) {
+				Outgoing out;
+				out.onJob = entry.second.onJob;
+				out.user = entry.second.user;
+				out.kind = EnvoyAPI::kJobStop;
+				out.speechId = a_speechId;
+				pending.push_back(std::move(out));
+			}
 		}
+		Dispatch(pending);
 	}
 
 	std::int32_t AdapterHost::SendAsk(const std::string& a_service, const std::string& a_payload)
 	{
-		std::scoped_lock lock(_mutex);
+		std::vector<Outgoing> pending;
+		std::int32_t           requestId = 0;
+		std::string            target;
+		{
+			std::scoped_lock lock(_mutex);
 
-		// Способность и есть имя службы: кто объявил "llm", тот и отвечает на "llm".
-		auto source = _sources.find(a_service);
-		if (source == _sources.end()) {
-			SKSE::log::warn("спросить некого: нет источника {}", a_service);
-			return 0;
+			// Способность и есть имя службы: кто объявил "llm", тот и отвечает на "llm".
+			auto source = _sources.find(a_service);
+			if (source == _sources.end()) {
+				SKSE::log::warn("спросить некого: нет источника {}", a_service);
+				return 0;
+			}
+			auto adapter = _adapters.find(source->second);
+			if (adapter == _adapters.end()) {
+				return 0;
+			}
+
+			requestId = _nextRequest++;
+			target = source->second;
+
+			Outgoing out;
+			out.onJob = adapter->second.onJob;
+			out.user = adapter->second.user;
+			out.kind = EnvoyAPI::kJobAsk;
+			out.requestId = requestId;
+			out.service = a_service;
+			out.payload = a_payload;
+			pending.push_back(std::move(out));
 		}
-		auto adapter = _adapters.find(source->second);
-		if (adapter == _adapters.end()) {
-			return 0;
-		}
+		Dispatch(pending);
 
-		const auto requestId = _nextRequest++;
-		EnvoyAPI::Job job{};
-		job.kind = EnvoyAPI::kJobAsk;
-		job.requestId = requestId;
-		job.service = a_service.c_str();
-		job.payload = a_payload.c_str();
-		adapter->second.onJob(job, adapter->second.user);
-
-		SKSE::log::info("запрос {} к {} -> адаптер {}", requestId, a_service, source->second);
+		SKSE::log::info("запрос {} к {} -> адаптер {}", requestId, a_service, target);
 		return requestId;
 	}
 

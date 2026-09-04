@@ -16,7 +16,7 @@
 
 namespace EnvoyAPI
 {
-	constexpr std::uint32_t kInterfaceVersion = 1;
+	constexpr std::uint32_t kInterfaceVersion = 2;
 
 	// Тип сообщения SKSE, которым мост отдаёт интерфейс. Отправитель - "Envoy".
 	constexpr std::uint32_t kMessageInterface = 'ENVY';
@@ -93,8 +93,12 @@ namespace EnvoyAPI
 		// Возвращает номер реплики в игре или 0 при отказе.
 		virtual std::int32_t PushUtterance(const char* a_adapterId, const UtteranceIn& a_utterance) = 0;
 
-		// Кто сейчас источник по способности; пусто - никто.
-		virtual const char* SourceOf(const char* a_capability) const = 0;
+		// Кто сейчас источник по способности. Имя копируется в буфер
+		// вызывающего: возвращать указатель на внутреннюю строку моста нельзя -
+		// её перепишет следующий спросивший, а спрашивают из разных потоков.
+		// false - источника нет либо буфер мал.
+		virtual bool SourceOf(const char* a_capability, char* a_out,
+			std::int32_t a_outSize) const = 0;
 
 		// Обратное направление: адаптер сообщает, чем кончилось задание.
 		virtual void PushAnswer(const char* a_adapterId, std::int32_t a_requestId, bool a_ok,
