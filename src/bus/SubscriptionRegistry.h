@@ -31,10 +31,6 @@ namespace Envoy
 		void ClearVocabulary(const std::string& a_ns);
 
 		VocabularyMatch          Match(const std::string& a_ns, const std::string& a_text) const;
-		// Сколько раз лучшая фраза подписчика встречается во фразе целиком.
-		// Решать, две это команды или одна оговорка, мост не берётся - он лишь
-		// считает, потому что Papyrus со строками работает плохо.
-		std::int32_t             Repeats(const std::string& a_ns, const std::string& a_text) const;
 		std::vector<std::string> MergedVocabulary() const;
 		// Кто объявился и на какие темы - чтобы участник мог показать это игроку.
 		std::vector<std::string> Namespaces() const;

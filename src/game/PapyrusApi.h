@@ -64,7 +64,6 @@ namespace Envoy
 		static void             Pong(Tag, std::int32_t a_token);
 		static Str              GetSpeechResult(Tag, std::int32_t a_speechId);
 		static Str              GetTopic(Tag, std::int32_t a_id);
-		static std::int32_t     GetRepeats(Tag, std::int32_t a_id, Str a_ns);
 
 		// Второе направление моста: из игры в модель.
 		static std::int32_t Say(Tag, Str a_text, Str a_voice, std::int32_t a_priority);
