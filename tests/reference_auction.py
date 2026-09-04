@@ -111,23 +111,61 @@ def run_auction(utterance: dict, bids: list, cfg: dict) -> dict:
         margin = top["confidence"] - second["confidence"]
         need = a["minMargin"][cls]
         if margin < need:
-            if top["ns"] in order and (second["ns"] not in order or
-                                       order.index(top["ns"]) < order.index(second["ns"])):
-                # Ставки неразличимы: раздавать такой результат нескольким
-                # означало бы удвоить действие по неясной фразе. Приоритет
-                # решает спор, и решает его единолично.
-                return {"winner": top["ns"], "winners": [top["ns"]],
-                        "denied": [b["ns"] for b in survivors if b["ns"] != top["ns"]],
-                        "reason": "отрыв %.2f < %.2f, спор решён приоритетом игрока" % (margin, need),
-                        "trace": trace}
-            return {"winner": None, "winners": [], "denied": [b["ns"] for b in bids],
-                    "reason": "отрыв %.2f < %.2f и приоритет не задан - не делает никто" % (margin, need),
-                    "trace": trace}
+            return _break_tie(survivors, bids, margin, need, a, trace)
 
     return _share(top, survivors,
                   "уверенность %.2f при пороге %.2f" % (top["confidence"], a["minConfidence"][cls]),
                   trace)
 
+
+def _break_tie(survivors: list, bids: list, margin: float, need: float,
+               a: dict, trace: list) -> dict:
+    """Ничья: уверенность спорщиков больше не разведёт.
+
+    Одна и та же запись словаря даёт одно и то же число всегда, поэтому ждать,
+    что в другой раз кто-то опередит, бессмысленно - нужно правило. Правил три,
+    и порядок между ними важен: сначала прямое указание игрока, потом вопрос,
+    об одном ли вообще спор, и только потом готовность делиться.
+    """
+    order = a.get("priority", [])
+    tied = [b for b in survivors if survivors[0]["confidence"] - b["confidence"] < need]
+
+    # 1. Порядок из настроек - прямое указание игрока, и оно старше любых
+    #    наших рассуждений о том, что он имел в виду.
+    places = [(order.index(b["ns"]) if b["ns"] in order else len(order), b) for b in tied]
+    best = min(place for place, _ in places)
+    if best < len(order) and sum(1 for place, _ in places if place == best) == 1:
+        winner = next(b for place, b in places if place == best)
+        return {"winner": winner["ns"], "winners": [winner["ns"]],
+                "denied": [b["ns"] for b in bids if b["ns"] != winner["ns"]],
+                "reason": "отрыв %.2f < %.2f, спор решён порядком из настроек" % (margin, need),
+                "trace": trace}
+
+    # 2. Порядок молчит. Разные команды при неразличимой уверенности - это
+    #    двусмысленная реплика: понять её можно двояко, и оба понимания равно
+    #    правдоподобны. Пустая фраза значит "неизвестно" и считается разной.
+    phrases = {b.get("phrase", "") for b in tied}
+    if len(phrases) != 1 or "" in phrases:
+        return {"winner": None, "winners": [], "denied": [b["ns"] for b in bids],
+                "reason": "отрыв %.2f < %.2f, фразу поняли по-разному - реплика двусмысленна"
+                          % (margin, need),
+                "trace": trace}
+
+    # 3. Спор об одной команде. Решает объявленная готовность делиться: жадный
+    #    сам сказал "мне одному или никак" и выбывает по собственному условию.
+    if a.get("sharedWinsTie", True):
+        winners = [b["ns"] for b in survivors if not b.get("greedy")]
+        if winners:
+            return {"winner": winners[0], "winners": winners,
+                    "denied": [b["ns"] for b in bids if b["ns"] not in winners],
+                    "reason": "отрыв %.2f < %.2f, одну команду просят несколько - её делают те, кто делится"
+                              % (margin, need),
+                    "trace": trace}
+
+    return {"winner": None, "winners": [], "denied": [b["ns"] for b in bids],
+            "reason": "отрыв %.2f < %.2f, одну команду просят несколько и все требуют её себе"
+                      % (margin, need),
+            "trace": trace}
 
 def _share(top: dict, survivors: list, reason: str, trace: list) -> dict:
     """Кому достаётся результат после того, как победитель определён."""
