@@ -70,6 +70,14 @@ namespace Envoy
 			return result;
 		}
 
+		// Отсутствие ставок и провал ставок - разные вещи, и сводить их к одной
+		// строке журнала значит лгать в диагностике: в прогоне 04.09 такую
+		// строку получили 34 реплики из 36, и ни у одной ставок не было.
+		if (a_utterance.bids.empty()) {
+			result.reason = "никто не заявился";
+			return result;
+		}
+
 		std::vector<BidRecord> survivors;
 		for (const auto& bid : a_utterance.bids) {
 			const auto need = Threshold("minConfidence", ClassName(bid.costClass), 0.55f);
