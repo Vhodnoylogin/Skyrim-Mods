@@ -157,8 +157,14 @@ namespace Envoy
 
 	void SubscriptionRegistry::SetVocabulary(const std::string& a_ns, std::vector<std::string> a_phrases)
 	{
+		std::vector<Phrase> prepared;
+		prepared.reserve(a_phrases.size());
+		for (auto& phrase : a_phrases) {
+			prepared.push_back(Phrase{ phrase, Normalize(phrase) });
+		}
+
 		std::scoped_lock lock(_mutex);
-		_entries[a_ns].vocabulary = std::move(a_phrases);
+		_entries[a_ns].vocabulary = std::move(prepared);
 	}
 
 	void SubscriptionRegistry::ClearVocabulary(const std::string& a_ns)
@@ -181,11 +187,11 @@ namespace Envoy
 		float second = 0.0f;
 
 		for (const auto& phrase : it->second.vocabulary) {
-			const auto score = Similarity(text, Normalize(phrase));
+			const auto score = Similarity(text, phrase.normalized);
 			if (score > best.score) {
 				second = best.score;
 				best.score = score;
-				best.phrase = phrase;
+				best.phrase = phrase.text;
 			} else if (score > second) {
 				second = score;
 			}
@@ -222,7 +228,9 @@ namespace Envoy
 			if (!entry.second.active) {
 				continue;
 			}
-			out.insert(out.end(), entry.second.vocabulary.begin(), entry.second.vocabulary.end());
+			for (const auto& phrase : entry.second.vocabulary) {
+				out.push_back(phrase.text);
+			}
 		}
 		std::sort(out.begin(), out.end());
 		out.erase(std::unique(out.begin(), out.end()), out.end());

@@ -112,6 +112,20 @@ namespace Envoy
 		return true;
 	}
 
+	void UtteranceStore::PruneIfDue(double a_ttlSec, std::size_t a_maxStored)
+	{
+		{
+			std::scoped_lock lock(_mutex);
+			const auto now = std::chrono::steady_clock::now();
+			const auto due = _lastPrune + std::chrono::duration<double>(a_ttlSec / 4.0);
+			if (_items.size() <= a_maxStored && now < due) {
+				return;
+			}
+			_lastPrune = now;
+		}
+		Prune(a_ttlSec, a_maxStored);
+	}
+
 	void UtteranceStore::Prune(double a_ttlSec, std::size_t a_maxStored)
 	{
 		std::scoped_lock lock(_mutex);
