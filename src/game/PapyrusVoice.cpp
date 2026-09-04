@@ -1,13 +1,13 @@
 #include "PapyrusApi.h"
 
 #include "ModEventBus.h"
+#include "core/Scheduler.h"
 #include "wire/AdapterHost.h"
 
 #include <SKSE/SKSE.h>
 
 #include <atomic>
 #include <chrono>
-#include <thread>
 
 // Голос наружу, выбор адаптера и самопроверка рассылки: всё, что уходит из
 // игры к моделям, и круг, доказывающий, что события доходят обратно.
@@ -81,8 +81,7 @@ namespace Envoy
 		// Звонок отложен нарочно. Скрипт подписывается на Envoy_Ping в той же
 		// строке, где просит самопроверку, и мгновенная рассылка обогнала бы
 		// его подписку - получилось бы ложное "не доходит". Две секунды с запасом.
-		std::thread([token]() {
-			std::this_thread::sleep_for(std::chrono::seconds(2));
+		Scheduler::Get().After(std::chrono::seconds(2), [token]() {
 			if (auto* task = SKSE::GetTaskInterface()) {
 				task->AddTask([token]() {
 					g_pingSentAt.store(std::chrono::steady_clock::now());
@@ -90,12 +89,16 @@ namespace Envoy
 					ModEventBus::Send("Envoy_Ping", "", static_cast<float>(token));
 				});
 			}
-			std::this_thread::sleep_for(std::chrono::seconds(5));
+		});
+
+		// Приговор выносится отдельным сроком, а не сном в том же потоке:
+		// планировщик один на всех, и занимать его ожиданием нельзя.
+		Scheduler::Get().After(std::chrono::seconds(7), [token]() {
 			if (!g_pongHeard.load()) {
 				SKSE::log::error("самопроверка рассылки: ответа на метку {} нет за 5 с - "
 				                 "события моста до скриптов Papyrus НЕ ДОХОДЯТ", token);
 			}
-		}).detach();
+		});
 	}
 
 	void PapyrusApi::Pong(Tag, std::int32_t a_token)
