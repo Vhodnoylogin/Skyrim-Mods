@@ -68,5 +68,18 @@ namespace Envoy
 		// она жила в отдельной карте с собственным мьютексом и собственной
 		// чисткой - хотя это обычное поле реплики.
 		std::chrono::steady_clock::time_point offeredAt{};
+
+		// Сколько миллисекунд прошло с оглашения; -1 - ещё не оглашали. Нужно
+		// затем, чтобы в журнале было видно, успевает ли Papyrus ответить внутри
+		// окна ставок: в первом живом прогоне ни одна ставка не пришла, и
+		// отличить "скрипт промолчал" от "скрипт опоздал" было нечем.
+		std::int64_t MsSinceOffer() const
+		{
+			if (offeredAt.time_since_epoch().count() == 0) {
+				return -1;
+			}
+			return std::chrono::duration_cast<std::chrono::milliseconds>(
+				std::chrono::steady_clock::now() - offeredAt).count();
+		}
 	};
 }

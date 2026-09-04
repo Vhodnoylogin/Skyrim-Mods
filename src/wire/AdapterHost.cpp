@@ -230,7 +230,7 @@ namespace Envoy
 		SKSE::log::info("реплика {} от адаптера {}: {}", id, Safe(a_adapterId), Safe(a_in.text));
 
 		if (auto* task = SKSE::GetTaskInterface()) {
-			task->AddTask([id]() { Auction::Offer(id); });
+			task->AddTask([id]() { Auctioneer::Get().Offer(id); });
 		}
 		return id;
 	}
