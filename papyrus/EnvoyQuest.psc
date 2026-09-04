@@ -12,11 +12,11 @@ Event OnInit()
     OnGameReload()
 EndEvent
 
-Event OnEnvoyReady(string asEventName, string asEmpty, float afContract)
+Event OnEnvoyReady(string asEventName, string asEmpty, float afContract, Form akSender)
     OnGameReload()
 EndEvent
 
-Event OnPing(string asEventName, string asEmpty, float afToken)
+Event OnPing(string asEventName, string asEmpty, float afToken, Form akSender)
     Envoy.Pong(afToken as int)
 EndEvent
 
