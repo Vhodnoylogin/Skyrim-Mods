@@ -56,7 +56,7 @@
     "sharedWinsTie": true,
     "priority": [],
     "hold": {
-      "tolerance": 0.15,
+      "tolerance": 0.27,
       "weight": {
         "revocable": 0.1,
         "plain": 0.4,
