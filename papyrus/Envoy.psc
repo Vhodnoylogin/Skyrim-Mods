@@ -17,11 +17,23 @@ Function SetActive(string asNamespace, bool abActive) global native
 Function RegisterVocabulary(string asNamespace, string[] asPhrases) global native
 Function ClearVocabulary(string asNamespace) global native
 
+; Что участник о себе объявляет. От этого зависит, придержит ли мост
+; незаконченную фразу или отдаст сразу.
+;   aiCostClass: 0 - обратимое действие, 1 - дорогое
+;   abRevocable: умеешь ли ты отменить сделанное. Объявивший true получает
+;                незаконченное раньше прочих и обязан слушать Envoy_Revoked:
+;                отзывчивость покупает скорость, но и обязывает.
+Function Declare(string asNamespace, int aiCostClass, bool abRevocable = false) global native
+
 ; ---------------------------------------------------------------- о реплике
 string Function GetText(int aiUtteranceId) global native
 float Function GetScore(int aiUtteranceId) global native
 float Function GetMargin(int aiUtteranceId) global native
 bool Function IsFinal(int aiUtteranceId) global native
+; Насколько мост уверен, что на этой реплике фраза ЗАКОНЧИЛАСЬ. Единица -
+; закончилась; ноль - человек, скорее всего, ещё говорит. Реплику с низким
+; числом мост придерживает и до подписчиков может не донести вовсе.
+float Function GetComplete(int aiUtteranceId) global native
 string Function GetEngineId(int aiUtteranceId) global native
 string Function GetLanguage(int aiUtteranceId) global native
 string Function GetChannel(int aiUtteranceId) global native
