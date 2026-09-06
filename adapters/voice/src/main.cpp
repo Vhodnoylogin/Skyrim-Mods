@@ -24,6 +24,7 @@
 #include <filesystem>
 #include <fstream>
 #include <mutex>
+#include <unordered_map>
 #include <string>
 #include <thread>
 #include <vector>
@@ -43,6 +44,12 @@ namespace
 	std::mutex                            g_correlate;
 	std::int32_t                          g_lastPreliminary{ 0 };
 	std::chrono::steady_clock::time_point g_lastPreliminaryAt{};
+
+	// Номер реплики у службы и у моста - разные числа. Служба говорит, какие
+	// СВОИ куски вобрал новый; мост понимает только свои. Перевод живёт здесь:
+	// адаптер - единственный, кто знает обе стороны, и держать эту карту
+	// где-либо ещё значило бы заставить одну из сторон знать про другую.
+	std::unordered_map<std::int32_t, std::int32_t> g_serviceToBridge;
 
 	void InitLog()
 	{
@@ -214,10 +221,39 @@ namespace
 		in.engine = engine.c_str();
 		in.channel = "";
 		in.score = a_item.value("score", 0.0f);
-		in.margin = 0.0f;
+		in.margin = a_item.value("margin", 0.0f);
 		in.latencyMs = a_item.value("ms", 0);
 		in.durationMs = 0;
 		in.isFinal = !isFast;
+
+		// --- третья версия контракта ----------------------------------------
+		// Служба на новом движке отдаёт не целую фразу после молчания, а куски
+		// по ходу речи, и о каждом говорит, насколько уверена, что фраза на нём
+		// кончилась. Мост придерживает незаконченное - но только если ему это
+		// сказали, а сказать может лишь тот, кто слышит паузу.
+		//
+		// Служба, которая об этом ничего не знает, полей не пришлёт, и значения
+		// останутся прежними: завершённость единица, поглощать нечего.
+		in.complete = a_item.value("complete", 1.0f);
+		in.lengthClass = a_item.value("lengthClass", 0);
+
+		// Номера служба даёт свои, сквозные; мост знает только свои. Перевод
+		// держим здесь: это ровно та работа, ради которой адаптер и существует -
+		// он один знает обе стороны.
+		std::vector<std::int32_t> swallowed;
+		if (a_item.contains("supersedes")) {
+			std::scoped_lock lock(g_correlate);
+			for (const auto& mark : a_item["supersedes"]) {
+				const auto found = g_serviceToBridge.find(mark.get<std::int32_t>());
+				if (found != g_serviceToBridge.end()) {
+					swallowed.push_back(found->second);
+				}
+			}
+		}
+		if (!swallowed.empty()) {
+			in.supersedes = swallowed.data();
+			in.supersedesCount = static_cast<std::int32_t>(swallowed.size());
+		}
 
 		if (!isFast) {
 			std::scoped_lock lock(g_correlate);
@@ -235,10 +271,27 @@ namespace
 			return;
 		}
 
-		if (isFast) {
+		{
 			std::scoped_lock lock(g_correlate);
-			g_lastPreliminary = id;
-			g_lastPreliminaryAt = std::chrono::steady_clock::now();
+			if (isFast) {
+				g_lastPreliminary = id;
+				g_lastPreliminaryAt = std::chrono::steady_clock::now();
+			}
+			// Запоминаем перевод, чтобы следующий кусок мог назвать поглощённые.
+			// Карта растёт на реплику за ход разговора; чистим её по тому же
+			// сроку, по которому мост забывает сами реплики.
+			const auto serviceId = a_item.value("id", 0);
+			if (serviceId != 0) {
+				g_serviceToBridge[serviceId] = id;
+				if (g_serviceToBridge.size() > 256) {
+					g_serviceToBridge.clear();
+				}
+			}
+		}
+
+		if (!swallowed.empty()) {
+			SKSE::log::info("реплика {} поглощает {} прежних, завершённость {:.2f}",
+				id, swallowed.size(), in.complete);
 		}
 	}
 
