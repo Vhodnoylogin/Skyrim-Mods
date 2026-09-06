@@ -33,6 +33,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -232,13 +233,29 @@ int main(int argc, char** argv)
 	report << "сценарий: " << scenario.value("name", scenarioFile.stem().string()) << "\n";
 	report << "окно ставок: " << Envoy::Settings::Get().bidWindowMs << " мс\n\n";
 
+	// Номер куска у движка - свой в каждой записи, номер реплики - сквозной.
+	// Связь между ними нужна, чтобы длинный кусок мог сказать, какие короткие
+	// он поглощает: именно здесь и видно, успел ли мост отдать команду до того,
+	// как выяснилось, что фраза ещё не кончилась.
+	std::string                 currentSource;
+	std::map<int, std::int32_t> sliceToId;
+
 	for (const auto& step : steps) {
 		state.Reset();
-		if (step.contains("state")) {
+		// Проверяем именно объект, а не наличие ключа: сценарий, собранный
+		// программой, вполне может положить туда пустоту, и разбирать её как
+		// объект значит уронить весь прогон на одном шаге.
+		if (step.contains("state") && step["state"].is_object()) {
 			const auto& s = step["state"];
 			state.menu = s.value("menu", std::string{});
 			state.paused = s.value("paused", false);
 			state.combat = s.value("combat", false);
+		}
+
+		const auto source = step.value("source", std::string{});
+		if (source != currentSource) {
+			currentSource = source;
+			sliceToId.clear();
 		}
 
 		Envoy::Utterance utterance;
@@ -248,11 +265,59 @@ int main(int argc, char** argv)
 		utterance.channel = step.value("channel", std::string{});
 		utterance.language = step.value("language", std::string{ "ru" });
 		utterance.engine = step.value("engine", std::string{ "host" });
+		utterance.lengthClass = step.value("lengthClass", 0);
+		utterance.sliceId = step.value("sliceId", 0);
+		utterance.durationMs = step.value("durationMs", 0);
 		utterance.isFinal = true;
 
+		// Прочие гипотезы движка. Аукцион их пока не спрашивает, но реплика
+		// обязана нести их целиком: подписчик вправе увидеть, что фразу можно
+		// понять иначе, а мост не вправе решать это за него.
+		if (step.contains("alternatives")) {
+			for (const auto& alt : step["alternatives"]) {
+				utterance.alternatives.push_back(Envoy::Alternative{
+					alt.value("text", std::string{}), alt.value("score", 0.0f) });
+			}
+		}
+
 		const auto id = Envoy::UtteranceStore::Get().Add(utterance);
+		if (utterance.sliceId != 0) {
+			sliceToId[utterance.sliceId] = id;
+		}
+
+		// Длинный кусок поглощает короткие, из которых он собран. Здесь видна
+		// главная опасность нарезки: приз по короткому куску мог быть уже отдан,
+		// и отменить сделанное мост не может - он может лишь отметить, что
+		// реплику поглотили. Что с этим делать, решает подписчик.
+		std::vector<std::string> swallowed;
+		if (step.contains("supersedes")) {
+			for (const auto& older : step["supersedes"]) {
+				const auto found = sliceToId.find(older.get<int>());
+				if (found == sliceToId.end()) {
+					continue;
+				}
+				auto was = Envoy::UtteranceStore::Get().Find(found->second);
+				if (!was) {
+					continue;
+				}
+				auto copy = *was;
+				copy.supersededBy = id;
+				Envoy::UtteranceStore::Get().Update(found->second, copy);
+
+				std::string who;
+				for (const auto& winner : was->winners) {
+					who += who.empty() ? winner : ", " + winner;
+				}
+				swallowed.push_back("реплика " + std::to_string(found->second) +
+					(who.empty() ? " - её никто не получил"
+					             : " - НО ОНА УЖЕ ОТДАНА: " + who));
+			}
+		}
 
 		spdlog::info("--- реплика {}: «{}» ---", id, utterance.text);
+		for (const auto& line : swallowed) {
+			spdlog::warn("поглощает {}", line);
+		}
 
 		// Оглашение выбирает тему и рассылает события. Отсюда и дальше всё
 		// делает ядро - ровно то же, что в игре.
@@ -307,6 +372,17 @@ int main(int argc, char** argv)
 		auto done = Envoy::UtteranceStore::Get().Find(id);
 
 		report << "реплика " << id << ": «" << utterance.text << "»\n";
+		if (!source.empty()) {
+			report << "    запись    : " << source << "  (эталон «"
+			       << step.value("reference", std::string{}) << "»)\n";
+		}
+		if (step.contains("complete")) {
+			report << "    кусок     : " << utterance.sliceId << ", завершённость "
+			       << step.value("complete", 0.0f) << "\n";
+		}
+		for (const auto& line : swallowed) {
+			report << "    поглощает : " << line << "\n";
+		}
 		report << "    тема      : " << topic << "\n";
 		report << "    ставок    : " << (done ? done->bids.size() : 0) << "\n";
 		if (done) {
