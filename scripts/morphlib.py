@@ -96,16 +96,99 @@ def deltas_for(obj, part, arm, log=None):
     return out
 
 
+def _put_key(obj, morph, delta, log):
+    if obj.data.shape_keys is None:
+        obj.shape_key_add(name='Basis', from_mix=False)
+    sk = obj.shape_key_add(name='>' + morph, from_mix=False)
+    inv = obj.matrix_world.inverted()
+    mx = 0.0
+    for i, d in delta.items():
+        sk.data[i].co = inv @ ((obj.matrix_world @ obj.data.vertices[i].co) + d)
+        mx = max(mx, d.length)
+    log("MORPH|%-16s %-14s сдвинуто %6d из %6d, макс %6.2f"
+        % (morph, obj.name, len(delta), len(obj.data.vertices), mx))
+
+
+def carry_field(src_obj, src_delta, dst_obj, k=6):
+    """Переносит поле сдвигов с кожи на оболочку, лежащую поверх неё.
+
+    Тело зверя собрано слоями: кожа, шесть оболочек шерсти и сшивки между ними.
+    Считать сдвиг на каждом слое отдельно нельзя. Раздувание задаётся
+    множителем обхвата, а слои стоят на разном удалении от оси — значит
+    оболочка, лежавшая в двух единицах над кожей, после умножения окажется
+    в четырёх. Слои расходятся, между ними появляется просвет, и сшивка
+    повисает ни на чём. Именно это и видел пользователь: «живот соединён
+    с грудью, однако это не грудь, а шерсть на груди; сама грудь спрятана
+    ниже и ни с чем не связана».
+
+    Поэтому сдвиг считается ОДИН РАЗ на коже, а оболочки его наследуют: каждая
+    вершина берёт усреднённый сдвиг ближайших вершин кожи. Зазор между слоями
+    сохраняется, и разойтись им нечем. Тот же приём, что в
+    toolslender-graft-shape.py при переносе формы между телами.
+    """
+    from mathutils import kdtree
+    src = src_obj.data.vertices
+    tree = kdtree.KDTree(len(src))
+    for i, v in enumerate(src):
+        tree.insert(src_obj.matrix_world @ v.co, i)
+    tree.balance()
+    out = {}
+    for j, v in enumerate(dst_obj.data.vertices):
+        co = dst_obj.matrix_world @ v.co
+        tot, acc = 0.0, Vector((0.0, 0.0, 0.0))
+        for _c, i, dist in tree.find_n(co, k):
+            d = src_delta.get(i)
+            if d is None:
+                continue
+            w = 1.0 / max(dist, 1e-4)
+            acc += d * w
+            tot += w
+        if tot > 0.0 and (acc / tot).length > 0.001:
+            out[j] = acc / tot
+    return out
+
+
 def apply_recipe(spec, objects, arm, log=print):
     """Кладёт ползунки из рецепта на формы тела как ключи '>Имя'.
 
-    PyNifly уводит форму-ключ с именем '>Имя' в файл морфов. Ползунок кладётся
-    сразу на ВСЕ формы, которых касается: тело зверя собрано слоями, и сдвиг
-    одной кожи выводит её сквозь оболочки шерсти.
+    PyNifly уводит форму-ключ с именем '>Имя' в файл морфов.
+
+    Два способа задать, куда ползунок ложится:
+
+      base + carry -- сдвиг считается на ОДНОЙ форме (обычно на коже `body`),
+                      остальные его наследуют полем. Слои не расходятся.
+                      Это способ по умолчанию для всего, что трогает туловище.
+      shapes       -- сдвиг считается на каждой форме отдельно. Годится там,
+                      где формы не лежат друг над другом, например уши.
     """
     for item in spec:
         morph = item['morph']
-        for shape in item['shapes']:
+        if item.get('base'):
+            src = objects.get(item['base'])
+            if src is None:
+                log("MORPH|%-16s нет опорной формы %s" % (morph, item['base']))
+                continue
+            delta = {}
+            for part in item['parts']:
+                for i, d in deltas_for(src, part, arm, log).items():
+                    delta[i] = delta.get(i, Vector((0, 0, 0))) + d
+            if not delta:
+                log("MORPH|%-16s %-14s костей нет, пропуск" % (morph, item['base']))
+                continue
+            _put_key(src, morph, delta, log)
+            for shape in item.get('carry', []):
+                dst = objects.get(shape)
+                if dst is None:
+                    log("MORPH|%-16s нет формы %s" % (morph, shape))
+                    continue
+                got = carry_field(src, delta, dst, int(item.get('carryNeighbours', 6)))
+                if got:
+                    _put_key(dst, morph, got, log)
+                else:
+                    log("MORPH|%-16s %-14s поле не дотянулось" % (morph, shape))
+            continue
+
+        for shape in item.get('shapes', []):
             obj = objects.get(shape)
             if obj is None:
                 log("MORPH|%-16s нет формы %s" % (morph, shape))
@@ -117,16 +200,7 @@ def apply_recipe(spec, objects, arm, log=print):
             if not delta:
                 log("MORPH|%-16s %-14s костей нет, пропуск" % (morph, shape))
                 continue
-            if obj.data.shape_keys is None:
-                obj.shape_key_add(name='Basis', from_mix=False)
-            sk = obj.shape_key_add(name='>' + morph, from_mix=False)
-            inv = obj.matrix_world.inverted()
-            mx = 0.0
-            for i, d in delta.items():
-                sk.data[i].co = inv @ ((obj.matrix_world @ obj.data.vertices[i].co) + d)
-                mx = max(mx, d.length)
-            log("MORPH|%-16s %-14s сдвинуто %6d из %6d, макс %6.2f"
-                % (morph, shape, len(delta), len(obj.data.vertices), mx))
+            _put_key(obj, morph, delta, log)
 
 
 def export_clean(out_path, log=print):
