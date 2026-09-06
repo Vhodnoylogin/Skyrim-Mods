@@ -14,6 +14,29 @@
 
 namespace Envoy
 {
+	Auction::Result Auction::Share(const std::vector<BidRecord>& a_survivors,
+		const BidRecord& a_top) const
+	{
+		Result result;
+
+		const char* stranger = a_top.phrase.empty()
+		                           ? "команда победителя неизвестна - награда не делится"
+		                           : "узнал другую команду - эта не его";
+
+		for (const auto& bid : a_survivors) {
+			const bool same = bid.ns == a_top.ns ||
+			                  (!a_top.phrase.empty() && bid.phrase == a_top.phrase);
+			if (!same) {
+				result.denied[bid.ns] = stranger;
+			} else if (bid.greedy) {
+				result.denied[bid.ns] = "проиграл, а делиться отказался";
+			} else {
+				result.winners.push_back(bid.ns);
+			}
+		}
+		return result;
+	}
+
 	Auction::Result Auction::Exclusive(const std::string& a_ns, const std::string& a_reason) const
 	{
 		Result result;
@@ -106,14 +129,11 @@ namespace Envoy
 		// этом ничего не теряет: он сам объявил "мне одному или никак" и при
 		// чужой победе выбывает по собственному условию.
 		if (Settings::Get().sharedWinsTie) {
-			Result shared;
-			for (const auto& bid : a_survivors) {
-				if (bid.greedy) {
-					shared.denied[bid.ns] = "проиграл, а делиться отказался";
-				} else {
-					shared.winners.push_back(bid.ns);
-				}
-			}
+			// Спорщики уже проверены на одну команду выше, но раздача идёт
+			// по всем выжившим: отставший на целый запас тоже может узнать
+			// ту же фразу, и отказывать ему не за что. А узнавший другую
+			// не получит награду, даже если порог прошёл.
+			auto shared = Share(a_survivors, tied.front());
 			if (!shared.winners.empty()) {
 				shared.reason = "одну команду просят несколько, порядок не задан - её делают те, кто делится";
 				return shared;
@@ -175,21 +195,22 @@ namespace Envoy
 
 		if (top.greedy) {
 			auto exclusive = Exclusive(top.ns, "победитель жадный - результат только ему");
-			exclusive.denied.insert(result.denied.begin(), result.denied.end());
+			// Отказ по порогу точнее: он называет причину, по которой участник
+			// выбыл РАНЬШЕ, чем начался спор. Поэтому он и перекрывает общую.
+			for (const auto& [who, why] : result.denied) {
+				exclusive.denied[who] = why;
+			}
 			return exclusive;
 		}
 
-		for (const auto& bid : survivors) {
-			if (bid.greedy) {
-				result.denied[bid.ns] = "проиграл, а делиться отказался";
-			} else {
-				result.winners.push_back(bid.ns);
-			}
-		}
-		result.reason = result.winners.size() > 1
-		                    ? "победитель делится - результат достался всем нежадным"
+		auto shared = Share(survivors, top);
+		shared.reason = shared.winners.size() > 1
+		                    ? "победитель делится - результат достался всем, кто узнал ту же команду"
 		                    : "победитель делится, делить не с кем";
-		return result;
+		for (const auto& [who, why] : result.denied) {
+			shared.denied[who] = why;
+		}
+		return shared;
 	}
 
 	Auctioneer& Auctioneer::Get()
