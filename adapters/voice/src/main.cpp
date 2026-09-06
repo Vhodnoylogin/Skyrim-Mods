@@ -391,10 +391,30 @@ namespace
 			return;
 		}
 		g_envoy = *static_cast<EnvoyAPI::IEnvoy**>(a_message->data);
-		if (!g_envoy || g_envoy->Version() != EnvoyAPI::kInterfaceVersion) {
-			SKSE::log::error("версия интерфейса моста не та, что я понимаю");
+		if (!g_envoy) {
+			return;
+		}
+
+		// Мост НОВЕЕ себя принимать обязаны: он не читает у нас полей, которых
+		// в объявленной нами версии ещё не было, и старый адаптер для него
+		// остаётся исправным. Мост СТАРШЕ себя принимать нельзя: он не поймёт
+		// того, что мы шлём.
+		//
+		// Прежде здесь стояло строгое равенство, и переработка моста до третьей
+		// версии выбила адаптер целиком: прогон 07.09 не состоялся, потому что
+		// речь в мост не попадала вовсе. Совместимость, сделанная с одной
+		// стороны, совместимостью не является.
+		if (g_envoy->Version() < EnvoyAPI::kInterfaceVersion) {
+			SKSE::log::error("мост старше меня: он понимает контракт версии {}, "
+			                 "а я говорю на {} - работать не буду",
+				g_envoy->Version(), EnvoyAPI::kInterfaceVersion);
 			g_envoy = nullptr;
 			return;
+		}
+		if (g_envoy->Version() > EnvoyAPI::kInterfaceVersion) {
+			SKSE::log::info("мост новее меня: контракт версии {} против моих {} - "
+			                "работаю по своей, новых полей он у меня не спросит",
+				g_envoy->Version(), EnvoyAPI::kInterfaceVersion);
 		}
 		SKSE::log::info("интерфейс моста получен, версия {}", g_envoy->Version());
 		Start();
