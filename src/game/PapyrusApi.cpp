@@ -1,5 +1,7 @@
 #include "PapyrusApi.h"
 
+#include "envoy-adapter.h"
+
 #include "bus/StateStore.h"
 #include "bus/SubscriptionRegistry.h"
 #include <atomic>
@@ -31,7 +33,11 @@ namespace Envoy
 
 	std::int32_t PapyrusApi::GetInterfaceVersion(Tag)
 	{
-		return Config::Get().Value<std::int32_t>("/interfaceVersion").value_or(0);
+		// Из двоичного файла, а не из настроек: подписчик спрашивает, какой
+		// контракт мост УМЕЕТ, а не какой ему прописали в json. Прежде здесь
+		// возвращалась единица из файла настроек, и любой скрипт, сверяющий
+		// версию, получал неправду.
+		return static_cast<std::int32_t>(EnvoyAPI::kInterfaceVersion);
 	}
 
 	bool PapyrusApi::IsAvailable(Tag)

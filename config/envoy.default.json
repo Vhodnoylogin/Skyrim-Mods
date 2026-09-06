@@ -1,5 +1,4 @@
 {
-  "interfaceVersion": 1,
   "log": {
     "level": "info",
     "file": "envoy.log",
