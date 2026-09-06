@@ -73,6 +73,13 @@ CommonLibSSE. Появится в ядре включение из игры — 
 
     build\tests\Release\envoy-host.exe
     envoy-host.exe --scenario tests\scenarios\default.json --report прогон.txt
+    envoy-host.exe --config %TEMP%\priority.json    с заданным порядком участников
+
+Настройки хост берёт из `envoy-host.json` рядом с собой, а `--config` подменяет
+файл. `tests/envoy-host.json` — заготовка с непустым `auction.priority`: на ней
+исполняется **первая ступень** разбора ничьей, которая на встроенных настройках
+молчит. Запускать её надо **копией вне репозитория**: недостающие ключи Config
+дописывает в файл, и заготовка разрослась бы до полного набора.
 
 Хост поднимает то же ядро, объявляет **тестовых подписчиков** из
 `tests/subscribers/*.json` и проигрывает сценарий из `tests/scenarios/`.

@@ -182,6 +182,7 @@ int main(int argc, char** argv)
 
 	fs::path subscribersDir = ENVOY_TEST_DIR "/subscribers";
 	fs::path scenarioFile = ENVOY_TEST_DIR "/scenarios/default.json";
+	fs::path configFile = "envoy-host.json";
 	fs::path reportFile;
 
 	for (int i = 1; i + 1 < argc; ++i) {
@@ -190,6 +191,8 @@ int main(int argc, char** argv)
 			subscribersDir = argv[++i];
 		} else if (key == "--scenario") {
 			scenarioFile = argv[++i];
+		} else if (key == "--config") {
+			configFile = argv[++i];
 		} else if (key == "--report") {
 			reportFile = argv[++i];
 		}
@@ -201,7 +204,7 @@ int main(int argc, char** argv)
 	// рядом с исполняемым, и правила аукциона получаются ровно те же, что
 	// в игре, - без единого пути, заданного здесь.
 	auto& config = Envoy::Config::Get();
-	config.Load("envoy-host.json");
+	config.Load(configFile);
 	spdlog::info("{}: {}", Envoy::Config::Describe(config.Source()), config.Path().string());
 
 	static ScriptedState state;
