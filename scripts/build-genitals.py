@@ -448,14 +448,24 @@ if BODYMORPHS:
 _DIRS = [Vector(d).normalized() for d in
          ((0, 1, 0), (0, -1, 0), (1, 0, 0), (-1, 0, 0), (0, 0, -1))]
 
+# Луч пускается по СНИМКУ кожи, а не по живому объекту. Object.ray_cast бьёт
+# по вычисленной геометрии, и как только на теле появляются ключи-формы,
+# ответ начинает от них зависеть: с одним набором морфов проверка давала
+# 410 вершин внутри, с другим -- 59, при неизменной геометрии самой детали.
+# Снимок берётся один раз, до того как на тело легли ползунки.
+from mathutils.bvhtree import BVHTree
+_snap_v = [body.matrix_world @ v.co for v in body.data.vertices]
+_snap_f = [tuple(p.vertices) for p in body.data.polygons]
+_skin = BVHTree.FromPolygons(_snap_v, _snap_f)
+
 
 def _inside(p):
     votes = 0
     for d in _DIRS:
         n, o = 0, p + d * 0.01
         while True:
-            hit, loc, _nr, _i = body.ray_cast(o, d, distance=500)
-            if not hit:
+            loc, _nr, _i, _dist = _skin.ray_cast(o, d, 500)
+            if loc is None:
                 break
             n += 1
             o = loc + d * 0.01

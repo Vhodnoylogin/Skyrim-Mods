@@ -1,0 +1,146 @@
+[
+  { "_": "ПОЛНЫЙ НАБОР ПОЛЗУНКОВ ТЕЛА. Правило одно на весь файл: сдвиг считается на КОЖЕ, оболочки шерсти и сшивки наследуют его полем (base + carry). Считать на каждом слое отдельно нельзя — слои стоят на разном удалении от оси, и после умножения расходятся: оболочка, лежавшая в двух единицах над кожей, оказывается в четырёх, а сшивка повисает ни на чём. Величины взяты заметными, но не чудовищными: этот заход должен показать, что каждый ползунок делает своё и не задевает соседей." },
+
+  { "morph": "CLAWEars", "base": "head",
+    "carry": ["fur_face", "FurfaceBlend", "ScalpFurBlend", "fur_back", "fur_shoulders"],
+    "_": "У каждого уха своя опора. Общий центр для парных костей попадает на осевую линию тела, и уши разъезжаются вбок вместо того, чтобы удлиняться.",
+    "parts": [
+      {"bones": ["NPC EarL [EarL]Bone01", "NPC EarL [EarL]Bone02"], "mode": "grow", "amount": 2.2, "pivot": "NPC EarL [EarL]Bone01"},
+      {"bones": ["NPC EarR [EarR]Bone01", "NPC EarR [EarR]Bone02"], "mode": "grow", "amount": 2.2, "pivot": "NPC EarR [EarR]Bone01"}
+    ]},
+
+  { "morph": "CLAWEarTilt", "base": "head",
+    "carry": ["fur_face", "FurfaceBlend", "ScalpFurBlend", "fur_back", "fur_shoulders"],
+    "_": "Поворот, а не объём. Морф ведёт вершину по хорде, поэтому на середине ползунка ухо подтягивается к основанию: при 28 градусах это 3 % — ниже глазного порога. На краях геометрия точна всегда.",
+    "parts": [
+      {"bones": ["NPC EarL [EarL]Bone01", "NPC EarL [EarL]Bone02"], "mode": "rotate", "amount": -28.0, "axis": [1, 0, 0], "pivot": "NPC EarL [EarL]Bone01"},
+      {"bones": ["NPC EarR [EarR]Bone01", "NPC EarR [EarR]Bone02"], "mode": "rotate", "amount": -28.0, "axis": [1, 0, 0], "pivot": "NPC EarR [EarR]Bone01"}
+    ]},
+
+  { "morph": "CLAWMuzzleLength", "base": "head",
+    "carry": ["fur_face", "FurfaceBlend", "ScalpFurBlend"],
+    "_": "Морда идёт от кости головы (Y 49) вперёд до Y 75, сужаясь с 11 до 2 единиц. Растяжение только по Y.",
+    "parts": [{"bones": ["NPC Head"], "mode": "scaleAxis", "scale": [1.0, 1.30, 1.0], "pivot": "NPC Head"}]},
+
+  { "morph": "CLAWMuzzleWidth", "base": "head",
+    "carry": ["fur_face", "FurfaceBlend", "ScalpFurBlend"],
+    "_": "Ширина и высота морды без изменения длины: острая или тупая.",
+    "parts": [{"bones": ["NPC Head"], "mode": "scaleAxis", "scale": [1.40, 1.0, 1.15], "pivot": "NPC Head"}]},
+
+  { "morph": "CLAWJaw", "base": "head",
+    "carry": ["fur_face", "FurfaceBlend"],
+    "_": "Массивность челюсти. Кость своя есть, поэтому маска по весам.",
+    "parts": [{"bones": ["NPC Jaw [Jaw]"], "mode": "scaleAxis", "scale": [1.35, 1.05, 1.30], "pivot": "NPC Jaw [Jaw]"}]},
+
+  { "morph": "CLAWFangs", "base": "mouth",
+    "_": "Клыки лежат в форме mouth, поверх неё шерсти нет — наследовать некому. Растяжение по высоте от челюсти.",
+    "parts": [{"bones": ["NPC Jaw [Jaw]"], "mode": "scaleAxis", "scale": [1.0, 1.10, 1.35], "pivot": "NPC Jaw [Jaw]"}]},
+
+  { "morph": "CLAWBuild", "base": "body",
+    "carry": ["fur_belly", "fur_chest", "fur_back", "fur_shoulders", "ChestBlend"],
+    "_": "Общая массивность корпуса от таза до груди. Контрольный ползунок: если он сработал, значит игра взяла наш меш.",
+    "parts": [{"mode": "region", "axis": [0.0, -2.0], "zRange": [58.0, 114.0], "zFade": 11.0,
+               "amount": 1.9, "maxShift": 20.0, "includeContains": ["NPC Pelvis", "NPC Spine"]}]},
+
+  { "morph": "CLAWBelly", "base": "body",
+    "carry": ["fur_belly", "fur_chest", "fur_back", "ChestBlend"],
+    "_": "Только живот: сытость, беременность. Уже пояс, чем у CLAWBuild, и не достаёт до груди.",
+    "parts": [{"mode": "region", "axis": [0.0, 2.0], "zRange": [64.0, 94.0], "zFade": 8.0,
+               "amount": 1.7, "maxShift": 14.0, "includeContains": ["NPC Pelvis", "NPC Spine"]}]},
+
+  { "morph": "CLAWChest", "base": "body",
+    "carry": ["fur_chest", "fur_back", "fur_shoulders", "ChestBlend"],
+    "_": "Грудная клетка отдельно от живота.",
+    "parts": [{"mode": "region", "axis": [0.0, 0.0], "zRange": [92.0, 114.0], "zFade": 8.0,
+               "amount": 1.6, "maxShift": 14.0, "includeContains": ["NPC Spine1", "NPC Spine2"]}]},
+
+  { "morph": "CLAWShoulders", "base": "body",
+    "carry": ["fur_shoulders", "fur_chest", "fur_back", "ChestBlend"],
+    "_": "Ширина плеч: плечевые кости отходят от оси груди.",
+    "parts": [{"bones": ["NPC L Clavicle [RClv]", "NPC Clavicle.R", "NPC L UpperArm [RUar]", "NPC UpperArm.R"],
+               "mode": "barrel", "amount": 5.0, "pivot": "NPC Spine2"}]},
+
+  { "morph": "CLAWNeck", "base": "body",
+    "carry": ["fur_chest", "fur_back", "fur_shoulders", "ChestBlend"],
+    "_": "Толщина шеи вокруг её собственной кости.",
+    "parts": [{"bones": ["NPC Neck"], "mode": "barrel", "amount": 4.5, "pivot": "NPC Neck"}]},
+
+  { "morph": "CLAWWaist", "base": "body",
+    "carry": ["fur_belly", "fur_back", "fur_chest"],
+    "_": "Талия УЖЕ, а не шире: множитель меньше единицы. Единственный ползунок в наборе, который убавляет.",
+    "parts": [{"mode": "region", "axis": [0.0, 0.0], "zRange": [84.0, 102.0], "zFade": 6.0,
+               "amount": 0.78, "includeContains": ["NPC Spine", "NPC Spine1"]}]},
+
+  { "morph": "CLAWHaunches", "base": "body",
+    "carry": ["fur_belly", "fur_back"],
+    "_": "Круп и верх бёдер наружу от таза.",
+    "parts": [{"bones": ["NPC Thigh.L", "NPC R Thigh [LThg]"], "mode": "barrel", "amount": 6.0, "pivot": "NPC Pelvis"}]},
+
+  { "morph": "CLAWHips", "base": "body",
+    "carry": ["fur_belly", "fur_back"],
+    "_": "Ширина таза: только вбок, без изменения глубины.",
+    "parts": [{"bones": ["NPC Pelvis"], "mode": "scaleAxis", "scale": [1.35, 1.0, 1.0], "pivot": "NPC Pelvis"}]},
+
+  { "morph": "CLAWArmMuscle", "base": "body",
+    "carry": ["fur_arms", "fur_shoulders"],
+    "_": "Рука идёт вбок, поэтому обхват берётся вокруг ГОРИЗОНТАЛЬНОЙ оси. С вертикальной осью по умолчанию рука толстела бы только в одной плоскости.",
+    "parts": [
+      {"bones": ["NPC L UpperArm [RUar]", "NPC L Forearm [RLar]", "NPC UpperarmTwist1.L", "NPC UpperarmTwist2.L", "NPC ForearmTwist1.L", "NPC ForearmTwist2.L"],
+       "mode": "barrel", "amount": 3.5, "pivot": "NPC L UpperArm [RUar]", "barrelAxis": [1, 0, 0]},
+      {"bones": ["NPC UpperArm.R", "NPC Forearm.R", "NPC UpperarmTwist1.R", "NPC UpperarmTwist2.R", "NPC ForearmTwist1.R", "NPC ForearmTwist2.R"],
+       "mode": "barrel", "amount": 3.5, "pivot": "NPC UpperArm.R", "barrelAxis": [1, 0, 0]}
+    ]},
+
+  { "morph": "CLAWLegMuscle", "base": "body",
+    "carry": ["fur_back"],
+    "_": "Нога идёт вниз, поэтому обхват вокруг вертикальной оси — по умолчанию.",
+    "parts": [
+      {"bones": ["NPC Thigh.L", "NPC Calf.L"], "mode": "barrel", "amount": 3.5, "pivot": "NPC Thigh.L"},
+      {"bones": ["NPC R Thigh [LThg]", "NPC R Calf [LClf]"], "mode": "barrel", "amount": 3.5, "pivot": "NPC R Thigh [LThg]"}
+    ]},
+
+  { "morph": "CLAWPawSize", "base": "body",
+    "carry": ["claws", "fur_arms"],
+    "_": "Кисти и ступни. Когти — отдельная форма, она наследует сдвиг кожи, иначе лапа вырастет, а когти останутся на месте.",
+    "parts": [
+      {"bones": ["NPC L Hand [RHnd]"], "mode": "grow", "amount": 1.30, "pivot": "NPC L Hand [RHnd]"},
+      {"bones": ["NPC Hand.R"], "mode": "grow", "amount": 1.30, "pivot": "NPC Hand.R"},
+      {"bones": ["NPC Foot.L", "NPC Toe0.L"], "mode": "grow", "amount": 1.30, "pivot": "NPC Foot.L"},
+      {"bones": ["NPC R Foot [Lft ]", "NPC R Toe0 [LToe]"], "mode": "grow", "amount": 1.30, "pivot": "NPC R Foot [Lft ]"}
+    ]},
+
+  { "morph": "CLAWClawLength", "base": "claws",
+    "_": "Когти — своя форма, поверх неё ничего не лежит. Растяжение от кости лапы.",
+    "parts": [
+      {"bones": ["NPC L Hand [RHnd]"], "mode": "grow", "amount": 1.45, "pivot": "NPC L Hand [RHnd]"},
+      {"bones": ["NPC Hand.R"], "mode": "grow", "amount": 1.45, "pivot": "NPC Hand.R"},
+      {"bones": ["NPC Foot.L", "NPC Toe0.L"], "mode": "grow", "amount": 1.45, "pivot": "NPC Foot.L"},
+      {"bones": ["NPC R Foot [Lft ]", "NPC R Toe0 [LToe]"], "mode": "grow", "amount": 1.45, "pivot": "NPC R Foot [Lft ]"}
+    ]},
+
+  { "morph": "CLAWDigitigrade", "base": "body",
+    "carry": ["claws"],
+    "_": "Поворот стопы: пятка выше, вес на пальцы. Угол держится в 24 градусах — на середине ползунка усадка около 2 %.",
+    "parts": [
+      {"bones": ["NPC Foot.L", "NPC Toe0.L"], "mode": "rotate", "amount": 24.0, "axis": [1, 0, 0], "pivot": "NPC Toe0.L"},
+      {"bones": ["NPC R Foot [Lft ]", "NPC R Toe0 [LToe]"], "mode": "rotate", "amount": 24.0, "axis": [1, 0, 0], "pivot": "NPC R Toe0 [LToe]"}
+    ]},
+
+  { "morph": "CLAWTailLength", "base": "body",
+    "carry": ["fur_back", "fur_tailtip"],
+    "_": "Хвост идёт назад и вниз от TailBone01, поэтому растяжение по Y и Z от его основания.",
+    "parts": [{"bones": ["TailBone01", "TailBone02", "TailBone03", "TailBone04", "TailBone05"],
+               "mode": "scaleAxis", "scale": [1.0, 1.35, 1.25], "pivot": "TailBone01"}]},
+
+  { "morph": "CLAWTailFluff", "base": "body",
+    "carry": ["fur_back", "fur_tailtip"],
+    "_": "Пышность хвоста: обхват вокруг его СОБСТВЕННОГО направления, а не вокруг вертикали.",
+    "parts": [{"bones": ["TailBone01", "TailBone02", "TailBone03", "TailBone04", "TailBone05"],
+               "mode": "barrel", "amount": 4.0, "pivot": "TailBone01", "barrelAxis": [0, 1, 0]}]},
+
+  { "morph": "CLAWTailLift", "base": "body",
+    "carry": ["fur_back", "fur_tailtip"],
+    "_": "Подъём хвоста. Нужен и для поз, и чтобы под хвостом вообще было что-то видно.",
+    "parts": [{"bones": ["TailBone01", "TailBone02", "TailBone03", "TailBone04", "TailBone05"],
+               "mode": "rotate", "amount": -26.0, "axis": [1, 0, 0], "pivot": "TailBone01"}]}
+]
