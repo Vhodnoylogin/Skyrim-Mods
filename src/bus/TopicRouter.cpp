@@ -2,8 +2,7 @@
 
 #include "Utterance.h"
 #include "core/Config.h"
-
-#include <RE/Skyrim.h>
+#include "core/GameState.h"
 
 namespace Envoy
 {
@@ -11,28 +10,17 @@ namespace Envoy
 	{
 		bool DialogueOpen()
 		{
-			auto* ui = RE::UI::GetSingleton();
-			if (!ui) {
-				return false;
-			}
-
 			const auto names = Config::Get().Value<std::vector<std::string>>("/topics/dialogueMenuNames");
 			if (!names) {
 				return false;
 			}
 
 			for (const auto& name : *names) {
-				if (ui->IsMenuOpen(name)) {
+				if (GameState::Get().IsMenuOpen(name)) {
 					return true;
 				}
 			}
 			return false;
-		}
-
-		bool InCombat()
-		{
-			auto* player = RE::PlayerCharacter::GetSingleton();
-			return player && player->IsInCombat();
 		}
 	}
 
@@ -53,12 +41,11 @@ namespace Envoy
 					return "dialogue";
 				}
 			} else if (name == "menu") {
-				auto* ui = RE::UI::GetSingleton();
-				if (ui && ui->GameIsPaused()) {
+				if (GameState::Get().IsPaused()) {
 					return "menu";
 				}
 			} else if (name == "combat") {
-				if (InCombat()) {
+				if (GameState::Get().IsInCombat()) {
 					return "combat";
 				}
 			} else if (name == "world") {

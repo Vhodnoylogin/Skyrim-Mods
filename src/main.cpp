@@ -9,11 +9,13 @@
 #include <RE/Skyrim.h>
 #include <SKSE/SKSE.h>
 
+#include <filesystem>
+
 #include "core/Config.h"
 #include "core/Log.h"
 #include "game/GameLoadWatch.h"
-#include "game/ModEventBus.h"
 #include "game/PapyrusApi.h"
+#include "game/SkseHost.h"
 #include "wire/AdapterHost.h"
 
 namespace
@@ -99,9 +101,20 @@ extern "C" __declspec(dllexport) bool SKSEAPI SKSEPlugin_Load(const SKSE::LoadIn
 	auto& config = Envoy::Config::Get();
 	config.Load(kConfigPath);
 
+	// Куда писать журнал, знает SKSE, а не ядро: путь отдаётся ему снаружи.
+	std::filesystem::path logFile;
+	if (auto dir = SKSE::log::log_directory()) {
+		logFile = *dir / (std::string(PLUGIN_NAME) + ".log");
+	}
+
 	// "info" здесь - не настройка, а запасной вариант на случай, когда не удалось
 	// разобрать даже встроенный набор. В норме значение приходит из файла.
-	Envoy::Log::Init(config.Value<std::string>("/log/level").value_or("info"));
+	Envoy::Log::Init(config.Value<std::string>("/log/level").value_or("info"), logFile);
+
+	// Ядро до этой строки отвечает себе само: работа делается на месте, в игре
+	// ничего не происходит, события уходят в журнал. Здесь на все три вопроса
+	// начинает отвечать игра.
+	Envoy::SkseHost::Install();
 
 	SKSE::log::info("{} v{} загружен, контракт версии {}", PLUGIN_NAME, PLUGIN_VERSION,
 		config.Value<std::int32_t>("/interfaceVersion").value_or(0));

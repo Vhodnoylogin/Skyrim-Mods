@@ -89,11 +89,55 @@ configure_file(
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/config/envoy.default.json")
 
-# ---------------------------------------------------------------- наш плагин
-file(GLOB_RECURSE ENVOY_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
-file(GLOB_RECURSE ENVOY_HEADERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h")
+# ------------------------------------------------------------------- два слоя
+# Ядро (envoy-core) об SKSE не знает ничего: ни включения, ни вызова. Всё, что
+# ему нужно от игры, оно спрашивает через три шва - core/MainThread,
+# core/GameState, core/Events, - и без установленных швов отвечает себе само.
+# Поэтому ядро собирается и работает без игры, а проверять аукцион можно
+# консольным хостом из tests/.
+#
+# Независимость держится не обещанием, а этим файлом: цель envoy-core не связана
+# с CommonLibSSE ни одной строкой, и любое включение <SKSE/...> в ядре не
+# соберётся. Нарушить правило молча нельзя.
+file(GLOB_RECURSE ENVOY_CORE_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/core/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/bus/*.cpp")
+file(GLOB_RECURSE ENVOY_CORE_HEADERS CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/core/*.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/bus/*.h")
 
-add_library(${PROJECT_NAME} SHARED ${ENVOY_SOURCES} ${ENVOY_HEADERS})
+add_library(envoy-core STATIC ${ENVOY_CORE_SOURCES} ${ENVOY_CORE_HEADERS})
+
+target_include_directories(envoy-core PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${CMAKE_CURRENT_BINARY_DIR}/generated"
+)
+
+target_link_libraries(envoy-core PUBLIC
+    spdlog::spdlog
+    nlohmann_json::nlohmann_json
+)
+
+if(MSVC)
+    target_compile_options(envoy-core PRIVATE
+        /MP /W4 /WX /permissive- /Zc:preprocessor /EHsc /utf-8
+        /wd4068 /wd4189 /wd4200 /wd4201 /wd4324
+    )
+endif()
+
+# ------------------------------------------------------------- слой SKSE
+# Здесь и только здесь живёт игра: функции Papyrus, рассылка событий, раздача
+# интерфейса адаптерам и ответы на три вопроса ядра средствами Skyrim.
+file(GLOB_RECURSE ENVOY_SKSE_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/wire/*.cpp")
+file(GLOB_RECURSE ENVOY_SKSE_HEADERS CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/*.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/wire/*.h")
+
+add_library(${PROJECT_NAME} SHARED
+    ${ENVOY_SKSE_SOURCES} ${ENVOY_SKSE_HEADERS}
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp")
 
 # Строгие флаги - только на наш код. Чужие библиотеки собираются своими:
 # ставить им /WX означало бы падать на чужих предупреждениях.
@@ -126,6 +170,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 )
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
+    envoy-core
     CommonLibSSE::CommonLibSSE
     nlohmann_json::nlohmann_json
     httplib::httplib
@@ -135,6 +180,9 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 # писать в сборку при запущенной игре нельзя.
 
 add_subdirectory(providers)
+
+# Консольный хост проверки: то же ядро, но без игры.
+add_subdirectory(tests)
 # Адаптер здесь не собирается: это отдельный модуль со своим файлом сборки
 # в adapters/voice. Мост о нём не знает вовсе - он отдаёт контракт папкой SDK,
 # и этого достаточно. Ветка у Envoy пока одна: модули разъедутся по веткам
