@@ -7,10 +7,21 @@
 
 Три способа сдвига, каждый под свою задачу:
 
+  rotate  -- поворот области вокруг оси, проходящей через кость. Уши прижать,
+             стопу поставить на пальцы. Морф ведёт вершину по ХОРДЕ, а не по
+             дуге, поэтому на середине ползунка деталь чуть подтягивается
+             к центру: 0.9 % при 15 градусах, 3.4 % при 30, 13 % при 60.
+             На краях геометрия точна всегда. Держать угол в пределах 30.
   grow    -- растяжение от основания кости. Длина: уши, хвост, морда.
              У каждой части своя опора, иначе парные кости получают общий
              центр на осевой линии тела и разъезжаются вбок.
-  barrel  -- наружу от вертикальной оси через кость. Обхват, маска по весам.
+  barrel  -- наружу от оси через кость. Обхват, маска по весам. Ось по умолчанию
+             вертикальная; для руки, идущей вбок, и для хвоста, идущего назад,
+             её надо задать своей -- иначе конечность толстеет только в одной
+             плоскости.
+  scaleAxis -- растяжение по каждой оси отдельно от кости-опоры. Длина морды,
+             ширина челюсти, длина хвоста: там, где нужен не обхват, а размер
+             вдоль своего направления.
   region  -- то же наружу от оси, но область задана поясом по высоте и суммой
              весов ПЕРЕЧИСЛЕННЫХ СВОИХ костей. Для живота и груди, где нужной
              одной кости у зверя просто нет.
@@ -20,6 +31,7 @@
 жёсткий бортик. Потолок сдвига держит гриву, висящую вчетверо дальше от оси,
 чем кожа; `min` двух растущих функций сама растёт, поэтому порядок цел.
 """
+import math
 from mathutils import Vector
 
 
@@ -42,7 +54,7 @@ def _weight_of(v, gi):
 def deltas_for(obj, part, arm, log=None):
     """Поле сдвигов одной части ползунка: {индекс вершины: смещение}."""
     out = {}
-    amount = float(part['amount'])
+    amount = float(part.get('amount', 1.0))   # scaleAxis величину берёт из scale
     mode = part.get('mode', 'barrel')
 
     if mode == 'region':
@@ -76,6 +88,36 @@ def deltas_for(obj, part, arm, log=None):
           if b in obj.vertex_groups]
     if not gi:
         return out
+    if mode == 'scaleAxis':
+        pivot = bone_head(arm, part.get('pivot') or part['bones'][0])
+        if pivot is None:
+            return out
+        sc = Vector(part.get('scale', [1.0, 1.0, 1.0]))
+        for i, v in enumerate(obj.data.vertices):
+            w = _weight_of(v, gi)
+            if w <= 0.01:
+                continue
+            co = obj.matrix_world @ v.co
+            d = co - pivot
+            out[i] = Vector((d.x * (sc.x - 1.0), d.y * (sc.y - 1.0),
+                             d.z * (sc.z - 1.0))) * w
+        return out
+
+    if mode == 'rotate':
+        from mathutils import Matrix
+        pivot = bone_head(arm, part.get('pivot') or part['bones'][0])
+        if pivot is None:
+            return out
+        axis = Vector(part.get('axis', [1.0, 0.0, 0.0])).normalized()
+        ang = math.radians(amount)
+        for i, v in enumerate(obj.data.vertices):
+            w = _weight_of(v, gi)
+            if w <= 0.01:
+                continue
+            co = obj.matrix_world @ v.co
+            m = Matrix.Rotation(ang * w, 4, axis)
+            out[i] = (m @ (co - pivot)) + pivot - co
+        return out
     pivot = bone_head(arm, part.get('pivot') or part['bones'][0])
     if pivot is None:
         if log:
@@ -89,7 +131,11 @@ def deltas_for(obj, part, arm, log=None):
         if mode == 'grow':
             out[i] = (co - pivot) * ((amount - 1.0) * w)
         else:
-            r = Vector((co.x - pivot.x, co.y - pivot.y, 0.0))
+            # обхват вокруг заданной оси: составляющая вдоль оси отбрасывается,
+            # остаток и есть направление наружу
+            ax = Vector(part.get('barrelAxis', [0.0, 0.0, 1.0])).normalized()
+            d = co - pivot
+            r = d - ax * d.dot(ax)
             if r.length < 1e-4:
                 continue
             out[i] = r.normalized() * (amount * w)
@@ -162,6 +208,8 @@ def apply_recipe(spec, objects, arm, log=print):
                       где формы не лежат друг над другом, например уши.
     """
     for item in spec:
+        if 'morph' not in item:
+            continue          # запись-пояснение в рецепте, а не ползунок
         morph = item['morph']
         if item.get('base'):
             src = objects.get(item['base'])
