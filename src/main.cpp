@@ -16,6 +16,8 @@
 #include "game/GameLoadWatch.h"
 #include "game/PapyrusApi.h"
 #include "game/SkseHost.h"
+#include "envoy-adapter.h"
+
 #include "wire/AdapterHost.h"
 
 namespace
@@ -116,8 +118,12 @@ extern "C" __declspec(dllexport) bool SKSEAPI SKSEPlugin_Load(const SKSE::LoadIn
 	// начинает отвечать игра.
 	Envoy::SkseHost::Install();
 
+	// Версия контракта - свойство двоичного файла, а не настройка. Раньше сюда
+	// печаталось поле "interfaceVersion" из файла настроек, где с давних пор
+	// лежала единица: два разных числа под одним именем, и в журнал попадало
+	// не то. Разбор прогона 07.09 начался именно с этой строки.
 	SKSE::log::info("{} v{} загружен, контракт версии {}", PLUGIN_NAME, PLUGIN_VERSION,
-		config.Value<std::int32_t>("/interfaceVersion").value_or(0));
+		EnvoyAPI::kInterfaceVersion);
 	SKSE::log::info("{}: {}", Envoy::Config::Describe(config.Source()), config.Path().string());
 
 	if (!config.Error().empty()) {
