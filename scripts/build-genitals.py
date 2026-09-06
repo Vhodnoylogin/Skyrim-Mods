@@ -262,6 +262,7 @@ ret_tip = (ry1 + 0.35, ret['zCenter'])
 bspec = spec['balls']
 brx, bry, brz = bspec['radii']
 bury = float(bspec.get('bury', 2.0))
+ball_spans = []
 for sgn in (-1, 1):
     sx = sgn * bspec['center'][0]
     cz = bspec['center'][2]
@@ -278,6 +279,7 @@ for sgn in (-1, 1):
     bv, bf = ellipsoid((sx, cy, cz), bspec['radii'],
                        bspec['rings'], bspec['segments'])
     off = len(verts)
+    ball_spans.append((off, off + len(bv), Vector((sx, cy, cz))))
     verts.extend(bv)
     faces.extend(tuple(k + off for k in f) for f in bf)
 
@@ -314,9 +316,12 @@ for n in [w['root']] + [c[0] for c in chain] + list(w['knot']) + list(w['ballsBo
 
 ky0, ky1 = w['knotYRange']
 for i, v in enumerate(mesh.vertices):
-    if i < n_tube:
-        # у трубы развеска берётся по ВЫТЯНУТОМУ положению вершины: цепочка
-        # костей описывает анатомию в вытянутом виде, а не в сжатом
+    if i < n_tube and w.get('tubeSingleBone'):
+        # Вся труба на одной кости. Раньше задняя половина висела на тазе,
+        # а передняя на цепочке WWD, и на стыке поверхность рвалась: в игре
+        # было видно два обрубка с открытыми торцами.
+        gen.vertex_groups[w['root']].add([i], 1.0, 'REPLACE')
+    elif i < n_tube:
         y = verts[i].y
         if y <= sheath[-1][0]:
             gen.vertex_groups[w['root']].add([i], 1.0, 'REPLACE')
@@ -355,6 +360,15 @@ ret_verts, _rf, ret_ringstart = tube(retracted, True, ret_tip)
 extended = [Vector(v) for v in verts]
 for i in range(n_tube):
     mesh.vertices[i].co = ret_verts[i]
+# Мошонка — такая же часть анатомии, и в покое её быть видно не должно. Она
+# уводится за поверхность паха и уменьшается; обратно её выводит тот же
+# CLAWGenitalState, что и ствол.
+pull = float(ret.get('ballsPullback', 0.0))
+bscale = float(ret.get('ballsScale', 1.0))
+for a, bnd, c in ball_spans:
+    for i in range(a, bnd):
+        e = extended[i]
+        mesh.vertices[i].co = c + (e - c) * bscale - Vector((0.0, pull, 0.0))
 print("GEN|состояние покоя: ствол сжат в Y %.1f..%.1f" % (ry0, ry1))
 
 # ---------------------------------------------------------------- морфы ------
@@ -373,7 +387,9 @@ def add_key(name, coords):
 
 
 # State: покой -> вытянутое
-add_key('CLAWGenitalState', {i: extended[i] for i in range(n_tube)})
+add_key('CLAWGenitalState',
+        {i: extended[i] for i in
+         list(range(n_tube)) + [k for a, bnd, _c in ball_spans for k in range(a, bnd)]})
 
 # Size: прибавка ПОВЕРХ вытянутого, поэтому дельта считается от вытянутого
 sz = ms['CLAWGenitalSize']
@@ -406,13 +422,16 @@ add_key('CLAWGenitalKnot', knot)
 
 # Balls: мошонка видна всегда, поэтому её дельта считается от базы
 bs = ms['CLAWBallsSize']
-cen = Vector((0.0, spec['balls']['center'][1], spec['balls']['center'][2]))
+spread = float(bs.get('spread', 1.0))
 balls = {}
-for i in range(n_tube, len(mesh.vertices)):
-    co = mesh.vertices[i].co
-    sx = spec['balls']['center'][0] * (1 if co.x > 0 else -1)
-    c3 = Vector((sx, cen.y, cen.z))
-    balls[i] = c3 + (co - c3) * bs['scale']
+for a, bnd, c in ball_spans:
+    # центр шара разъезжается вбок на тот же множитель, что и его радиус:
+    # без этого при 1.4 шары перекрывали осевую линию и сливались в овал
+    c2 = Vector((c.x * spread, c.y, c.z))
+    for i in range(a, bnd):
+        e = extended[i]
+        big = c2 + (e - c) * bs['scale']
+        balls[i] = mesh.vertices[i].co + (big - e)
 add_key('CLAWBallsSize', balls)
 
 # ------------------------------------------------- морфы самого тела ---------
