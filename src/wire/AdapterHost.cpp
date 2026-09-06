@@ -1,6 +1,7 @@
 #include "AdapterHost.h"
 
 #include "bus/Auction.h"
+#include "core/MainThread.h"
 #include "bus/SubscriptionRegistry.h"
 #include "bus/UtteranceStore.h"
 #include "core/Config.h"
@@ -211,6 +212,22 @@ namespace Envoy
 		utterance.latencyMs = a_in.latencyMs;
 		utterance.durationMs = a_in.durationMs;
 
+		// Поля третьей версии читаем только у того, кто её объявил: у прежних
+		// адаптеров на этом месте чужая память, а не нули.
+		std::vector<std::int32_t> swallowed;
+		{
+			std::scoped_lock lock(_mutex);
+			auto entry = _adapters.find(Safe(a_adapterId));
+			if (entry != _adapters.end() && entry->second.contract >= 3) {
+				utterance.complete = a_in.complete;
+				utterance.lengthClass = a_in.lengthClass;
+				if (a_in.supersedes && a_in.supersedesCount > 0) {
+					swallowed.assign(a_in.supersedes,
+						a_in.supersedes + a_in.supersedesCount);
+				}
+			}
+		}
+
 		for (std::int32_t i = 0; i < a_in.altCount; ++i) {
 			utterance.alternatives.push_back({ Safe(a_in.altText[i]),
 				a_in.altScore ? a_in.altScore[i] : 0.0f });
@@ -229,9 +246,14 @@ namespace Envoy
 		const auto id = UtteranceStore::Get().Add(std::move(utterance));
 		SKSE::log::info("реплика {} от адаптера {}: {}", id, Safe(a_adapterId), Safe(a_in.text));
 
-		if (auto* task = SKSE::GetTaskInterface()) {
-			task->AddTask([id]() { Auctioneer::Get().Offer(id); });
-		}
+		// Поглощение раньше приёма: если новый кусок вобрал придержанный,
+		// тот должен быть выброшен ДО того, как решится судьба нового.
+		MainThread::Post([id, swallowed = std::move(swallowed)]() {
+			if (!swallowed.empty()) {
+				Auctioneer::Get().Supersede(id, swallowed);
+			}
+			Auctioneer::Get().Receive(id);
+		});
 		return id;
 	}
 

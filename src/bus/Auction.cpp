@@ -2,6 +2,7 @@
 
 #include "TopicRouter.h"
 #include "UtteranceStore.h"
+#include "Hold.h"
 #include "core/Events.h"
 #include "core/MainThread.h"
 #include "core/Scheduler.h"
@@ -217,6 +218,100 @@ namespace Envoy
 	{
 		static Auctioneer instance;
 		return instance;
+	}
+
+	void Auctioneer::Receive(std::int32_t a_id)
+	{
+		auto stored = UtteranceStore::Get().Find(a_id);
+		if (!stored) {
+			return;
+		}
+
+		// Тема выбирается ДО решения о придержании: зал зависит от неё, и
+		// сказанное в бою слышат не те, кто слышит сказанное в мире.
+		auto item = *stored;
+		item.topic = TopicRouter::Pick(item);
+		UtteranceStore::Get().Update(a_id, item);
+
+		const auto verdict = Hold::Judge(item);
+		if (!verdict.hold) {
+			if (verdict.audience > 0) {
+				spdlog::info("реплика {} отдаётся сразу: {}", a_id, verdict.reason);
+			}
+			Offer(a_id);
+			return;
+		}
+
+		item.held = true;
+		item.holdReason = verdict.reason;
+		UtteranceStore::Get().Update(a_id, item);
+		spdlog::info("реплика {} ПРИДЕРЖАНА: {}", a_id, verdict.reason);
+
+		// Потолок - не главный путь, а страховка. Обычно удержание кончается
+		// раньше: либо приходит продолжение и обрывок выбрасывается вовсе,
+		// либо человек замолкает, и движок сам присылает законченную реплику.
+		if (verdict.ceilingMs > 0) {
+			Scheduler::Get().After(std::chrono::milliseconds(verdict.ceilingMs), [a_id]() {
+				MainThread::Post([a_id]() {
+					Auctioneer::Get().Release(a_id, "истёк потолок класса длины");
+				});
+			});
+		}
+	}
+
+	void Auctioneer::Release(std::int32_t a_id, const std::string& a_why)
+	{
+		auto stored = UtteranceStore::Get().Find(a_id);
+		if (!stored || !stored->held) {
+			return;
+		}
+		if (stored->supersededBy != 0) {
+			// Продолжение успело прийти: обрывок больше не разыгрывается.
+			return;
+		}
+
+		auto item = *stored;
+		item.held = false;
+		UtteranceStore::Get().Update(a_id, item);
+		spdlog::info("реплика {} отпущена: {}", a_id, a_why);
+		Offer(a_id);
+	}
+
+	void Auctioneer::Supersede(std::int32_t a_newId, const std::vector<std::int32_t>& a_older)
+	{
+		for (const auto older : a_older) {
+			auto stored = UtteranceStore::Get().Find(older);
+			if (!stored || stored->supersededBy != 0) {
+				continue;
+			}
+
+			auto item = *stored;
+			item.supersededBy = a_newId;
+			const bool wasHeld = item.held;
+			item.held = false;
+			UtteranceStore::Get().Update(older, item);
+
+			if (wasHeld) {
+				// Придержали и не прогадали: фраза продолжилась, а обрывок
+				// так и не ушёл никуда. Ради этого случая всё и делалось.
+				spdlog::info("реплика {} выброшена не оглашённой: её поглотила {}",
+					older, a_newId);
+				continue;
+			}
+
+			if (!item.winners.empty()) {
+				// Успели отдать. Отменить сделанное мост не может - он не знает,
+				// что именно подписчик сделал, - но обязан сказать. Знает, как
+				// исправиться, только сам победитель.
+				std::string who;
+				for (const auto& winner : item.winners) {
+					who += who.empty() ? winner : ", " + winner;
+				}
+				spdlog::warn("реплика {} была отдана ({}) и поглощена репликой {} - отзыв",
+					older, who, a_newId);
+				Events::Send("Envoy_Revoked", "", static_cast<float>(older));
+			}
+		}
 	}
 
 	void Auctioneer::Offer(std::int32_t a_id)

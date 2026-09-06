@@ -55,7 +55,20 @@
     "minUtteranceScore": 0.4,
     "debounceSec": 1.0,
     "sharedWinsTie": true,
-    "priority": []
+    "priority": [],
+    "hold": {
+      "tolerance": 0.15,
+      "weight": {
+        "revocable": 0.1,
+        "plain": 0.4,
+        "costly": 1.0
+      },
+      "ceilingMs": {
+        "short": 2500,
+        "middle": 1500,
+        "long": 800
+      }
+    }
   },
   "utterance": {
     "ttlSec": 30.0,

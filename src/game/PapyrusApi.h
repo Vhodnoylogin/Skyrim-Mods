@@ -29,12 +29,18 @@ namespace Envoy
 		static void Subscribe(Tag, Str a_ns, std::vector<Str> a_topics);
 		static void Unsubscribe(Tag, Str a_ns);
 		static void SetActive(Tag, Str a_ns, bool a_active);
+		// Что участник о себе объявляет: во что обходится его действие
+		// и умеет ли он его отменить. От этого зависит, придержит ли мост
+		// незаконченную фразу или отдаст сразу.
+		static void Declare(Tag, Str a_ns, std::int32_t a_costClass, bool a_revocable);
 		static void RegisterVocabulary(Tag, Str a_ns, std::vector<Str> a_phrases);
 		static void ClearVocabulary(Tag, Str a_ns);
 
 		static Str          GetText(Tag, std::int32_t a_id);
 		static float        GetScore(Tag, std::int32_t a_id);
 		static float        GetMargin(Tag, std::int32_t a_id);
+		// Насколько мост уверен, что на этой реплике фраза закончилась.
+		static float        GetComplete(Tag, std::int32_t a_id);
 		static bool         IsFinal(Tag, std::int32_t a_id);
 		static Str          GetEngineId(Tag, std::int32_t a_id);
 		static Str          GetLanguage(Tag, std::int32_t a_id);
