@@ -73,7 +73,7 @@ namespace Envoy
 		_minMargin[1]      = cfg.Value<float>("/auction/minMargin/costly").value_or(0.15f);
 		_priority          = cfg.Value<std::vector<std::string>>("/auction/priority")
 		                        .value_or(std::vector<std::string>{});
-		holdTolerance      = cfg.Value<float>("/auction/hold/tolerance").value_or(0.15f);
+		holdTolerance      = cfg.Value<float>("/auction/hold/tolerance").value_or(0.27f);
 		_holdWeight[0]     = cfg.Value<float>("/auction/hold/weight/revocable").value_or(0.1f);
 		_holdWeight[1]     = cfg.Value<float>("/auction/hold/weight/plain").value_or(0.4f);
 		_holdWeight[2]     = cfg.Value<float>("/auction/hold/weight/costly").value_or(1.0f);
