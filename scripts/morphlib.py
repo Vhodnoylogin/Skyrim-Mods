@@ -19,6 +19,9 @@
              вертикальная; для руки, идущей вбок, и для хвоста, идущего назад,
              её надо задать своей -- иначе конечность толстеет только в одной
              плоскости.
+  bumps   -- местные выпуклости или впадины в заданных точках: вершина едет
+             по своей нормали, сила спадает от центра к краю. Ряд сосков,
+             ниша вульвы -- всё, что не описывается ни костью, ни поясом.
   scaleAxis -- растяжение по каждой оси отдельно от кости-опоры. Длина морды,
              ширина челюсти, длина хвоста: там, где нужен не обхват, а размер
              вдоль своего направления.
@@ -84,12 +87,29 @@ def deltas_for(obj, part, arm, log=None):
             out[i] = r.normalized() * (shift * w)
         return out
 
-    gi = [obj.vertex_groups[b].index for b in part['bones']
+    if mode == 'bumps':
+        # Работает без костей: область задана точками, а не развеской.
+        centers = [Vector(c) for c in part.get('centers', [])]
+        rad = float(part.get('radius', 5.0))
+        obj.data.calc_normals_split() if hasattr(obj.data, 'calc_normals_split') else None
+        for i, v in enumerate(obj.data.vertices):
+            co = obj.matrix_world @ v.co
+            best = 0.0
+            for c in centers:
+                t = 1.0 - (co - c).length / rad
+                if t > best:
+                    best = t
+            if best <= 0.0:
+                continue
+            out[i] = v.normal.normalized() * (amount * smooth(best))
+        return out
+
+    gi = [obj.vertex_groups[b].index for b in part.get('bones', [])
           if b in obj.vertex_groups]
     if not gi:
         return out
     if mode == 'scaleAxis':
-        pivot = bone_head(arm, part.get('pivot') or part['bones'][0])
+        pivot = bone_head(arm, part.get('pivot') or (part.get('bones') or [''])[0])
         if pivot is None:
             return out
         sc = Vector(part.get('scale', [1.0, 1.0, 1.0]))
@@ -105,7 +125,7 @@ def deltas_for(obj, part, arm, log=None):
 
     if mode == 'rotate':
         from mathutils import Matrix
-        pivot = bone_head(arm, part.get('pivot') or part['bones'][0])
+        pivot = bone_head(arm, part.get('pivot') or (part.get('bones') or [''])[0])
         if pivot is None:
             return out
         axis = Vector(part.get('axis', [1.0, 0.0, 0.0])).normalized()
@@ -118,7 +138,7 @@ def deltas_for(obj, part, arm, log=None):
             m = Matrix.Rotation(ang * w, 4, axis)
             out[i] = (m @ (co - pivot)) + pivot - co
         return out
-    pivot = bone_head(arm, part.get('pivot') or part['bones'][0])
+    pivot = bone_head(arm, part.get('pivot') or (part.get('bones') or [''])[0])
     if pivot is None:
         if log:
             log("нет кости-опоры для %s" % obj.name)
