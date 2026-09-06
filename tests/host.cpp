@@ -40,6 +40,9 @@
 #include <vector>
 
 #ifdef _WIN32
+// Без этого windows.h объявляет макросы min и max, и любое std::min
+// перестаёт разбираться - ошибка при этом указывает не на макрос.
+#	define NOMINMAX
 #	include <windows.h>
 #endif
 
@@ -83,6 +86,10 @@ namespace
 		std::vector<std::string> vocabulary;
 		std::int32_t             costClass{ 0 };   // 0 обратимое, 1 дорогое
 		bool                     greedy{ false };
+		// Умеет ли отменить сделанное. Отзывчивому мост отдаёт незаконченную
+		// фразу сразу: он способен исправиться. Неотзывчивому - только когда
+		// уверен, что фраза кончилась.
+		bool                     revocable{ false };
 
 		// Дойдёт ли до него оглашение этой темы. "any" - слышит всё; так
 		// объявляют себя наблюдатели, которым важно видеть каждую реплику.
@@ -150,6 +157,7 @@ namespace
 			sub.vocabulary = doc.value("vocabulary", std::vector<std::string>{});
 			sub.costClass = doc.value("cost", std::string{ "reversible" }) == "costly" ? 1 : 0;
 			sub.greedy = doc.value("greedy", false);
+			sub.revocable = doc.value("revocable", false);
 			out.push_back(std::move(sub));
 		}
 		return out;
@@ -160,6 +168,10 @@ namespace
 		auto& registry = Envoy::SubscriptionRegistry::Get();
 		for (const auto& sub : a_subs) {
 			registry.Subscribe(sub.ns, sub.topics);
+			// Род объявляется отдельно от подписки: решение придержать реплику
+			// принимается ДО того, как кто-либо успел заявиться, и опираться
+			// на ставки в нём нельзя.
+			registry.Declare(sub.ns, sub.costClass, sub.revocable);
 			if (!sub.vocabulary.empty()) {
 				registry.SetVocabulary(sub.ns, sub.vocabulary);
 			}
@@ -168,9 +180,10 @@ namespace
 			for (const auto& topic : sub.topics) {
 				topics += topics.empty() ? topic : ", " + topic;
 			}
-			spdlog::info("подписчик {}: темы [{}], фраз {}, {}{}", sub.ns, topics,
+			spdlog::info("подписчик {}: темы [{}], фраз {}, {}{}{}", sub.ns, topics,
 				sub.vocabulary.size(), CostName(sub.costClass),
-				sub.greedy ? ", жадный" : "");
+				sub.greedy ? ", жадный" : "",
+				sub.revocable ? ", отзывчивый" : "");
 		}
 	}
 }
@@ -239,6 +252,104 @@ int main(int argc, char** argv)
 	// как выяснилось, что фраза ещё не кончилась.
 	std::string                 currentSource;
 	std::map<int, std::int32_t> sliceToId;
+	std::int32_t                lastEmitMs = 0;
+	std::vector<std::int32_t>   waiting;   // придержанные, чьей судьбы мы ещё не знаем
+
+	// Что известно о реплике только на её шаге. Итог дочитывается из хранилища
+	// в конце: у придержанной он появляется позже, чем шаг заканчивается.
+	struct Told
+	{
+		std::int32_t             id{ 0 };
+		std::string              source;
+		std::string              reference;
+		std::string              topic;
+		std::int32_t             sliceId{ 0 };
+		float                    complete{ 1.0f };
+		bool                     hadComplete{ false };
+		std::vector<std::string> swallowed;
+	};
+	std::vector<Told> history;
+
+	// Последнее известное состояние каждой реплики.
+	//
+	// Хранилище моста - живой кеш, а не журнал: оно чистится по сроку и по
+	// числу, и к концу прогона ранние реплики из него уже вымыты. Это верно
+	// для моста и неверно для проверки, которой нужен итог по КАЖДОЙ. Поэтому
+	// снимок держим у себя, а не требуем от хранилища быть тем, чем оно не является.
+	std::map<std::int32_t, Envoy::Utterance> snapshot;
+
+	// Ставки вместо скриптов Papyrus. Уверенность - произведение двух разных
+	// величин: насколько хорошо реплику расслышали и насколько она похожа
+	// на объявленную фразу. Одного совпадения со словарём мало: невнятно
+	// сказанная команда совпадает с ним ровно так же, как чётко сказанная.
+	// Настоящий подписчик считает уверенность сам; здесь взято простейшее
+	// защитимое правило, потому что поведение подписчиков проверку не занимает.
+	auto placeBids = [&subs](std::int32_t a_id, const std::string& a_text, float a_score,
+		                 const std::string& a_topic) {
+		std::size_t placed = 0;
+		for (const auto& sub : subs) {
+			if (!sub.Hears(a_topic)) {
+				continue;
+			}
+			const auto match = Envoy::SubscriptionRegistry::Get().Match(sub.ns, a_text);
+			if (match.score <= 0.0f) {
+				continue;
+			}
+			const float confidence = match.score * a_score;
+			Envoy::UtteranceStore::Get().AddBid(a_id,
+				Envoy::BidRecord{ sub.ns, confidence, sub.costClass, sub.greedy, match.phrase });
+			++placed;
+			spdlog::info("ставка {}: уверенность {:.2f} (слышимость {:.2f} x словарь {:.2f}), "
+			             "фраза «{}», {}{}",
+				sub.ns, confidence, a_score, match.score, match.phrase,
+				CostName(sub.costClass), sub.greedy ? ", жадный" : "");
+		}
+		if (placed == 0) {
+			spdlog::info("ставок нет - никто из подписчиков темы {} не узнал фразу", a_topic);
+		}
+	};
+
+	// Придержанную реплику могли отпустить по потолку, пока мы занимались
+	// следующим куском. Оглашение случилось - значит пора торговать.
+	auto catchUp = [&waiting, &placeBids]() {
+		std::vector<std::int32_t> still;
+		for (const auto id : waiting) {
+			auto item = Envoy::UtteranceStore::Get().Find(id);
+			if (!item || item->supersededBy != 0) {
+				continue;   // поглощена - судьба решена, торговать нечего
+			}
+			if (item->held) {
+				still.push_back(id);
+				continue;
+			}
+			spdlog::info("реплика {} отпущена - торгуем с опозданием", id);
+			placeBids(id, item->text, item->score, item->topic);
+		}
+		waiting.swap(still);
+	};
+
+	// Ждать надо не одним сном, а короткими долями с проверкой между ними.
+	// Окно ставок открывается в тот миг, когда придержанную отпустили, и
+	// длится доли секунды: заметив это через секунду, хост опоздает на торги
+	// и реплика уйдёт без единой ставки - не потому, что мост так решил,
+	// а потому, что проверка проспала.
+	auto keep = [&history, &snapshot]() {
+		for (const auto& told : history) {
+			if (auto item = Envoy::UtteranceStore::Get().Find(told.id)) {
+				snapshot[told.id] = *item;
+			}
+		}
+	};
+
+	auto waitMs = [&catchUp, &keep](std::int64_t a_ms) {
+		const std::int64_t slice = 50;
+		for (std::int64_t left = a_ms; left > 0; left -= slice) {
+			std::this_thread::sleep_for(
+				std::chrono::milliseconds(left < slice ? left : slice));
+			catchUp();
+			keep();
+		}
+	};
 
 	for (const auto& step : steps) {
 		state.Reset();
@@ -256,6 +367,16 @@ int main(int argc, char** argv)
 		if (source != currentSource) {
 			currentSource = source;
 			sliceToId.clear();
+			lastEmitMs = 0;
+		}
+
+		// Куски одной записи проигрываются по меткам времени, а не подряд.
+		// Иначе продолжение приходит мгновенно, и придержание выглядит
+		// работающим там, где в жизни успел бы истечь потолок.
+		const auto emitMs = step.value("emitMs", 0);
+		if (emitMs > lastEmitMs) {
+			waitMs(emitMs - lastEmitMs);
+			lastEmitMs = emitMs;
 		}
 
 		Envoy::Utterance utterance;
@@ -268,6 +389,9 @@ int main(int argc, char** argv)
 		utterance.lengthClass = step.value("lengthClass", 0);
 		utterance.sliceId = step.value("sliceId", 0);
 		utterance.durationMs = step.value("durationMs", 0);
+		// Единица по умолчанию: сценарий, не знающий о завершённости, ведёт
+		// себя как прежде - всё приходит законченным и ничего не держится.
+		utterance.complete = step.value("complete", 1.0f);
 		utterance.isFinal = true;
 
 		// Прочие гипотезы движка. Аукцион их пока не спрашивает, но реплика
@@ -285,107 +409,121 @@ int main(int argc, char** argv)
 			sliceToId[utterance.sliceId] = id;
 		}
 
-		// Длинный кусок поглощает короткие, из которых он собран. Здесь видна
-		// главная опасность нарезки: приз по короткому куску мог быть уже отдан,
-		// и отменить сделанное мост не может - он может лишь отметить, что
-		// реплику поглотили. Что с этим делать, решает подписчик.
-		std::vector<std::string> swallowed;
+		// Длинный кусок поглощает короткие, из которых он собран. Решает это
+		// теперь мост, а не хост: придержанные он выбросит не оглашёнными,
+		// а уже отданные - отзовёт.
+		std::vector<std::int32_t> older;
 		if (step.contains("supersedes")) {
-			for (const auto& older : step["supersedes"]) {
-				const auto found = sliceToId.find(older.get<int>());
-				if (found == sliceToId.end()) {
-					continue;
+			for (const auto& mark : step["supersedes"]) {
+				const auto found = sliceToId.find(mark.get<int>());
+				if (found != sliceToId.end()) {
+					older.push_back(found->second);
 				}
-				auto was = Envoy::UtteranceStore::Get().Find(found->second);
-				if (!was) {
-					continue;
-				}
-				auto copy = *was;
-				copy.supersededBy = id;
-				Envoy::UtteranceStore::Get().Update(found->second, copy);
-
-				std::string who;
-				for (const auto& winner : was->winners) {
-					who += who.empty() ? winner : ", " + winner;
-				}
-				swallowed.push_back("реплика " + std::to_string(found->second) +
-					(who.empty() ? " - её никто не получил"
-					             : " - НО ОНА УЖЕ ОТДАНА: " + who));
 			}
 		}
 
-		spdlog::info("--- реплика {}: «{}» ---", id, utterance.text);
-		for (const auto& line : swallowed) {
-			spdlog::warn("поглощает {}", line);
+		spdlog::info("--- реплика {}: «{}» (завершённость {:.2f}) ---", id, utterance.text,
+			utterance.complete);
+
+		std::vector<std::string> swallowed;
+		for (const auto mark : older) {
+			auto was = Envoy::UtteranceStore::Get().Find(mark);
+			if (!was) {
+				continue;
+			}
+			std::string who;
+			for (const auto& winner : was->winners) {
+				who += who.empty() ? winner : ", " + winner;
+			}
+			swallowed.push_back("реплика " + std::to_string(mark) +
+				(was->held ? " - придержана, выброшена не оглашённой"
+				           : (who.empty() ? " - её никто не получил"
+				                          : " - НО ОНА УЖЕ ОТДАНА: " + who)));
+		}
+		if (!older.empty()) {
+			Envoy::Auctioneer::Get().Supersede(id, older);
 		}
 
-		// Оглашение выбирает тему и рассылает события. Отсюда и дальше всё
-		// делает ядро - ровно то же, что в игре.
-		Envoy::Auctioneer::Get().Offer(id);
+		// Приём вместо оглашения. Мост сам решит, огласить реплику сейчас или
+		// придержать, пока не станет ясно, кончилась ли фраза.
+		Envoy::Auctioneer::Get().Receive(id);
 
 		auto offered = Envoy::UtteranceStore::Get().Find(id);
 		const std::string topic = offered ? offered->topic : std::string{ "?" };
+		const bool held = offered && offered->held;
 
-		// Ставки вместо скриптов Papyrus. Уверенность берётся из совпадения
-		// со словарём - тем самым, что подписчик объявил: своего мнения
-		// у тестового подписчика нет и быть не должно.
-		std::size_t placed = 0;
-		for (const auto& sub : subs) {
-			if (!sub.Hears(topic)) {
-				continue;
-			}
-			const auto match = Envoy::SubscriptionRegistry::Get().Match(sub.ns, utterance.text);
-			if (match.score <= 0.0f) {
-				continue;
-			}
-
-			// Уверенность - произведение двух разных величин: насколько хорошо
-			// реплику вообще расслышали и насколько она похожа на объявленную
-			// фразу. Одного совпадения со словарём мало: невнятно сказанная
-			// команда совпадает со словарём ровно так же, как чётко сказанная,
-			// и без множителя разница между ними пропадала - шаг «сказано тихо»
-			// давал тот же исход, что и «сказано ясно».
-			//
-			// Настоящий подписчик считает свою уверенность сам; здесь взято
-			// простейшее защитимое правило, потому что поведение подписчиков
-			// проверку не занимает.
-			const float confidence = match.score * utterance.score;
-
-			Envoy::UtteranceStore::Get().AddBid(id,
-				Envoy::BidRecord{ sub.ns, confidence, sub.costClass, sub.greedy, match.phrase });
-			++placed;
-			spdlog::info("ставка {}: уверенность {:.2f} (слышимость {:.2f} x словарь {:.2f}), "
-			             "фраза «{}», {}{}",
-				sub.ns, confidence, utterance.score, match.score, match.phrase,
-				CostName(sub.costClass), sub.greedy ? ", жадный" : "");
-		}
-		if (placed == 0) {
-			spdlog::info("ставок нет - никто из подписчиков темы {} не узнал фразу", topic);
+		if (held) {
+			// Придержанную не торгуем и не ждём: в жизни движок в это время
+			// продолжает работать, и продолжение может прийти раньше, чем
+			// истечёт потолок. Ставки за неё поставим, если её всё-таки отпустят.
+			waiting.push_back(id);
+			spdlog::info("реплика {} придержана - ставки не собираем", id);
+		} else {
+			placeBids(id, utterance.text, utterance.score, topic);
+			// Итог подводит сам аукционист по истечении окна ставок, из потока
+			// планировщика. Ждём его, а не подводим за него.
+			waitMs(Envoy::Settings::Get().bidWindowMs + 250);
 		}
 
-		// Итог подводит сам аукционист по истечении окна ставок, из потока
-		// планировщика. Ждём его, а не подводим за него: проверять надо то,
-		// что работает в игре.
-		std::this_thread::sleep_for(
-			std::chrono::milliseconds(Envoy::Settings::Get().bidWindowMs + 250));
+		// Итог сюда не пишем. Придержанная реплика решится позже - когда её
+		// поглотят или отпустят по потолку, - и снимок, сделанный сейчас,
+		// показал бы её вечно нерешённой. Всё, что известно только на этом
+		// шаге, запоминаем; остальное дочитаем из хранилища в конце.
+		Told told;
+		told.id = id;
+		told.source = source;
+		told.reference = step.value("reference", std::string{});
+		told.sliceId = utterance.sliceId;
+		told.complete = utterance.complete;
+		told.topic = topic;
+		told.swallowed = std::move(swallowed);
+		told.hadComplete = step.contains("complete");
+		history.push_back(std::move(told));
+	}
 
-		auto done = Envoy::UtteranceStore::Get().Find(id);
+	// Сценарий кончился, но потолки придержанных могли ещё не истечь. Ждём их
+	// и дописываем итог: реплика, отпущенная последней, должна быть в отчёте
+	// так же, как все прочие.
+	if (!waiting.empty()) {
+		spdlog::info("ждём {} придержанных реплик", waiting.size());
+		waitMs(3000 + Envoy::Settings::Get().bidWindowMs + 250);
+	}
 
-		report << "реплика " << id << ": «" << utterance.text << "»\n";
-		if (!source.empty()) {
-			report << "    запись    : " << source << "  (эталон «"
-			       << step.value("reference", std::string{}) << "»)\n";
+	keep();
+	Envoy::Scheduler::Get().Stop();
+
+	// Теперь, когда решилось всё, дочитываем итоги из снимка.
+	std::size_t heldCount = 0, droppedCount = 0;
+	for (const auto& told : history) {
+		const auto found = snapshot.find(told.id);
+		const Envoy::Utterance* done = found == snapshot.end() ? nullptr : &found->second;
+
+		report << "реплика " << told.id << ": «" << (done ? done->text : std::string{}) << "»\n";
+		if (!told.source.empty()) {
+			report << "    запись    : " << told.source << "  (эталон «"
+			       << told.reference << "»)\n";
 		}
-		if (step.contains("complete")) {
-			report << "    кусок     : " << utterance.sliceId << ", завершённость "
-			       << step.value("complete", 0.0f) << "\n";
+		if (told.hadComplete) {
+			report << "    кусок     : " << told.sliceId << ", завершённость "
+			       << told.complete << "\n";
 		}
-		for (const auto& line : swallowed) {
+		for (const auto& line : told.swallowed) {
 			report << "    поглощает : " << line << "\n";
 		}
-		report << "    тема      : " << topic << "\n";
-		report << "    ставок    : " << (done ? done->bids.size() : 0) << "\n";
+		report << "    тема      : " << told.topic << "\n";
+
+		if (done && !done->holdReason.empty()) {
+			++heldCount;
+			report << "    придержана: " << done->holdReason << "\n";
+			if (done->supersededBy != 0) {
+				++droppedCount;
+				report << "    ВЫБРОШЕНА : не оглашалась, её поглотила реплика "
+				       << done->supersededBy << "\n";
+			}
+		}
+
 		if (done) {
+			report << "    ставок    : " << done->bids.size() << "\n";
 			for (const auto& bid : done->bids) {
 				report << "        " << bid.ns << "  " << bid.confidence
 				       << "  " << CostName(bid.costClass)
@@ -405,7 +543,10 @@ int main(int argc, char** argv)
 		report << "\n";
 	}
 
-	Envoy::Scheduler::Get().Stop();
+	report << "=== придержание ===\n";
+	report << "придержано реплик: " << heldCount << " из " << history.size() << "\n";
+	report << "из них выброшено не оглашёнными: " << droppedCount
+	       << " - столько раз обрывок фразы НЕ ушёл никому\n\n";
 
 	const auto text = report.str();
 	if (!reportFile.empty()) {

@@ -68,6 +68,14 @@ namespace Envoy
 		SubscriptionRegistry::Get().SetActive(a_ns.c_str(), a_active);
 	}
 
+	void PapyrusApi::Declare(Tag, Str a_ns, std::int32_t a_costClass, bool a_revocable)
+	{
+		SubscriptionRegistry::Get().Declare(a_ns.c_str(), a_costClass, a_revocable);
+		SKSE::log::info("участник {} объявил себя: {}, {}", a_ns.c_str(),
+			a_costClass >= 1 ? "дорогой" : "обратимый",
+			a_revocable ? "умеет отменить" : "отменить не умеет");
+	}
+
 	void PapyrusApi::RegisterVocabulary(Tag, Str a_ns, std::vector<Str> a_phrases)
 	{
 		const auto phrases = ToStrings(a_phrases);
@@ -99,6 +107,12 @@ namespace Envoy
 	{
 		auto item = UtteranceStore::Get().Find(a_id);
 		return item ? item->margin : 0.0f;
+	}
+
+	float PapyrusApi::GetComplete(Tag, std::int32_t a_id)
+	{
+		auto item = UtteranceStore::Get().Find(a_id);
+		return item ? item->complete : 1.0f;
 	}
 
 	bool PapyrusApi::IsFinal(Tag, std::int32_t a_id)
@@ -323,6 +337,8 @@ namespace Envoy
 		a_vm->RegisterFunction("GetAlternatives", kScriptName, GetAlternatives);
 		a_vm->RegisterFunction("GetAlternativeScores", kScriptName, GetAlternativeScores);
 
+		a_vm->RegisterFunction("Declare", kScriptName, Declare);
+		a_vm->RegisterFunction("GetComplete", kScriptName, GetComplete);
 		a_vm->RegisterFunction("GetVocabularyMatch", kScriptName, GetVocabularyMatch);
 		a_vm->RegisterFunction("GetVocabularyScore", kScriptName, GetVocabularyScore);
 		a_vm->RegisterFunction("GetVocabularyMargin", kScriptName, GetVocabularyMargin);

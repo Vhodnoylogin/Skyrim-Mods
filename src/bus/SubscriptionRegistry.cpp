@@ -19,6 +19,15 @@ namespace Envoy
 		_entries[a_ns].topics = std::move(a_topics);
 	}
 
+	void SubscriptionRegistry::Declare(const std::string& a_ns, std::int32_t a_costClass,
+		bool a_revocable)
+	{
+		std::scoped_lock lock(_mutex);
+		auto& entry = _entries[a_ns];
+		entry.costClass = a_costClass;
+		entry.revocable = a_revocable;
+	}
+
 	void SubscriptionRegistry::Unsubscribe(const std::string& a_ns)
 	{
 		std::scoped_lock lock(_mutex);
@@ -49,21 +58,14 @@ namespace Envoy
 		_entries[a_ns].vocabulary.clear();
 	}
 
-	VocabularyMatch SubscriptionRegistry::Match(const std::string& a_ns, const std::string& a_text) const
+	VocabularyMatch SubscriptionRegistry::BestOf(const Entry& a_entry,
+		const std::u32string& a_text)
 	{
-		std::scoped_lock lock(_mutex);
 		VocabularyMatch best;
+		float           second = 0.0f;
 
-		auto it = _entries.find(a_ns);
-		if (it == _entries.end()) {
-			return best;
-		}
-
-		const auto text = Text::Normalize(a_text);
-		float second = 0.0f;
-
-		for (const auto& phrase : it->second.vocabulary) {
-			const auto score = Text::Similarity(text, phrase.normalized);
+		for (const auto& phrase : a_entry.vocabulary) {
+			const auto score = Text::Similarity(a_text, phrase.normalized);
 			if (score > best.score) {
 				second = best.score;
 				best.score = score;
@@ -75,6 +77,58 @@ namespace Envoy
 
 		best.margin = best.score - second;
 		return best;
+	}
+
+	bool SubscriptionRegistry::Hears(const Entry& a_entry, const std::string& a_topic)
+	{
+		for (const auto& mine : a_entry.topics) {
+			if (mine == "any" || mine == a_topic) {
+				return true;
+			}
+			// Канал приходит темой вида "channel:имя".
+			if (mine == "channel" && a_topic.rfind("channel:", 0) == 0) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	VocabularyMatch SubscriptionRegistry::Match(const std::string& a_ns, const std::string& a_text) const
+	{
+		std::scoped_lock lock(_mutex);
+
+		auto it = _entries.find(a_ns);
+		if (it == _entries.end()) {
+			return VocabularyMatch{};
+		}
+		return BestOf(it->second, Text::Normalize(a_text));
+	}
+
+	std::vector<Listener> SubscriptionRegistry::Audience(const std::string& a_topic,
+		const std::string& a_text) const
+	{
+		std::vector<Listener> out;
+		if (a_text.empty()) {
+			return out;
+		}
+
+		std::scoped_lock lock(_mutex);
+		const auto text = Text::Normalize(a_text);
+
+		for (const auto& [ns, entry] : _entries) {
+			if (!entry.active || entry.vocabulary.empty() || !Hears(entry, a_topic)) {
+				continue;
+			}
+			auto match = BestOf(entry, text);
+			if (match.score <= 0.0f) {
+				continue;
+			}
+			out.push_back(Listener{ ns, std::move(match), entry.costClass, entry.revocable });
+		}
+
+		std::sort(out.begin(), out.end(),
+			[](const Listener& a, const Listener& b) { return a.ns < b.ns; });
+		return out;
 	}
 
 	std::vector<std::string> SubscriptionRegistry::Namespaces() const
