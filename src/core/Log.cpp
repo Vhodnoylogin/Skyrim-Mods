@@ -1,6 +1,8 @@
 #include "Log.h"
 
 #include <spdlog/sinks/basic_file_sink.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
+#include <spdlog/spdlog.h>
 
 #include <memory>
 
@@ -24,24 +26,29 @@ namespace Envoy
 			}
 			return spdlog::level::info;
 		}
+
+		void Adopt(std::shared_ptr<spdlog::logger> a_logger, std::string_view a_level)
+		{
+			const auto level = ToLevel(a_level);
+			a_logger->set_level(level);
+			a_logger->flush_on(level);
+			spdlog::set_default_logger(std::move(a_logger));
+		}
 	}
 
-	void Log::Init(std::string_view a_level)
+	void Log::Init(std::string_view a_level, const std::filesystem::path& a_file)
 	{
-		auto path = SKSE::log::log_directory();
-		if (!path) {
+		if (a_file.empty()) {
+			ToConsole(a_level);
 			return;
 		}
 
-		*path /= PLUGIN_NAME;
-		*path += ".log";
+		auto sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(a_file.string(), true);
+		Adopt(std::make_shared<spdlog::logger>("global log", std::move(sink)), a_level);
+	}
 
-		auto sink = std::make_shared<spdlog::sinks::basic_file_sink_mt>(path->string(), true);
-		auto logger = std::make_shared<spdlog::logger>("global log", std::move(sink));
-
-		const auto level = ToLevel(a_level);
-		logger->set_level(level);
-		logger->flush_on(level);
-		spdlog::set_default_logger(std::move(logger));
+	void Log::ToConsole(std::string_view a_level)
+	{
+		Adopt(spdlog::stdout_color_mt("global log"), a_level);
 	}
 }

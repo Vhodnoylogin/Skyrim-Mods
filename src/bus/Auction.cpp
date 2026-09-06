@@ -2,11 +2,12 @@
 
 #include "TopicRouter.h"
 #include "UtteranceStore.h"
+#include "core/Events.h"
+#include "core/MainThread.h"
 #include "core/Scheduler.h"
 #include "core/Settings.h"
-#include "game/ModEventBus.h"
 
-#include <SKSE/SKSE.h>
+#include <spdlog/spdlog.h>
 
 #include <algorithm>
 #include <chrono>
@@ -220,13 +221,11 @@ namespace Envoy
 		// узнаёт по имени события, а для Envoy_Speech_Any - вызовом GetTopic.
 		// Текст всегда берётся из моста: точная модель может уточнить его уже
 		// после рассылки, и копия в событии разошлась бы с истиной.
-		ModEventBus::Send("Envoy_Speech_Any", "", static_cast<float>(a_id));
-		ModEventBus::Send(TopicRouter::EventName(item.topic), "", static_cast<float>(a_id));
+		Events::Send("Envoy_Speech_Any", "", static_cast<float>(a_id));
+		Events::Send(TopicRouter::EventName(item.topic), "", static_cast<float>(a_id));
 
 		Scheduler::Get().After(std::chrono::milliseconds(Settings::Get().bidWindowMs), [a_id]() {
-			if (auto* task = SKSE::GetTaskInterface()) {
-				task->AddTask([a_id]() { Auctioneer::Get().Settle(a_id); });
-			}
+			MainThread::Post([a_id]() { Auctioneer::Get().Settle(a_id); });
 		});
 	}
 
@@ -250,7 +249,7 @@ namespace Envoy
 		UtteranceStore::Get().SetOutcome(a_id, result.winners, result.denied,
 			outcome + " - " + result.reason);
 
-		SKSE::log::info("реплика {} тема {} ставок {} -> {} ({})", a_id, stored->topic,
+		spdlog::info("реплика {} тема {} ставок {} -> {} ({})", a_id, stored->topic,
 			stored->bids.size(), outcome, result.reason);
 
 		// По одной рассылке на исход, а не на получателя: имени в событии больше
@@ -259,11 +258,11 @@ namespace Envoy
 		// условия: Envoy_Award молчит, когда никто не выиграл, Envoy_Denied -
 		// когда никому не отказано, а Envoy_Settled звучит всегда.
 		if (!result.winners.empty()) {
-			ModEventBus::Send("Envoy_Award", "", static_cast<float>(a_id));
+			Events::Send("Envoy_Award", "", static_cast<float>(a_id));
 		}
 		if (!result.denied.empty()) {
-			ModEventBus::Send("Envoy_Denied", "", static_cast<float>(a_id));
+			Events::Send("Envoy_Denied", "", static_cast<float>(a_id));
 		}
-		ModEventBus::Send("Envoy_Settled", "", static_cast<float>(a_id));
+		Events::Send("Envoy_Settled", "", static_cast<float>(a_id));
 	}
 }
