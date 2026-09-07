@@ -35,18 +35,32 @@ namespace Voice
 		// СВОИ куски вобрал новый; мост понимает только свои. Перевод живёт здесь:
 		// адаптер - единственный, кто знает обе стороны, и держать эту карту
 		// где-либо ещё значило бы заставить одну из сторон знать про другую.
+		//
+		// Перевод - отдельный на модель. Счётчик номеров у каждой службы свой,
+		// и при двух моделях сразу - «быстрая плюс точная», ради чего адаптер
+		// и заведён, - их номера сталкивались бы в одной карте: запись одной
+		// службы перекрывала бы запись другой, а «старейшей» считалась бы
+		// та, чей счётчик меньше. Поглощение всегда ссылается на куски той же
+		// службы, так что чужую карту искать не надо.
 		class Correlation
 		{
 		public:
-			// Номера службы -> номера моста; неизвестные службе номера пропускаются.
-			std::vector<std::int32_t> Translate(const nlohmann::json& a_serviceIds)
+			// Номера службы -> номера моста. Неизвестный номер - это и есть
+			// «поглощение не случится», поэтому он не пропускается молча.
+			std::vector<std::int32_t> Translate(const std::string& a_modelId,
+				const nlohmann::json& a_serviceIds)
 			{
 				std::vector<std::int32_t> out;
 				std::scoped_lock          lock(_lock);
+				const auto& map = _serviceToBridge[a_modelId];
 				for (const auto& mark : a_serviceIds) {
-					const auto found = _serviceToBridge.find(mark.get<std::int32_t>());
-					if (found != _serviceToBridge.end()) {
+					const auto serviceId = mark.get<std::int32_t>();
+					const auto found = map.find(serviceId);
+					if (found != map.end()) {
 						out.push_back(found->second);
+					} else {
+						SKSE::log::warn("модель {}: кусок {} в переводе не найден - "
+						                "его поглощение до моста не дойдёт", a_modelId, serviceId);
 					}
 				}
 				return out;
@@ -64,10 +78,10 @@ namespace Voice
 				return 0;
 			}
 
-			void Remember(bool a_fast, std::int32_t a_serviceId, std::int32_t a_bridgeId)
+			void Remember(const Model& a_model, std::int32_t a_serviceId, std::int32_t a_bridgeId)
 			{
 				std::scoped_lock lock(_lock);
-				if (a_fast) {
+				if (a_model.fast) {
 					_lastPreliminary = a_bridgeId;
 					_lastPreliminaryAt = std::chrono::steady_clock::now();
 				}
@@ -78,11 +92,13 @@ namespace Voice
 				// случилось бы - мост огласил бы и куски, и фразу целиком. Поэтому
 				// выбрасываются только самые старые. Номера у службы сквозные и
 				// растут, так что в упорядоченной карте старейший всегда первый.
+				// Предел ноль и меньше - без предела.
 				if (a_serviceId != 0) {
-					_serviceToBridge[a_serviceId] = a_bridgeId;
-					const auto limit = static_cast<std::size_t>(std::max(0, Config::Get().idMapLimit));
-					while (_serviceToBridge.size() > limit) {
-						_serviceToBridge.erase(_serviceToBridge.begin());
+					auto& map = _serviceToBridge[a_model.id];
+					map[a_serviceId] = a_bridgeId;
+					const auto limit = Config::Get().idMapLimit;
+					while (limit > 0 && map.size() > static_cast<std::size_t>(limit)) {
+						map.erase(map.begin());
 					}
 				}
 			}
@@ -91,7 +107,8 @@ namespace Voice
 			std::mutex                            _lock;
 			std::int32_t                          _lastPreliminary{ 0 };
 			std::chrono::steady_clock::time_point _lastPreliminaryAt{};
-			std::map<std::int32_t, std::int32_t>  _serviceToBridge;
+			// Имя модели -> (номер службы -> номер моста).
+			std::map<std::string, std::map<std::int32_t, std::int32_t>> _serviceToBridge;
 		};
 
 		Correlation g_correlation;
@@ -128,12 +145,9 @@ namespace Voice
 			in.complete = a_item.value("complete", 1.0f);
 			in.lengthClass = a_item.value("lengthClass", 0);
 
-			// Номера служба даёт свои, сквозные; мост знает только свои. Перевод
-			// держим здесь: это ровно та работа, ради которой адаптер и существует -
-			// он один знает обе стороны.
 			std::vector<std::int32_t> swallowed;
 			if (a_item.contains("supersedes")) {
-				swallowed = g_correlation.Translate(a_item["supersedes"]);
+				swallowed = g_correlation.Translate(a_model.id, a_item["supersedes"]);
 			}
 			if (!swallowed.empty()) {
 				in.supersedes = swallowed.data();
@@ -151,7 +165,7 @@ namespace Voice
 				return;
 			}
 
-			g_correlation.Remember(a_model.fast, a_item.value("id", 0), id);
+			g_correlation.Remember(a_model, a_item.value("id", 0), id);
 
 			if (!swallowed.empty()) {
 				SKSE::log::info("реплика {} поглощает {} прежних, завершённость {:.2f}",
