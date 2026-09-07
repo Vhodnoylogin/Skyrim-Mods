@@ -7,6 +7,6 @@ ModHeader:
   Flags:
   - Small
   Author: CLAW
-  Description: Спутница CLAW и её звериный облик
+  Description: CLAW companion and her beast form
   MasterReferences:
   - Master: Skyrim.esm

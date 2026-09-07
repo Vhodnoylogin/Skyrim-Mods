@@ -14,7 +14,7 @@ Configuration:
   CalcMaxLevel: 60
 Name:
   TargetLanguage: English
-  Value: Ульва
+  Value: Ulva
 Template: 0A2C8E:Skyrim.esm
 Class: 013176:Skyrim.esm
 DefaultOutfit: 01DC10:Skyrim.esm
