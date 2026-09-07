@@ -89,11 +89,14 @@ class Raster:
         verts, tris, vcols = self._collect()
 
         basis = view.basis()
-        centre = 0.5 * (verts.min(axis=0) + verts.max(axis=0))
+        # Кадр: либо вся модель, либо сфера, на которую наведена камера, - решает ядро.
+        whole = 0.5 * (verts.min(axis=0) + verts.max(axis=0))
+        half = float(np.abs(((verts - whole) @ basis.T)[:, :2]).max())
+        centre, half = view.framing(whole, half)
         local = (verts - centre) @ basis.T          # x вправо, y вверх, z от зрителя
 
-        span = float(np.abs(local[:, :2]).max()) * 2.0
-        scale = (min(w, h) * 0.92) / max(span, 1e-3) * view.zoom
+        span = half * 2.0
+        scale = (min(w, h) * float(self.cfg["frameFill"])) / max(span, 1e-3) * view.zoom
         sx = local[:, 0] * scale + w * 0.5
         sy = h * 0.5 - local[:, 1] * scale
         depth = local[:, 2]
