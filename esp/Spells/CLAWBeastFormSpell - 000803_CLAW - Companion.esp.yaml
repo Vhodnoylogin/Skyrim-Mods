@@ -1,0 +1,15 @@
+FormKey: 000803:CLAW - Companion.esp
+EditorID: CLAWBeastFormSpell
+Name:
+  TargetLanguage: English
+  Value: Beast Form
+Type: Spell
+CastType: FireAndForget
+TargetType: Aimed
+EquipmentType: 013F44:Skyrim.esm
+Effects:
+- BaseEffect: 000802:CLAW - Companion.esp
+  Data:
+    Magnitude: 0
+    Area: 0
+    Duration: 1

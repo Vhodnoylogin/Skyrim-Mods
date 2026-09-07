@@ -1,0 +1,28 @@
+FormKey: 000802:CLAW - Companion.esp
+EditorID: CLAWBeastFormEffect
+Name:
+  TargetLanguage: English
+  Value: Beast Form
+Flags:
+- NoDeathDispel
+BaseCost: 0
+Archetype:
+  MutagenObjectType: MagicEffectArchetype
+  Type: Script
+CastType: FireAndForget
+TargetType: Aimed
+VirtualMachineAdapter:
+  Version: 5
+  ObjectFormat: 2
+  Scripts:
+  - Name: CLAWBeastFormEffect
+    Flags: Local
+    Properties:
+    - MutagenObjectType: ScriptObjectProperty
+      Name: BeastRace
+      Flags: Edited
+      Object: 0CDD84:Skyrim.esm
+    - MutagenObjectType: ScriptObjectProperty
+      Name: HumanRace
+      Flags: Edited
+      Object: 013746:Skyrim.esm
