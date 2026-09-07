@@ -1,0 +1,12 @@
+SpriggitSource:
+  PackageName: Spriggit.Yaml.Skyrim
+  Version: 0.41
+ModKey: CLAW - Companion.esp
+GameRelease: SkyrimSE
+ModHeader:
+  Flags:
+  - Small
+  Author: CLAW
+  Description: Спутница CLAW и её звериный облик
+  MasterReferences:
+  - Master: Skyrim.esm

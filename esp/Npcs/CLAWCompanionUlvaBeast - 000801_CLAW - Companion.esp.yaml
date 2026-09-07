@@ -1,0 +1,20 @@
+FormKey: 000801:CLAW - Companion.esp
+EditorID: CLAWCompanionUlvaBeast
+Configuration:
+  Flags:
+  - Female
+  - Essential
+  - Unique
+  Level:
+    MutagenObjectType: NpcLevel
+    Level: 10
+  CalcMinLevel: 5
+  CalcMaxLevel: 60
+Name:
+  TargetLanguage: English
+  Value: Ульва в облике зверя
+Race: 0CDD84:Skyrim.esm
+Class: 013176:Skyrim.esm
+Factions:
+- Faction: 05C84D:Skyrim.esm
+  Rank: 0
