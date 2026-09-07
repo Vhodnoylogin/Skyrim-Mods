@@ -1,12 +1,12 @@
 #include "AdapterHost.h"
 
 #include "bus/Auction.h"
-#include "core/MainThread.h"
 #include "bus/SubscriptionRegistry.h"
 #include "bus/UtteranceStore.h"
 #include "core/Config.h"
+#include "core/Events.h"
+#include "core/MainThread.h"
 #include "core/Settings.h"
-#include "game/ModEventBus.h"
 
 #include <SKSE/SKSE.h>
 
@@ -134,35 +134,44 @@ namespace Envoy
 		SKSE::log::info("адаптер ушёл: {}", a_id);
 	}
 
+	std::unordered_map<std::string, std::string> AdapterHost::Choose(
+		const std::unordered_map<std::string, Entry>&       a_adapters,
+		const std::unordered_map<std::string, std::string>& a_overrides)
+	{
+		// По каждой способности - один источник. Старшинство такое:
+		// принуждение из меню (SetSource), иначе имя из настроек
+		// (adapters.primary), иначе зарегистрировавшийся первым. Названный,
+		// но не умеющий этого или не пришедший, ничего не меняет: способность
+		// уходит первому по порядку, а не остаётся без источника. Принуждение
+		// заслоняет имя из настроек целиком, даже если само не сработало:
+		// игрок сказал своё слово в меню, и файл ему больше не указ.
+		const auto& settings = Settings::Get();
+
+		std::unordered_map<std::string, std::string> chosen;
+		for (const auto& [id, entry] : a_adapters) {
+			for (const auto& capability : entry.provides) {
+				const auto  forced = a_overrides.find(capability);
+				const auto& named = forced != a_overrides.end() ? forced->second
+				                                                : settings.PrimaryAdapter(capability);
+				auto current = chosen.find(capability);
+				if (current == chosen.end() || (!named.empty() && id == named)) {
+					chosen[capability] = id;
+					continue;
+				}
+				if (current->second != named &&
+					entry.order < a_adapters.at(current->second).order) {
+					chosen[capability] = id;
+				}
+			}
+		}
+		return chosen;
+	}
+
 	std::vector<AdapterHost::Outgoing> AdapterHost::RecomputeSources()
 	{
 		std::vector<Outgoing> pending;
 
-		const auto& settings = Settings::Get();
-
-		std::unordered_map<std::string, std::string> chosen;
-		for (const auto& entry : _adapters) {
-			for (const auto& capability : entry.second.provides) {
-				auto forced = _overrides.find(capability);
-				const bool forcedHere = forced != _overrides.end() && forced->second == entry.first;
-				const bool namedHere = forcedHere ||
-				                       (forced == _overrides.end() &&
-				                        settings.PrimaryAdapter(capability) == entry.first);
-
-				auto current = chosen.find(capability);
-				if (current == chosen.end() || namedHere) {
-					chosen[capability] = entry.first;
-					continue;
-				}
-
-				const bool namedRival = (forced != _overrides.end() && forced->second == current->second) ||
-				                        (forced == _overrides.end() &&
-				                         settings.PrimaryAdapter(capability) == current->second);
-				if (!namedRival && entry.second.order < _adapters.at(current->second).order) {
-					chosen[capability] = entry.first;
-				}
-			}
-		}
+		const auto chosen = Choose(_adapters, _overrides);
 		_sources = chosen;
 
 		for (auto& entry : _adapters) {
@@ -460,11 +469,11 @@ namespace Envoy
 		SKSE::log::info("ответ {} от адаптера {}: {}", a_requestId, Safe(a_adapterId),
 			a_ok ? "успех" : "неудача");
 
-		if (auto* task = SKSE::GetTaskInterface()) {
-			task->AddTask([a_requestId]() {
-				ModEventBus::Send("Envoy_Answer", "", static_cast<float>(a_requestId));
-			});
-		}
+		// Через швы ядра, а не напрямую к SKSE: у шва есть запасной путь
+		// с предупреждением, у прямого вызова - молчаливая потеря.
+		MainThread::Post([a_requestId]() {
+			Events::Send("Envoy_Answer", "", static_cast<float>(a_requestId));
+		});
 	}
 
 	void AdapterHost::PushSpeechDone(const char* a_adapterId, std::int32_t a_speechId, bool a_ok,
@@ -477,10 +486,8 @@ namespace Envoy
 		}
 		SKSE::log::info("озвучка {} у адаптера {}: {}", a_speechId, Safe(a_adapterId), how);
 
-		if (auto* task = SKSE::GetTaskInterface()) {
-			task->AddTask([a_speechId]() {
-				ModEventBus::Send("Envoy_SpeechDone", "", static_cast<float>(a_speechId));
-			});
-		}
+		MainThread::Post([a_speechId]() {
+			Events::Send("Envoy_SpeechDone", "", static_cast<float>(a_speechId));
+		});
 	}
 }

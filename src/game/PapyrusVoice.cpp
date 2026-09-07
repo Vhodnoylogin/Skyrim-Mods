@@ -1,6 +1,7 @@
 #include "PapyrusApi.h"
 
-#include "ModEventBus.h"
+#include "core/Events.h"
+#include "core/MainThread.h"
 #include "core/Scheduler.h"
 #include "wire/AdapterHost.h"
 
@@ -82,13 +83,11 @@ namespace Envoy
 		// строке, где просит самопроверку, и мгновенная рассылка обогнала бы
 		// его подписку - получилось бы ложное "не доходит". Две секунды с запасом.
 		Scheduler::Get().After(std::chrono::seconds(2), [token]() {
-			if (auto* task = SKSE::GetTaskInterface()) {
-				task->AddTask([token]() {
-					g_pingSentAt.store(std::chrono::steady_clock::now());
-					SKSE::log::info("самопроверка рассылки: посылаю Envoy_Ping, метка {}", token);
-					ModEventBus::Send("Envoy_Ping", "", static_cast<float>(token));
-				});
-			}
+			MainThread::Post([token]() {
+				g_pingSentAt.store(std::chrono::steady_clock::now());
+				SKSE::log::info("самопроверка рассылки: посылаю Envoy_Ping, метка {}", token);
+				Events::Send("Envoy_Ping", "", static_cast<float>(token));
+			});
 		});
 
 		// Приговор выносится отдельным сроком, а не сном в том же потоке:
