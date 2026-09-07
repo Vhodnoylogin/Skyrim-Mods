@@ -32,7 +32,7 @@ Envoy состоит из трёх связанных, но **отдельных
 | Модуль | Папка | Мод в сборке |
 |---|---|---|
 | **мост** — корень этого дерева | `.` | `Envoy Framework` |
-| тестовый адаптер | `adaptersoice\` | `Envoy Framework - Voice Adapter` |
+| тестовый адаптер | `adapters\voice\` | `Envoy Framework - Voice Adapter` |
 | тестовый слушатель | `subscribers\demo\` | `Envoy Framework - Demo Subscriber` |
 
 Общее у них одно — **контракт**, и он между модулями не копируется. Мост кладёт его папкой
