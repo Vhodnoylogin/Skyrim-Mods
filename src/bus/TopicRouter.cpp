@@ -1,8 +1,8 @@
 #include "TopicRouter.h"
 
 #include "Utterance.h"
-#include "core/Config.h"
 #include "core/GameState.h"
+#include "core/Settings.h"
 
 namespace Envoy
 {
@@ -10,12 +10,7 @@ namespace Envoy
 	{
 		bool DialogueOpen()
 		{
-			const auto names = Config::Get().Value<std::vector<std::string>>("/topics/dialogueMenuNames");
-			if (!names) {
-				return false;
-			}
-
-			for (const auto& name : *names) {
+			for (const auto& name : Settings::Get().dialogueMenuNames) {
 				if (GameState::Get().IsMenuOpen(name)) {
 					return true;
 				}
@@ -26,12 +21,7 @@ namespace Envoy
 
 	std::string TopicRouter::Pick(const Utterance& a_utterance)
 	{
-		const auto order = Config::Get().Value<std::vector<std::string>>("/topics/order");
-		if (!order) {
-			return "world";
-		}
-
-		for (const auto& name : *order) {
+		for (const auto& name : Settings::Get().topicOrder) {
 			if (name == "channel") {
 				if (!a_utterance.channel.empty()) {
 					return "channel:" + a_utterance.channel;

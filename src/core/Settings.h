@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace Envoy
@@ -13,6 +14,13 @@ namespace Envoy
 	// а в бою берутся готовые поля. До этого порядок участников извлекался из
 	// JSON на каждое сравнение внутри сортировки ставок, с выделением вектора
 	// строк на каждое; пороги склеивали указатель из кусков на каждую ставку.
+	// Порядок тем и имена окон диалога точно так же доставались указателем
+	// на каждую реплику - теперь и они здесь.
+	//
+	// Значение в инициализаторе поля - единственное запасное в коде: на него
+	// падает Read, если ключа в файле нет. Эталон живёт в envoy.default.json,
+	// и в норме сюда попадает именно он; повторять число ещё и в Read нельзя -
+	// три копии одного умолчания разойдутся при первой правке.
 	class Settings
 	{
 	public:
@@ -37,6 +45,16 @@ namespace Envoy
 		bool         sharedWinsTie{ true };
 		double       utteranceTtlSec{ 30.0 };
 		std::size_t  utteranceMaxStored{ 64 };
+
+		// В каком порядке пробовать темы и какие окна считать диалогом.
+		// Порядок - правило, а не перечень: канал раньше боя, потому что явное
+		// обращение в канал старше обстановки, в которой оно сделано.
+		std::vector<std::string> topicOrder{ "channel", "dialogue", "menu", "combat", "world" };
+		std::vector<std::string> dialogueMenuNames{ "Dialogue Menu" };
+
+		// Кто назначен источником по способности прямо в настройках; пусто -
+		// источник выбирается по порядку регистрации.
+		std::string PrimaryAdapter(const std::string& a_capability) const;
 
 		// Класс цены: 0 - обратимое действие, 1 - дорогое.
 		float MinConfidence(std::int32_t a_costClass) const;
@@ -68,6 +86,7 @@ namespace Envoy
 		// чем мы узнаем то, ради чего держали.
 		std::int32_t             _holdCeilingMs[3]{ 2500, 1500, 800 };
 		std::vector<std::string> _priority;
+		std::unordered_map<std::string, std::string> _primary;
 		bool                     _read{ false };
 	};
 }

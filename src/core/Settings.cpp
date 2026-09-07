@@ -53,6 +53,12 @@ namespace Envoy
 		return _holdCeilingMs[index];
 	}
 
+	std::string Settings::PrimaryAdapter(const std::string& a_capability) const
+	{
+		const auto it = _primary.find(a_capability);
+		return it == _primary.end() ? std::string{} : it->second;
+	}
+
 	std::size_t Settings::PriorityIndex(const std::string& a_ns) const
 	{
 		const auto it = std::find(_priority.begin(), _priority.end(), a_ns);
@@ -64,24 +70,30 @@ namespace Envoy
 	{
 		const auto& cfg = Config::Get();
 
-		bidWindowMs        = cfg.Value<std::int32_t>("/auction/bidWindowMs").value_or(750);
-		minUtteranceScore  = cfg.Value<float>("/auction/minUtteranceScore").value_or(0.4f);
-		sharedWinsTie      = cfg.Value<bool>("/auction/sharedWinsTie").value_or(true);
-		_minConfidence[0]  = cfg.Value<float>("/auction/minConfidence/reversible").value_or(0.55f);
-		_minConfidence[1]  = cfg.Value<float>("/auction/minConfidence/costly").value_or(0.75f);
-		_minMargin[0]      = cfg.Value<float>("/auction/minMargin/reversible").value_or(0.05f);
-		_minMargin[1]      = cfg.Value<float>("/auction/minMargin/costly").value_or(0.15f);
-		_priority          = cfg.Value<std::vector<std::string>>("/auction/priority")
-		                        .value_or(std::vector<std::string>{});
-		holdTolerance      = cfg.Value<float>("/auction/hold/tolerance").value_or(0.27f);
-		_holdWeight[0]     = cfg.Value<float>("/auction/hold/weight/revocable").value_or(0.1f);
-		_holdWeight[1]     = cfg.Value<float>("/auction/hold/weight/plain").value_or(0.4f);
-		_holdWeight[2]     = cfg.Value<float>("/auction/hold/weight/costly").value_or(1.0f);
-		_holdCeilingMs[0]  = cfg.Value<std::int32_t>("/auction/hold/ceilingMs/short").value_or(2500);
-		_holdCeilingMs[1]  = cfg.Value<std::int32_t>("/auction/hold/ceilingMs/middle").value_or(1500);
-		_holdCeilingMs[2]  = cfg.Value<std::int32_t>("/auction/hold/ceilingMs/long").value_or(800);
-		utteranceTtlSec    = cfg.Value<double>("/utterance/ttlSec").value_or(30.0);
-		utteranceMaxStored = cfg.Value<std::size_t>("/utterance/maxStored").value_or(64);
+		// value_or(поле) - запасное значение берётся из инициализатора поля,
+		// и второй копии числа здесь нет.
+		bidWindowMs        = cfg.Value<std::int32_t>("/auction/bidWindowMs").value_or(bidWindowMs);
+		minUtteranceScore  = cfg.Value<float>("/auction/minUtteranceScore").value_or(minUtteranceScore);
+		sharedWinsTie      = cfg.Value<bool>("/auction/sharedWinsTie").value_or(sharedWinsTie);
+		_minConfidence[0]  = cfg.Value<float>("/auction/minConfidence/reversible").value_or(_minConfidence[0]);
+		_minConfidence[1]  = cfg.Value<float>("/auction/minConfidence/costly").value_or(_minConfidence[1]);
+		_minMargin[0]      = cfg.Value<float>("/auction/minMargin/reversible").value_or(_minMargin[0]);
+		_minMargin[1]      = cfg.Value<float>("/auction/minMargin/costly").value_or(_minMargin[1]);
+		_priority          = cfg.Value<std::vector<std::string>>("/auction/priority").value_or(_priority);
+		holdTolerance      = cfg.Value<float>("/auction/hold/tolerance").value_or(holdTolerance);
+		_holdWeight[0]     = cfg.Value<float>("/auction/hold/weight/revocable").value_or(_holdWeight[0]);
+		_holdWeight[1]     = cfg.Value<float>("/auction/hold/weight/plain").value_or(_holdWeight[1]);
+		_holdWeight[2]     = cfg.Value<float>("/auction/hold/weight/costly").value_or(_holdWeight[2]);
+		_holdCeilingMs[0]  = cfg.Value<std::int32_t>("/auction/hold/ceilingMs/short").value_or(_holdCeilingMs[0]);
+		_holdCeilingMs[1]  = cfg.Value<std::int32_t>("/auction/hold/ceilingMs/middle").value_or(_holdCeilingMs[1]);
+		_holdCeilingMs[2]  = cfg.Value<std::int32_t>("/auction/hold/ceilingMs/long").value_or(_holdCeilingMs[2]);
+		utteranceTtlSec    = cfg.Value<double>("/utterance/ttlSec").value_or(utteranceTtlSec);
+		utteranceMaxStored = cfg.Value<std::size_t>("/utterance/maxStored").value_or(utteranceMaxStored);
+		topicOrder         = cfg.Value<std::vector<std::string>>("/topics/order").value_or(topicOrder);
+		dialogueMenuNames  = cfg.Value<std::vector<std::string>>("/topics/dialogueMenuNames")
+		                        .value_or(dialogueMenuNames);
+		_primary           = cfg.Value<std::unordered_map<std::string, std::string>>("/adapters/primary")
+		                        .value_or(_primary);
 
 		_read = true;
 

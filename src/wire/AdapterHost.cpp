@@ -138,11 +138,7 @@ namespace Envoy
 	{
 		std::vector<Outgoing> pending;
 
-		const auto& raw = Config::Get().Raw();
-		nlohmann::json named = nlohmann::json::object();
-		if (raw.contains("adapters") && raw["adapters"].contains("primary")) {
-			named = raw["adapters"]["primary"];
-		}
+		const auto& settings = Settings::Get();
 
 		std::unordered_map<std::string, std::string> chosen;
 		for (const auto& entry : _adapters) {
@@ -150,8 +146,8 @@ namespace Envoy
 				auto forced = _overrides.find(capability);
 				const bool forcedHere = forced != _overrides.end() && forced->second == entry.first;
 				const bool namedHere = forcedHere ||
-				                       (forced == _overrides.end() && named.contains(capability) &&
-				                        named[capability].get<std::string>() == entry.first);
+				                       (forced == _overrides.end() &&
+				                        settings.PrimaryAdapter(capability) == entry.first);
 
 				auto current = chosen.find(capability);
 				if (current == chosen.end() || namedHere) {
@@ -160,8 +156,8 @@ namespace Envoy
 				}
 
 				const bool namedRival = (forced != _overrides.end() && forced->second == current->second) ||
-				                        (forced == _overrides.end() && named.contains(capability) &&
-				                         named[capability].get<std::string>() == current->second);
+				                        (forced == _overrides.end() &&
+				                         settings.PrimaryAdapter(capability) == current->second);
 				if (!namedRival && entry.second.order < _adapters.at(current->second).order) {
 					chosen[capability] = entry.first;
 				}
