@@ -11,11 +11,12 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
+#include <map>
 #include <mutex>
 #include <string>
 #include <thread>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -71,21 +72,26 @@ namespace Voice
 					_lastPreliminaryAt = std::chrono::steady_clock::now();
 				}
 				// Запоминаем перевод, чтобы следующий кусок мог назвать поглощённые.
-				// Карта растёт на реплику за ход разговора; чистим её по тому же
-				// сроку, по которому мост забывает сами реплики.
+				// Карта растёт на реплику за кусок речи, и предел ей нужен. Но
+				// сбрасывать её целиком нельзя: длинный кусок, пришедший сразу после
+				// сброса, не нашёл бы своих коротких, и поглощение молча не
+				// случилось бы - мост огласил бы и куски, и фразу целиком. Поэтому
+				// выбрасываются только самые старые. Номера у службы сквозные и
+				// растут, так что в упорядоченной карте старейший всегда первый.
 				if (a_serviceId != 0) {
 					_serviceToBridge[a_serviceId] = a_bridgeId;
-					if (_serviceToBridge.size() > 256) {
-						_serviceToBridge.clear();
+					const auto limit = static_cast<std::size_t>(std::max(0, Config::Get().idMapLimit));
+					while (_serviceToBridge.size() > limit) {
+						_serviceToBridge.erase(_serviceToBridge.begin());
 					}
 				}
 			}
 
 		private:
-			std::mutex                                     _lock;
-			std::int32_t                                   _lastPreliminary{ 0 };
-			std::chrono::steady_clock::time_point          _lastPreliminaryAt{};
-			std::unordered_map<std::int32_t, std::int32_t> _serviceToBridge;
+			std::mutex                            _lock;
+			std::int32_t                          _lastPreliminary{ 0 };
+			std::chrono::steady_clock::time_point _lastPreliminaryAt{};
+			std::map<std::int32_t, std::int32_t>  _serviceToBridge;
 		};
 
 		Correlation g_correlation;

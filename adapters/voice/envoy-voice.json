@@ -51,6 +51,7 @@
   "healthTimeoutSec": 2,
   "listenGraceSec": 10,
   "idleSleepMs": 1000,
+  "idMapLimit": 256,
   "speakModel": "accurate",
   "sayTimeoutSec": 120
 }

@@ -59,6 +59,7 @@ namespace Voice
 		int listenGraceSec{ 10 };    // насколько дольше срока службы ждать ответ /listen
 		int idleSleepMs{ 1000 };     // шаг ожидания, пока мост держит нас в запасе
 		int sayTimeoutSec{ 120 };    // сколько ждать ответа /say
+		int idMapLimit{ 256 };       // сколько последних переводов "номер службы -> номер моста" помнить
 
 	private:
 		Config() = default;
