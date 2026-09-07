@@ -233,7 +233,9 @@ namespace Envoy
 			}
 		}
 
-		for (std::int32_t i = 0; i < a_in.altCount; ++i) {
+		// Число без массива - ошибка адаптера, а не повод уронить игру:
+		// оценки без текстов уже пропускались, тексты без оценок - нет.
+		for (std::int32_t i = 0; a_in.altText && i < a_in.altCount; ++i) {
 			utterance.alternatives.push_back({ Safe(a_in.altText[i]),
 				a_in.altScore ? a_in.altScore[i] : 0.0f });
 		}
