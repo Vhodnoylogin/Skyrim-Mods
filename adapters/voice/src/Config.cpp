@@ -86,6 +86,7 @@ namespace Voice
 			self.listenGraceSec = doc.value("listenGraceSec", self.listenGraceSec);
 			self.idleSleepMs = doc.value("idleSleepMs", self.idleSleepMs);
 			self.sayTimeoutSec = doc.value("sayTimeoutSec", self.sayTimeoutSec);
+			self.idMapLimit = doc.value("idMapLimit", self.idMapLimit);
 		} catch (const std::exception& e) {
 			SKSE::log::error("настройки не разобраны: {}", e.what());
 			return false;
