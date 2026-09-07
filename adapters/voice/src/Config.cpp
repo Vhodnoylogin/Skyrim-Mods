@@ -33,8 +33,14 @@ namespace Voice
 		{
 			Model out;
 			out.id = a_doc.value("id", out.id);
-			out.fast = a_doc.value("class", std::string{}) == "fast";
 			out.enabled = a_doc.value("enabled", out.enabled);
+			// У выключенной модели дальше не читаем: кривое поле в записи,
+			// которой не пользуются, не должно останавливать адаптер целиком.
+			// Так было и прежде, когда поля читались в момент использования.
+			if (!out.enabled) {
+				return out;
+			}
+			out.fast = a_doc.value("class", std::string{}) == "fast";
 			out.url = a_doc.value("url", out.url);
 			out.language = a_doc.value("language", out.language);
 			out.listenTimeoutSec = a_doc.value("listenTimeoutSec", out.listenTimeoutSec);
