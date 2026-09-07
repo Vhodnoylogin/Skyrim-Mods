@@ -2,19 +2,11 @@
 
 #include "envoy-adapter.h"
 
-#include "bus/StateStore.h"
 #include "bus/SubscriptionRegistry.h"
-#include <atomic>
-#include <chrono>
-#include <thread>
-
-#include "ModEventBus.h"
-#include "bus/Auction.h"
 #include "bus/UtteranceStore.h"
-#include "core/Config.h"
+#include "wire/AdapterHost.h"
 
 #include <algorithm>
-#include "wire/AdapterHost.h"
 
 namespace Envoy
 {

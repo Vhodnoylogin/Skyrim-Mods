@@ -1,6 +1,6 @@
 #include "GameLoadWatch.h"
 
-#include "ModEventBus.h"
+#include "core/Events.h"
 #include "envoy-adapter.h"
 
 #include <SKSE/SKSE.h>
@@ -29,7 +29,7 @@ namespace Envoy
 	RE::BSEventNotifyControl GameLoadWatch::ProcessEvent(const RE::TESLoadGameEvent*,
 		RE::BSTEventSource<RE::TESLoadGameEvent>*)
 	{
-		ModEventBus::Send("Envoy_Ready", "", static_cast<float>(EnvoyAPI::kInterfaceVersion));
+		Events::Send("Envoy_Ready", "", static_cast<float>(EnvoyAPI::kInterfaceVersion));
 		SKSE::log::info("игра загружена: зову участников объявиться заново");
 		return RE::BSEventNotifyControl::kContinue;
 	}

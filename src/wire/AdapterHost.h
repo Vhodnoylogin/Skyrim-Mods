@@ -89,8 +89,17 @@ namespace Envoy
 
 		static void Dispatch(const std::vector<Outgoing>& a_jobs);
 
-		// Возвращает задания вместо того, чтобы их рассылать: вызывающий
-		// обязан отпустить замок и только потом звать Dispatch.
+		// Правило «кто источник по способности», отделённое от последствий.
+		// Чистая функция от состава адаптеров, принуждений из меню и имён из
+		// настроек: её можно прочитать и проверить, не думая о замках,
+		// заданиях и журнале. Прежде правило было переплетено с ними.
+		static std::unordered_map<std::string, std::string> Choose(
+			const std::unordered_map<std::string, Entry>&       a_adapters,
+			const std::unordered_map<std::string, std::string>& a_overrides);
+
+		// Применяет Choose: переключает активность и возвращает задания вместо
+		// того, чтобы их рассылать. Вызывающий обязан отпустить замок и только
+		// потом звать Dispatch.
 		[[nodiscard]] std::vector<Outgoing> RecomputeSources();
 
 		mutable std::mutex                           _mutex;

@@ -63,9 +63,10 @@ namespace Envoy
 		static Str              GetOutcome(Tag, std::int32_t a_id);
 		static Str              GetAnswer(Tag, std::int32_t a_requestId);
 
-		// Самопроверка рассылки. SelfTest посылает Envoy_Ping, Pong - ответ скрипта.
+		// Кто объявился и на какие темы - чтобы участник мог показать это игроку.
 		static std::vector<Str> GetNamespaces(Tag);
 		static std::vector<Str> GetTopicsOf(Tag, Str a_ns);
+		// Самопроверка рассылки. SelfTest посылает Envoy_Ping, Pong - ответ скрипта.
 		static void             SelfTest(Tag);
 		static void             Pong(Tag, std::int32_t a_token);
 		static Str              GetSpeechResult(Tag, std::int32_t a_speechId);
