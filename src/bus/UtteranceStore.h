@@ -3,6 +3,7 @@
 #include "Utterance.h"
 
 #include <chrono>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
@@ -30,7 +31,7 @@ namespace Envoy
 
 		bool AddBid(std::int32_t a_id, BidRecord a_bid);
 		bool SetOutcome(std::int32_t a_id, std::vector<std::string> a_winners,
-			std::unordered_map<std::string, std::string> a_denied, std::string a_outcome);
+			std::map<std::string, std::string> a_denied, std::string a_outcome);
 
 		void        Prune(double a_ttlSec, std::size_t a_maxStored);
 		// Уборка по двум дешёвым условиям вместо сметания на каждую реплику:

@@ -3,8 +3,8 @@
 #include "Utterance.h"
 
 #include <cstdint>
+#include <map>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 namespace Envoy
@@ -24,9 +24,9 @@ namespace Envoy
 	public:
 		struct Result
 		{
-			std::vector<std::string>                     winners;  // пусто - не делает никто
-			std::unordered_map<std::string, std::string> denied;   // кому отказано и почему
-			std::string                                  reason;
+			std::vector<std::string>           winners;  // пусто - не делает никто
+			std::map<std::string, std::string> denied;   // кому отказано и почему
+			std::string                        reason;
 		};
 
 		explicit Auction(const Utterance& a_utterance) :

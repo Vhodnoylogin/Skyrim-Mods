@@ -2,8 +2,8 @@
 
 #include <chrono>
 #include <cstdint>
+#include <map>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 namespace Envoy
@@ -71,11 +71,15 @@ namespace Envoy
 		std::int32_t             sliceId{ 0 };
 		// Номер длинной реплики, вобравшей эту; 0 - пока не вобрана.
 		std::int32_t             supersededBy{ 0 };
-		std::vector<BidRecord>                       bids;
-		std::vector<std::string>                     winners;
-		std::unordered_map<std::string, std::string> denied;   // кому отказано и почему
-		std::string                                  outcome;  // текст итога для наблюдателя
-		bool                                         awarded{ false };
+		std::vector<BidRecord>             bids;
+		std::vector<std::string>           winners;
+		// Кому отказано и почему. Упорядоченная карта нарочно: порядок обхода
+		// хеш-карты зависит от порядка вставки, и любая перестановка кода,
+		// не меняющая смысла, перемешивала бы строки отказов в журнале и в отчёте
+		// хоста - сетка безопасности срабатывала бы ложно.
+		std::map<std::string, std::string> denied;
+		std::string                        outcome;  // текст итога для наблюдателя
+		bool                               awarded{ false };
 
 		std::chrono::steady_clock::time_point born{ std::chrono::steady_clock::now() };
 		// Когда реплику огласили подписчикам. Отметка нужна и после итога:

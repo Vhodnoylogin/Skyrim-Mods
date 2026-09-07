@@ -85,7 +85,7 @@ namespace Envoy
 	}
 
 	bool UtteranceStore::SetOutcome(std::int32_t a_id, std::vector<std::string> a_winners,
-		std::unordered_map<std::string, std::string> a_denied, std::string a_outcome)
+		std::map<std::string, std::string> a_denied, std::string a_outcome)
 	{
 		std::scoped_lock lock(_mutex);
 		return Mutate(a_id, [&](Utterance& item) {
