@@ -38,12 +38,13 @@ namespace Envoy
 		return result;
 	}
 
-	Auction::Result Auction::Exclusive(const std::string& a_ns, const std::string& a_reason) const
+	Auction::Result Auction::Exclusive(const std::string& a_ns, const std::string& a_reason,
+		const std::vector<BidRecord>& a_scope) const
 	{
 		Result result;
 		result.winners.push_back(a_ns);
 		result.reason = a_reason;
-		for (const auto& bid : _utterance.bids) {
+		for (const auto& bid : a_scope) {
 			if (bid.ns != a_ns) {
 				result.denied[bid.ns] = a_reason;
 			}
@@ -109,7 +110,8 @@ namespace Envoy
 			}
 		}
 		if (best != Settings::kNoPriority && count == 1) {
-			return Exclusive(chosen->ns, "ставки неразличимы, спор решён порядком из настроек");
+			return Exclusive(chosen->ns, "ставки неразличимы, спор решён порядком из настроек",
+				a_survivors);
 		}
 
 		// Порядок молчит. Дальше всё зависит от того, об одном ли спор. Разные
@@ -118,7 +120,7 @@ namespace Envoy
 		// по ней хоть что-нибудь значит угадывать.
 		if (!SameCommand(tied)) {
 			result.reason = "фразу поняли по-разному и одинаково уверенно - реплика двусмысленна";
-			for (const auto& bid : tied) {
+			for (const auto& bid : a_survivors) {
 				result.denied[bid.ns] = result.reason;
 			}
 			return result;
@@ -142,7 +144,7 @@ namespace Envoy
 		}
 
 		result.reason = "одну команду просят несколько, и все требуют её себе - не делает никто";
-		for (const auto& bid : tied) {
+		for (const auto& bid : a_survivors) {
 			result.denied[bid.ns] = result.reason;
 		}
 		return result;
@@ -185,33 +187,26 @@ namespace Envoy
 
 		const auto top = survivors.front();
 
-		if (survivors.size() > 1) {
-			const auto need = Settings::Get().MinMargin(top.costClass);
-			if (top.confidence - survivors[1].confidence < need) {
-				auto tie = BreakTie(survivors, need);
-				tie.denied.insert(result.denied.begin(), result.denied.end());
-				return tie;
-			}
+		// Дальше спорят только выжившие, и вердикт касается только их.
+		Result verdict;
+		const auto need = Settings::Get().MinMargin(top.costClass);
+		if (survivors.size() > 1 && top.confidence - survivors[1].confidence < need) {
+			verdict = BreakTie(survivors, need);
+		} else if (top.greedy) {
+			verdict = Exclusive(top.ns, "победитель жадный - результат только ему", survivors);
+		} else {
+			verdict = Share(survivors, top);
+			verdict.reason = verdict.winners.size() > 1
+			                     ? "победитель делится - результат достался всем, кто узнал ту же команду"
+			                     : "победитель делится, делить не с кем";
 		}
 
-		if (top.greedy) {
-			auto exclusive = Exclusive(top.ns, "победитель жадный - результат только ему");
-			// Отказ по порогу точнее: он называет причину, по которой участник
-			// выбыл РАНЬШЕ, чем начался спор. Поэтому он и перекрывает общую.
-			for (const auto& [who, why] : result.denied) {
-				exclusive.denied[who] = why;
-			}
-			return exclusive;
-		}
-
-		auto shared = Share(survivors, top);
-		shared.reason = shared.winners.size() > 1
-		                    ? "победитель делится - результат достался всем, кто узнал ту же команду"
-		                    : "победитель делится, делить не с кем";
-		for (const auto& [who, why] : result.denied) {
-			shared.denied[who] = why;
-		}
-		return shared;
+		// Выбывшие по порогу в круг спора не входили, и в вердикте их нет:
+		// их причина записана раньше и просто добавляется. Так слияние одно
+		// на все исходы; прежде их было два с разной семантикой, и в ветке
+		// порядка выбывший по порогу получал чужую причину.
+		verdict.denied.insert(result.denied.begin(), result.denied.end());
+		return verdict;
 	}
 
 	Auctioneer& Auctioneer::Get()
