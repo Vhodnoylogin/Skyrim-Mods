@@ -22,6 +22,7 @@
         ],
         "workingDir": "D:/Skyrim VR Modding/Claude Code/Skyrim VR/dev/voice",
         "waitSec": 240,
+        "pollSec": 1,
         "parentPidArg": "--parent-pid"
       }
     },
@@ -40,11 +41,16 @@
         "args": [],
         "workingDir": "",
         "waitSec": 60,
+        "pollSec": 1,
         "parentPidArg": ""
       }
     }
   ],
   "correlateMs": 2500,
   "retryDelayMs": 2000,
-  "speakModel": "accurate"
+  "healthTimeoutSec": 2,
+  "listenGraceSec": 10,
+  "idleSleepMs": 1000,
+  "speakModel": "accurate",
+  "sayTimeoutSec": 120
 }
