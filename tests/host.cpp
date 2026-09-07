@@ -90,22 +90,6 @@ namespace
 		// фразу сразу: он способен исправиться. Неотзывчивому - только когда
 		// уверен, что фраза кончилась.
 		bool                     revocable{ false };
-
-		// Дойдёт ли до него оглашение этой темы. "any" - слышит всё; так
-		// объявляют себя наблюдатели, которым важно видеть каждую реплику.
-		bool Hears(const std::string& a_topic) const
-		{
-			for (const auto& mine : topics) {
-				if (mine == "any" || mine == a_topic) {
-					return true;
-				}
-				// Канал приходит темой вида "channel:имя".
-				if (mine == "channel" && a_topic.rfind("channel:", 0) == 0) {
-					return true;
-				}
-			}
-			return false;
-		}
 	};
 
 	std::string CostName(std::int32_t a_class)
@@ -278,33 +262,33 @@ int main(int argc, char** argv)
 	// снимок держим у себя, а не требуем от хранилища быть тем, чем оно не является.
 	std::map<std::int32_t, Envoy::Utterance> snapshot;
 
-	// Ставки вместо скриптов Papyrus. Уверенность - произведение двух разных
-	// величин: насколько хорошо реплику расслышали и насколько она похожа
-	// на объявленную фразу. Одного совпадения со словарём мало: невнятно
-	// сказанная команда совпадает с ним ровно так же, как чётко сказанная.
-	// Настоящий подписчик считает уверенность сам; здесь взято простейшее
-	// защитимое правило, потому что поведение подписчиков проверку не занимает.
-	auto placeBids = [&subs](std::int32_t a_id, const std::string& a_text, float a_score,
+	// Ставки вместо скриптов Papyrus. Кто в зале - подписчики темы, чьи словари
+	// узнали фразу, - отвечает сам реестр, тем же вопросом, которым пользуется
+	// придержание; своей копии правила «слышит ли подписчик тему» у хоста нет.
+	// Уверенность - та же оценка, по которой придержание судит, дошёл бы
+	// подписчик до порога. Настоящий подписчик считает её сам; здесь взято
+	// простейшее защитимое правило, потому что поведение подписчиков проверку
+	// не занимает. Жадность реестру не объявляют - это свойство ставки, а не
+	// подписки, - поэтому её хост берёт из своего описания подписчика.
+	std::map<std::string, const TestSubscriber*> byNs;
+	for (const auto& sub : subs) {
+		byNs[sub.ns] = &sub;
+	}
+	auto placeBids = [&byNs](std::int32_t a_id, const std::string& a_text, float a_score,
 		                 const std::string& a_topic) {
-		std::size_t placed = 0;
-		for (const auto& sub : subs) {
-			if (!sub.Hears(a_topic)) {
-				continue;
-			}
-			const auto match = Envoy::SubscriptionRegistry::Get().Match(sub.ns, a_text);
-			if (match.score <= 0.0f) {
-				continue;
-			}
-			const float confidence = match.score * a_score;
+		const auto heard = Envoy::SubscriptionRegistry::Get().Audience(a_topic, a_text);
+		for (const auto& who : heard) {
+			const auto  found = byNs.find(who.ns);
+			const bool  greedy = found != byNs.end() && found->second->greedy;
+			const float confidence = who.match.Confidence(a_score);
 			Envoy::UtteranceStore::Get().AddBid(a_id,
-				Envoy::BidRecord{ sub.ns, confidence, sub.costClass, sub.greedy, match.phrase });
-			++placed;
+				Envoy::BidRecord{ who.ns, confidence, who.costClass, greedy, who.match.phrase });
 			spdlog::info("ставка {}: уверенность {:.2f} (слышимость {:.2f} x словарь {:.2f}), "
 			             "фраза «{}», {}{}",
-				sub.ns, confidence, a_score, match.score, match.phrase,
-				CostName(sub.costClass), sub.greedy ? ", жадный" : "");
+				who.ns, confidence, a_score, who.match.score, who.match.phrase,
+				CostName(who.costClass), greedy ? ", жадный" : "");
 		}
-		if (placed == 0) {
+		if (heard.empty()) {
 			spdlog::info("ставок нет - никто из подписчиков темы {} не узнал фразу", a_topic);
 		}
 	};

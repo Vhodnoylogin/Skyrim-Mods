@@ -23,12 +23,9 @@ namespace Envoy
 			a_utterance.text);
 
 		for (const auto& who : heard) {
-			// Оценка подписчика - произведение двух разных величин: насколько
-			// хорошо расслышали реплику и насколько она похожа на объявленную
-			// фразу. Точного числа мост не знает - его считает сам подписчик, -
-			// но эта оценка достаточно близка, чтобы понять, дошёл бы он
-			// до порога своего класса или нет.
-			const float likely = who.match.score * a_utterance.score;
+			// Дошёл бы он до порога своего класса - по той же оценке, по которой
+			// за него ставит хост проверки.
+			const float likely = who.match.Confidence(a_utterance.score);
 			if (likely < settings.MinConfidence(who.costClass)) {
 				continue;
 			}
