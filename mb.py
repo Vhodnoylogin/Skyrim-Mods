@@ -16,10 +16,15 @@
     python mb.py render  <меш.nif> --out кадр.png [--view front | --look 40,15] [--colour bone]
                          [--slider CLAWEars=1] [--only body,head] [--morph CLAWPawSize]
                          [--focus-bone Finger | --focus-morph CLAWPawSize | --focus-shape head]
-                         [--zoom 2] [--pan=5,-3] [--size 900x900]
+                         [--zoom 2 | --zoom-at=2,0.4,-0.3] [--pan=5,-3] [--size 900x900]
+                         [--light camera|world] [--light-dir=x,y,z] [--light-power=a,d,f]
     python mb.py sheet   <меш.nif> --out папка [--views front,side,below] [--prefix view]
     python mb.py web     <меш.nif> --out страница.html  (те же ключи, что у render)
+    python mb.py env                                   под MO2 ли мы и какой корень обзора
+    python mb.py catalog [папка] [--all] [--find X]    обзор мешей с подобранными морфами
+    python mb.py serve   [--root папка] [--port N] [--nif X]   страница со списком мешей
 
+У render, sheet и web меш можно взять из обзора вместо пути: `--entry <номер|имя> [--root папка]`.
 Ко всякой команде подходит `--json`: тот же ответ машинно, без таблиц.
 Файл морфов подбирается рядом с мешем сам; можно задать явно ключом `--tri`.
 Пары чисел с минусом впереди пишутся через знак равенства: `--pan=-5,3`, `--look=-10,5`.
@@ -32,16 +37,40 @@ import sys
 from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from morphbench import MorphBench            # noqa: E402
 from presenters import text                  # noqa: E402
 
+# Отказы фасада, которые командная строка показывает одной строкой, а не трассировкой.
+_REFUSALS = (ValueError, PermissionError, FileNotFoundError, KeyError)
+
 
 def _bench(args) -> MorphBench:
+    """Открыть меш: по пути либо по записи обзора (`--entry`, `--root`)."""
     bench = MorphBench()
-    bench.open(args.nif, args.tri)
+    entry = getattr(args, "entry", None)
+    if entry is not None:
+        key = int(entry) if str(entry).strip().isdigit() else entry
+        bench.open_entry(key, getattr(args, "root", None))
+    elif args.nif:
+        bench.open(args.nif, args.tri)
+    else:
+        raise ValueError("назовите меш: путь к .nif либо --entry <номер|имя> [--root папка]")
     return bench
+
+
+def _numbers(text: str, key: str, low: int, high: int) -> list[float]:
+    """Числа через запятую из значения ключа; их должно быть от low до high."""
+    try:
+        values = [float(p) for p in str(text).split(",")]
+    except ValueError:
+        raise ValueError("%s: ожидались числа через запятую, а не %r" % (key, text))
+    if not low <= len(values) <= high:
+        raise ValueError("%s: нужно %s чисел, а не %d" % (
+            key, str(low) if low == high else "от %d до %d" % (low, high), len(values)))
+    return values
 
 
 def _out(args, data, columns=None, empty="пусто") -> None:
@@ -166,10 +195,12 @@ def _apply_view(bench: MorphBench, args) -> None:
         bench.only([s.strip() for s in args.only.split(",") if s.strip()])
     if args.colour != "shade" or args.morph:
         bench.colour_by(args.colour, args.morph)
-    if args.zoom:
+    if args.zoom is not None:
         bench.zoom(args.zoom)
     if args.size:
         w, _, h = args.size.partition("x")
+        if not (w.strip().isdigit() and h.strip().isdigit()):
+            raise ValueError("--size: ожидалось ШИРИНАxВЫСОТА, например 900x900, а не %r" % args.size)
         bench.resize(int(w), int(h))
     if args.focus_bone:
         bench.focus_bone(args.focus_bone)
@@ -180,11 +211,17 @@ def _apply_view(bench: MorphBench, args) -> None:
     if args.view:
         bench.preset(args.view)
     if args.look:
-        yaw, _, pitch = args.look.partition(",")
-        bench.look(float(yaw), float(pitch))
+        bench.look(*_numbers(args.look, "--look", 2, 2))
     if args.pan:
-        dx, _, dy = args.pan.partition(",")
-        bench.pan(float(dx), float(dy))
+        bench.pan(*_numbers(args.pan, "--pan", 2, 2))
+    if args.zoom_at:
+        bench.zoom_at(*_numbers(args.zoom_at, "--zoom-at", 3, 3))
+    if args.light:
+        bench.light_follow_camera(args.light == "camera")
+    if args.light_dir:
+        bench.light_direction(*_numbers(args.light_dir, "--light-dir", 3, 3))
+    if args.light_power:
+        bench.light_power(*_numbers(args.light_power, "--light-power", 1, 3))
 
 
 def cmd_render(args) -> int:
@@ -218,15 +255,58 @@ def cmd_web(args) -> int:
     return 0
 
 
+def cmd_env(args) -> int:
+    """Где запущены: под MO2 или нет, какие игры видны, какой корень обзора по умолчанию."""
+    env = MorphBench().environment()
+    if args.json:
+        print(json.dumps(env, ensure_ascii=False, indent=2))
+        return 0
+    print("под MO2:        %s" % ("да" if env["insideMo2"] else "нет"))
+    print("корень обзора:  %s" % (env["dataRoot"] or "не задан - назовите папку"))
+    print("игры в реестре: %s" % (", ".join("%s (%s)" % (g["game"], g["root"])
+                                             for g in env["games"]) or "нет"))
+    return 0
+
+
+def cmd_catalog(args) -> int:
+    """Обзор мешей под корнем: номер, путь от корня, формат морфов."""
+    bench = MorphBench()
+    rows = bench.catalog(args.root, with_morphs=not args.all)
+    if args.find:
+        low = args.find.lower()
+        rows = [r for r in rows if low in r["name"].lower()]
+    _out(args, rows, [("index", "№"), ("name", "меш"), ("kind", "морфы")],
+         "мешей не найдено" if not args.all else "мешей нет")
+    return 0
+
+
+def cmd_serve(args) -> int:
+    """Страница со списком мешей на локальном порту: выбор тела без перезапуска."""
+    from presenters.serve import WebServer
+    bench = MorphBench()
+    try:
+        server = WebServer(bench, root=args.root, host=args.host, port=args.port,
+                           with_morphs=not args.all)
+    except (ValueError, PermissionError, FileNotFoundError) as e:
+        print("не могу начать обзор: %s" % e)
+        return 2
+    if args.nif:
+        bench.open(args.nif, args.tri)
+    print("обзор: %s" % server.root)
+    print("страница: %s" % server.url)
+    server.run(open_browser=not args.no_browser)
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="mb", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--json", action="store_true", help="машинный вывод вместо таблиц")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    def add(name, fn, **kw):
+    def add(name, fn, nif_required=True, **kw):
         p = sub.add_parser(name, **kw)
-        p.add_argument("nif")
+        p.add_argument("nif", nargs=None if nif_required else "?", default=None)
         p.add_argument("--tri", default=None)
         # Без умолчания: иначе --json, поставленный ПЕРЕД именем команды, затирался бы.
         p.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
@@ -265,7 +345,10 @@ def main(argv=None) -> int:
     for name, fn, hlp in (("render", cmd_render, "кадр в PNG"),
                           ("sheet", cmd_sheet, "несколько ракурсов подряд"),
                           ("web", cmd_web, "самодостаточная страница со смотрелкой")):
-        p = add(name, fn, help=hlp)
+        p = add(name, fn, nif_required=False, help=hlp)
+        p.add_argument("--entry", default=None,
+                       help="меш из обзора по номеру или имени вместо пути к .nif")
+        p.add_argument("--root", default=None, help="корень обзора для --entry")
         p.add_argument("--out", required=True)
         p.add_argument("--view", default=None)
         p.add_argument("--colour", "--color", dest="colour", default="shade",
@@ -279,6 +362,16 @@ def main(argv=None) -> int:
         p.add_argument("--pan", default=None,
                        help="сдвиг кадра вправо,вверх в единицах модели (с минусом: --pan=-5,3)")
         p.add_argument("--size", default=None)
+        p.add_argument("--zoom-at", dest="zoom_at", default=None,
+                       help="масштаб к точке: новый масштаб,x,y - точка в долях половины "
+                            "меньшей стороны кадра от центра, вправо и вверх (--zoom-at=2,0.4,-0.3)")
+        p.add_argument("--light", choices=["camera", "world"], default=None,
+                       help="свет за камерой (camera) или отдельно от неё (world)")
+        p.add_argument("--light-dir", dest="light_dir", default=None,
+                       help="направление на источник x,y,z: в осях камеры при --light camera, "
+                            "иначе мировое (--light-dir=0.3,0.5,0.8)")
+        p.add_argument("--light-power", dest="light_power", default=None,
+                       help="силы света: рассеянная,направленная[,встречная] (--light-power=0.3,0.7,0.15)")
         p.add_argument("--focus-bone", dest="focus_bone", default=None)
         p.add_argument("--focus-morph", dest="focus_morph", default=None)
         p.add_argument("--focus-shape", dest="focus_shape", default=None)
@@ -286,8 +379,37 @@ def main(argv=None) -> int:
             p.add_argument("--views", default=None)
             p.add_argument("--prefix", default="view")
 
+    # Команды без меша: окружение, обзор и страница со списком.
+    p = sub.add_parser("env", help="под MO2 ли запущены и какой корень обзора")
+    p.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    p.set_defaults(func=cmd_env)
+    p = sub.add_parser("catalog", help="обзор мешей под папкой")
+    p.add_argument("root", nargs="?", default=None,
+                   help="корень обзора; без него - Data игры под MO2 либо catalogRoot из настроек")
+    p.add_argument("--all", action="store_true", help="и меши без файла морфов")
+    p.add_argument("--find", default=None, help="подстрока пути")
+    p.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    p.set_defaults(func=cmd_catalog)
+    p = sub.add_parser("serve", help="страница со списком мешей на локальном порту")
+    p.add_argument("--root", default=None, help="корень обзора; умолчание как у catalog")
+    p.add_argument("--nif", default=None, help="меш, открытый сразу")
+    p.add_argument("--tri", default=None)
+    p.add_argument("--host", default=None, help="адрес; по умолчанию serveHost из настроек")
+    p.add_argument("--port", type=int, default=None, help="порт; по умолчанию servePort из настроек")
+    p.add_argument("--all", action="store_true", help="и меши без файла морфов")
+    p.add_argument("--no-browser", dest="no_browser", action="store_true",
+                   help="не открывать браузер самому")
+    p.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+    p.set_defaults(func=cmd_serve)
+
     args = ap.parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except _REFUSALS as e:
+        # Отказ фасада - не сбой программы: одна строка и код 2, как у argparse.
+        message = e.args[0] if e.args and isinstance(e.args[0], str) else str(e)
+        print("%s: %s" % (args.cmd, message), file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

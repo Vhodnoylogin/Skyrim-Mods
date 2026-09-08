@@ -85,7 +85,8 @@ class TestWebPage(unittest.TestCase):
                 values = unpack(s["values"], "u1").astype(np.float32) * s["max"] / 255.0
                 self.assertEqual(sorted(idx.tolist()), np.nonzero(full > 0)[0].tolist())
                 self.assertLessEqual(float(np.abs(values - full[idx]).max()), s["max"] / 510 + 1e-6)
-        self.assertEqual(payload["view"], self.bench.view_state())
+        # Страница строит кадр по этим числам, поэтому получает их без округления.
+        self.assertEqual(payload["view"], self.bench.view_state(precise=True))
         self.assertEqual(payload["sliders"], self.bench.sliders())
 
     def test_targets_include_command_line_focus(self):

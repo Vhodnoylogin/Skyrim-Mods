@@ -1,0 +1,156 @@
+# -*- coding: utf-8 -*-
+"""Командная строка: те же ответы, что у фасада, только текстом или JSON.
+
+mb.py создаёт MorphBench() с настройками рядом с программой; здесь он подменяется
+фабрикой с настройками во временной папке, чтобы настоящий morphbench.json не трогать.
+Ловит: --json, не дающий JSON; команду catalog, не принявшую корень; ключи --zoom-at
+и --light-*, не доехавшие до состояния показа; кадр, не записанный на диск. Кадр на
+настоящем NIF рисуется, только если есть PyNifly; иначе — пропуск.
+"""
+import contextlib
+import io
+import json
+import os
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import common  # noqa: E402
+import solids  # noqa: E402
+from test_catalog import ALL_MESHES, WITH_MORPHS, make_tree, mo2  # noqa: E402
+
+import mb  # noqa: E402 - корень программы в sys.path добавил common
+from morphbench import MorphBench  # noqa: E402
+
+
+def run(argv, cfg) -> str:
+    """mb.main с настройками cfg вместо файла рядом с программой; вывод — строкой."""
+    out = io.StringIO()
+    with mock.patch.object(mb, "MorphBench", lambda: MorphBench(cfg)):
+        with contextlib.redirect_stdout(out):
+            code = mb.main(list(argv))
+    if code != 0:
+        raise AssertionError("mb %s вернул код %r" % (" ".join(argv), code))
+    return out.getvalue()
+
+
+class TestEnvAndCatalog(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.cfg = common.config(self.tmp.name)
+        self.root = make_tree(Path(self.tmp.name) / "tree")
+
+    def test_env_json(self):
+        """env --json — JSON с теми же ключами, что у MorphBench.environment()."""
+        with mo2(False):
+            for argv in (["env", "--json"], ["--json", "env"]):
+                data = json.loads(run(argv, self.cfg))
+                self.assertEqual(set(data), {"insideMo2", "dataRoot", "games", "catalogRoot"})
+                self.assertFalse(data["insideMo2"])
+                self.assertIsNone(data["dataRoot"])
+                self.assertEqual(data["catalogRoot"], "")
+
+    def test_env_text(self):
+        with mo2(False):
+            text = run(["env"], self.cfg)
+        self.assertIn("под MO2", text)
+        self.assertIn("нет", text)
+        self.assertIn("не задан", text)
+
+    def test_catalog_json(self):
+        with mo2(False):
+            rows = json.loads(run(["catalog", str(self.root), "--json"], self.cfg))
+            self.assertEqual([r["name"] for r in rows], WITH_MORPHS)
+            for r in rows:
+                self.assertEqual(set(r), {"index", "name", "nif", "tri", "kind", "folder", "file"})
+            rows = json.loads(run(["--json", "catalog", str(self.root), "--all"], self.cfg))
+            self.assertEqual([r["name"] for r in rows], ALL_MESHES)
+            rows = json.loads(run(["catalog", str(self.root), "--find", "HEAD", "--json"], self.cfg))
+            self.assertEqual([r["name"] for r in rows], ["meshes/a/head.nif"])
+            self.assertEqual(json.loads(run(["catalog", str(self.root), "--find", "zzz", "--json"],
+                                            self.cfg)), [])
+
+    def test_catalog_text(self):
+        with mo2(False):
+            text = run(["catalog", str(self.root)], self.cfg)
+        self.assertIn("меш", text)
+        self.assertIn("body_0.nif", text)
+        self.assertIn("TRIP", text)
+        self.assertIn("FRTRI", text)
+        with mo2(False):
+            self.assertIn("мешей не найдено",
+                          run(["catalog", str(self.root), "--find", "zzz"], self.cfg))
+
+    def test_catalog_without_root_outside_mo2(self):
+        """Корень не назван и catalogRoot пуст — отказ фасада печатается одной строкой
+        и даёт код 2, а не трассировку."""
+        with mo2(False):
+            err = io.StringIO()
+            with mock.patch.object(mb, "MorphBench", lambda: MorphBench(self.cfg)):
+                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                    code = mb.main(["catalog", "--json"])
+            self.assertEqual(code, 2)
+            self.assertIn("корень обзора не задан", err.getvalue())
+            cfg = common.config(self.tmp.name, catalogRoot=str(self.root))
+            rows = json.loads(run(["catalog", "--json"], cfg))
+            self.assertEqual([r["name"] for r in rows], WITH_MORPHS)
+
+
+class TestRender(unittest.TestCase):
+    """render с --zoom-at и --light-*: ключи доезжают до состояния показа, кадр на диске."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.cfg = common.config(self.tmp.name, imageWidth=64, imageHeight=64)
+        pynifly = common.load_pynifly(self.cfg)
+        c = solids.cube()
+        self.nif = common.write_nif(pynifly, Path(self.tmp.name) / "cube.nif", {"cube": {
+            "verts": c.verts.tolist(), "tris": c.tris.tolist(),
+            "uvs": [(0.0, 0.0)] * 8, "normals": [(0.0, 0.0, 1.0)] * 8}})
+
+    def render(self, *extra) -> dict:
+        out = Path(self.tmp.name) / "out" / ("%d.png" % len(os.listdir(self.tmp.name)))
+        data = json.loads(run(["--json", "render", str(self.nif), "--out", str(out), *extra], self.cfg))
+        self.assertEqual(Path(data["saved"]), out)
+        self.assertTrue(out.is_file())
+        from PIL import Image
+        with Image.open(out) as img:
+            self.assertEqual(img.size, (64, 64))
+        return data["view"]
+
+    def test_zoom_at_and_world_light(self):
+        view = self.render("--view", "front", "--zoom-at=2,0.4,-0.3", "--light", "world",
+                           "--light-dir=-0.4,-0.7,0.6", "--light-power=0.3,0.7,0.2")
+        self.assertEqual(view["zoom"], 2.0)
+        self.assertNotEqual(view["pan"], [0.0, 0.0])
+        self.assertEqual(view["preset"], "front")
+        light = view["light"]
+        self.assertFalse(light["follow"])
+        self.assertEqual(light["direction"], [-0.4, -0.7, 0.6])
+        self.assertEqual((light["ambient"], light["diffuse"], light["fill"]), (0.3, 0.7, 0.2))
+
+    def test_camera_light_and_partial_power(self):
+        """--light camera с направлением в осях камеры; две силы из трёх — третья прежняя."""
+        view = self.render("--light", "camera", "--light-dir=0,0,1", "--light-power=0.5,0.5")
+        light = view["light"]
+        self.assertTrue(light["follow"])
+        self.assertEqual(light["direction"], [0.0, 0.0, 1.0])
+        self.assertEqual((light["ambient"], light["diffuse"], light["fill"]), (0.5, 0.5, 0.15))
+        self.assertEqual(view["zoom"], 1.0)
+        self.assertEqual(view["pan"], [0.0, 0.0])
+
+    def test_plain_render_keeps_defaults(self):
+        view = self.render()
+        self.assertTrue(view["light"]["follow"])
+        self.assertEqual(view["light"]["direction"], [0.35, 0.45, 0.82])
+        self.assertEqual(view["zoom"], 1.0)
+
+
+if __name__ == "__main__":
+    common.main()
