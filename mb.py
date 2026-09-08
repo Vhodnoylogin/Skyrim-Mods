@@ -18,6 +18,9 @@
                          [--focus-bone Finger | --focus-morph CLAWPawSize | --focus-shape head]
                          [--zoom 2 | --zoom-at=2,0.4,-0.3] [--pan=5,-3] [--size 900x900]
                          [--light camera|world] [--light-dir=x,y,z] [--light-power=a,d,f]
+    python mb.py colliders [меш.nif] --skeleton <skeleton.nif> [--find Thigh] [--clearance]
+    python mb.py fit       <меш.nif> --skeleton <skeleton.nif> [--find Thigh] [--slider X=1]
+                           [--only body] [--save новый.nif] [--ppb]
     python mb.py sheet   <меш.nif> --out папка [--views front,side,below] [--prefix view]
     python mb.py web     <меш.nif> --out страница.html  (те же ключи, что у render)
     python mb.py env                                   под MO2 ли мы и какой корень обзора
@@ -25,6 +28,8 @@
     python mb.py serve   [--root папка] [--port N] [--nif X]   страница со списком мешей
 
 У render, sheet и web меш можно взять из обзора вместо пути: `--entry <номер|имя> [--root папка]`.
+Скелет открывается ключом `--skeleton` у любой команды; с ним же render и web умеют
+`--colliders` - слой капсул поверх тела.
 Ко всякой команде подходит `--json`: тот же ответ машинно, без таблиц.
 Файл морфов подбирается рядом с мешем сам; можно задать явно ключом `--tri`.
 Пары чисел с минусом впереди пишутся через знак равенства: `--pan=-5,3`, `--look=-10,5`.
@@ -56,8 +61,12 @@ def _bench(args) -> MorphBench:
         bench.open_entry(key, getattr(args, "root", None))
     elif args.nif:
         bench.open(args.nif, args.tri)
-    else:
+    elif not getattr(args, "skeleton", None):
+        # Скелет самодостаточен: капсулы можно смотреть и без тела. Тело нужно только
+        # посадке и подгонке, и они скажут об этом сами.
         raise ValueError("назовите меш: путь к .nif либо --entry <номер|имя> [--root папка]")
+    if getattr(args, "skeleton", None):
+        bench.open_skeleton(args.skeleton)
     return bench
 
 
@@ -222,6 +231,50 @@ def _apply_view(bench: MorphBench, args) -> None:
         bench.light_direction(*_numbers(args.light_dir, "--light-dir", 3, 3))
     if args.light_power:
         bench.light_power(*_numbers(args.light_power, "--light-power", 1, 3))
+    if getattr(args, "colliders", False):
+        if not bench.has_skeleton():
+            raise ValueError("--colliders без скелета: добавьте --skeleton <skeleton.nif>")
+        bench.show_colliders(True, getattr(args, "bumper", False))
+
+
+def cmd_colliders(args) -> int:
+    """Капсулы скелета числами: где стоят, какие и как сидят по коже."""
+    bench = _bench(args)
+    if not bench.has_skeleton():
+        raise ValueError("назовите скелет: --skeleton <skeleton.nif>")
+    rows = bench.colliders(args.find)
+    if args.clearance:
+        if not bench.is_open():
+            raise ValueError("--clearance меряет капсулы по коже: назовите ещё и меш")
+        fit = {r["bone"]: r for r in bench.collider_clearance(args.find)}
+        for row in rows:
+            row["clearance"] = fit.get(row["bone"])
+    _out(args, rows if args.json else text.colliders(rows))
+    return 0
+
+
+def cmd_fit(args) -> int:
+    """Посадить капсулы по коже при нынешних ползунках."""
+    bench = _bench(args)
+    if not bench.has_skeleton():
+        raise ValueError("назовите скелет: --skeleton <skeleton.nif>")
+    _apply_view(bench, args)
+    rows = bench.collider_fit(args.find, args.percentile)
+    result = {"fitted": rows}
+    if args.save:
+        result["saved"] = bench.collider_save(args.save)
+    if args.ppb:
+        result["ppb"] = bench.collider_ppb(args.find)
+    if args.json:
+        _out(args, result)
+        return 0
+    lines = [text.fitted(rows)]
+    if args.save:
+        lines.append("скелет: %s" % result["saved"])
+    if args.ppb:
+        lines.append("\n".join(result["ppb"]))
+    _out(args, "\n".join(lines))
+    return 0
 
 
 def cmd_render(args) -> int:
@@ -308,6 +361,8 @@ def main(argv=None) -> int:
         p = sub.add_parser(name, **kw)
         p.add_argument("nif", nargs=None if nif_required else "?", default=None)
         p.add_argument("--tri", default=None)
+        p.add_argument("--skeleton", default=None,
+                       help="файл скелета: из него читаются капсулы столкновений")
         # Без умолчания: иначе --json, поставленный ПЕРЕД именем команды, затирался бы.
         p.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
         p.set_defaults(func=fn)
@@ -337,10 +392,32 @@ def main(argv=None) -> int:
     p = add("binding", cmd_binding, help="к каким костям привязано то, что двигает морф")
     p.add_argument("--shape", default=None, help="часть меша; по умолчанию baseShape из настроек")
     p.add_argument("--morph", required=True)
+    p = add("colliders", cmd_colliders, nif_required=False,
+            help="капсулы столкновений скелета")
+    p.add_argument("--find", default=None, help="подстрока имени кости")
+    p.add_argument("--clearance", action="store_true",
+                   help="и посадка по коже при нынешних ползунках")
     p = add("focus", cmd_focus, help="наведение камеры: на кость, морф или часть")
     p.add_argument("--bone", default=None, help="имя кости или его часть")
     p.add_argument("--morph", default=None)
     p.add_argument("--shape", default=None)
+
+    p = add("fit", cmd_fit, nif_required=False,
+            help="посадить капсулы по коже при нынешних ползунках")
+    p.add_argument("--entry", default=None)
+    p.add_argument("--root", default=None)
+    p.add_argument("--find", default=None, help="подстрока имени кости")
+    p.add_argument("--percentile", type=float, default=None,
+                   help="доля точек внутри радиуса; по умолчанию из настроек")
+    p.add_argument("--save", default=None, help="записать новый файл скелета")
+    p.add_argument("--ppb", action="store_true",
+                   help="выдать строки настроек Precision Physic Bodies")
+    p.add_argument("--slider", action="append", default=[])
+    p.add_argument("--only", default=None)
+    for key in ("colour", "morph", "zoom", "size", "view", "look", "pan", "zoom_at",
+                "light", "light_dir", "light_power", "focus_bone", "focus_morph",
+                "focus_shape", "colliders", "bumper"):
+        p.set_defaults(**{key: None if key != "colour" else "shade"})
 
     for name, fn, hlp in (("render", cmd_render, "кадр в PNG"),
                           ("sheet", cmd_sheet, "несколько ракурсов подряд"),
@@ -375,6 +452,10 @@ def main(argv=None) -> int:
         p.add_argument("--focus-bone", dest="focus_bone", default=None)
         p.add_argument("--focus-morph", dest="focus_morph", default=None)
         p.add_argument("--focus-shape", dest="focus_shape", default=None)
+        p.add_argument("--colliders", action="store_true",
+                       help="слой капсул поверх тела; нужен --skeleton")
+        p.add_argument("--bumper", action="store_true",
+                       help="и цилиндр перемещения: он вчетверо больше тела")
         if name == "sheet":
             p.add_argument("--views", default=None)
             p.add_argument("--prefix", default="view")
