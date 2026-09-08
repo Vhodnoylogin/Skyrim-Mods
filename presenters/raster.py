@@ -94,21 +94,26 @@ class Raster:
                 + view.fill * np.clip(-lam, 0.0, 1.0)).astype(np.float32)
 
     # ---- рисование --------------------------------------------------------------------
+    def _screen(self, verts: np.ndarray):
+        """Вершины в координатах холста: вправо, вниз и глубина от зрителя."""
+        view = self.bench.view
+        w, h = view.width, view.height
+        basis = view.basis()
+        # Кадр - вся модель, сфера наведения или панорама - решает ядро.
+        centre, half = self.bench.framing()
+        local = (verts - centre) @ basis.T          # x вправо, y вверх, z от зрителя
+        scale = ((min(w, h) * float(self.cfg["frameFill"]))
+                 / max(half * 2.0, 1e-3) * view.zoom)
+        return (local[:, 0] * scale + w * 0.5,
+                h * 0.5 - local[:, 1] * scale,
+                local[:, 2])
+
     def image(self) -> Image.Image:
         view = self.bench.view
         w, h = view.width, view.height
         verts, normals, tris, vcols = self._collect()
 
-        basis = view.basis()
-        # Кадр - вся модель, сфера наведения или панорама - решает ядро.
-        centre, half = self.bench.framing()
-        local = (verts - centre) @ basis.T          # x вправо, y вверх, z от зрителя
-
-        span = half * 2.0
-        scale = (min(w, h) * float(self.cfg["frameFill"])) / max(span, 1e-3) * view.zoom
-        sx = local[:, 0] * scale + w * 0.5
-        sy = h * 0.5 - local[:, 1] * scale
-        depth = local[:, 2]
+        sx, sy, depth = self._screen(verts)
 
         bg = np.array(self.cfg["background"], dtype=np.float32) / 255.0
         colour = np.tile(bg, (h, w, 1)).astype(np.float32)
@@ -167,7 +172,70 @@ class Raster:
             csub = colour[ya:yb + 1, xa:xb + 1]
             csub[mask] = np.clip(base * shade[t], 0.0, 1.0)
 
+        if view.colliders and self.bench.has_skeleton():
+            self._overlay_colliders(colour, zbuf)
         return Image.fromarray((colour * 255.0).astype(np.uint8), mode="RGB")
+
+    def _overlay_colliders(self, colour: np.ndarray, zbuf: np.ndarray) -> None:
+        """Капсулы поверх тела - полупрозрачно, с собственной глубиной.
+
+        Смысл прозрачности в том, что видно обе оболочки сразу: там, где капсула лежит
+        внутри тела, она просвечивает сквозь кожу, а там, где вылезает наружу, ложится
+        прямо на фон и сразу бросается в глаза. Ради этого капсулы НЕ пишут в общий
+        буфер глубины - иначе они закрыли бы собой то, что мы и хотим с ними сравнить.
+        """
+        verts, tris = self.bench.collider_mesh()
+        if tris.shape[0] == 0:
+            return
+        alpha = float(self.cfg["colliderOpacity"])
+        tint = np.array(self.cfg["colliderColour"], dtype=np.float32) / 255.0
+        sx, sy, depth = self._screen(verts)
+        normals = self._face_normals(verts, tris)
+        shade = self._lit(normals)
+        own = np.full(zbuf.shape, np.inf, dtype=np.float32)
+        for t in range(tris.shape[0]):
+            a, b, c = tris[t]
+            self._paint_triangle(colour, own, sx, sy, depth, a, b, c,
+                                 np.clip(tint * shade[t], 0.0, 1.0), alpha)
+
+    @staticmethod
+    def _face_normals(verts: np.ndarray, tris: np.ndarray) -> np.ndarray:
+        n = np.cross(verts[tris[:, 1]] - verts[tris[:, 0]],
+                     verts[tris[:, 2]] - verts[tris[:, 0]])
+        return n / np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1e-6)
+
+    @staticmethod
+    def _paint_triangle(colour, zbuf, sx, sy, depth, a, b, c, rgb, alpha) -> None:
+        """Один треугольник ровным цветом с проверкой глубины и подмешиванием."""
+        h, w = zbuf.shape
+        ax, ay, bx, by, cx, cy = sx[a], sy[a], sx[b], sy[b], sx[c], sy[c]
+        area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
+        if abs(area) < 1e-9:
+            return
+        xa = max(int(np.floor(min(ax, bx, cx))), 0)
+        xb = min(int(np.ceil(max(ax, bx, cx))), w - 1)
+        ya = max(int(np.floor(min(ay, by, cy))), 0)
+        yb = min(int(np.ceil(max(ay, by, cy))), h - 1)
+        if xb < xa or yb < ya:
+            return
+        gx, gy = np.meshgrid(np.arange(xa, xb + 1, dtype=np.float32) + 0.5,
+                             np.arange(ya, yb + 1, dtype=np.float32) + 0.5)
+        inv = 1.0 / area
+        w0 = ((bx - ax) * (gy - ay) - (by - ay) * (gx - ax)) * inv
+        w1 = ((gx - ax) * (cy - ay) - (gy - ay) * (cx - ax)) * inv
+        inside = (w0 >= 0) & (w1 >= 0) & (w0 + w1 <= 1.0)
+        if not inside.any():
+            return
+        z = np.where(inside,
+                     (1.0 - w1 - w0) * depth[a] + w1 * depth[b] + w0 * depth[c],
+                     np.inf)
+        sub = zbuf[ya:yb + 1, xa:xb + 1]
+        mask = inside & (z < sub)
+        if not mask.any():
+            return
+        sub[mask] = z[mask]
+        csub = colour[ya:yb + 1, xa:xb + 1]
+        csub[mask] = csub[mask] * (1.0 - alpha) + rgb * alpha
 
     def save(self, path) -> Path:
         path = Path(path)
