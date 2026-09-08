@@ -27,9 +27,15 @@
     python mb.py catalog [папка] [--all] [--find X]    обзор мешей с подобранными морфами
     python mb.py serve   [--root папка] [--port N] [--nif X]   страница со списком мешей
 
+`serve` без ключей просто поднимает сервер: корень обзора - Data игры под MO2, иначе его
+называют на странице. Если сервер на этом адресе уже поднят, второй не поднимается:
+ему отдаётся корень (из-под MO2 - Data игры, которую видит этот процесс) и открывается
+страница. Так работает точка входа для MO2 - `morphbench.exe` рядом, он лишь зовёт
+`serve` из-под usvfs.
+
 У render, sheet и web меш можно взять из обзора вместо пути: `--entry <номер|имя> [--root папка]`.
-Скелет открывается ключом `--skeleton` у любой команды; с ним же render и web умеют
-`--colliders` - слой капсул поверх тела.
+Скелет (`skeleton.nif` в папке меша) подбирается сам, иначе - ключ `--skeleton` у любой
+команды; render, sheet и web умеют `--colliders` - слой капсул поверх тела.
 Ко всякой команде подходит `--json`: тот же ответ машинно, без таблиц.
 Файл морфов подбирается рядом с мешем сам; можно задать явно ключом `--tri`.
 Пары чисел с минусом впереди пишутся через знак равенства: `--pan=-5,3`, `--look=-10,5`.
@@ -46,7 +52,7 @@ sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from morphbench import MorphBench            # noqa: E402
-from presenters import text                  # noqa: E402
+from presenters import ppb, text             # noqa: E402
 
 # Отказы фасада, которые командная строка показывает одной строкой, а не трассировкой.
 _REFUSALS = (ValueError, PermissionError, FileNotFoundError, KeyError)
@@ -197,44 +203,48 @@ def cmd_focus(args) -> int:
 
 
 def _apply_view(bench: MorphBench, args) -> None:
-    for pair in args.slider or []:
+    """Ключи показа - в вызовы фасада, в том порядке, в каком они друг от друга зависят.
+    Ключа может не быть у команды вовсе (у `fit` нет ракурса): тогда он не задан."""
+    opt = lambda name, default=None: getattr(args, name, default)  # noqa: E731
+    for pair in opt("slider") or []:
         name, _, value = pair.partition("=")
         bench.set_slider(name.strip(), float(value))
-    if args.only:
+    if opt("only"):
         bench.only([s.strip() for s in args.only.split(",") if s.strip()])
-    if args.colour != "shade" or args.morph:
-        bench.colour_by(args.colour, args.morph)
-    if args.zoom is not None:
+    if opt("colour", "shade") != "shade" or opt("morph"):
+        bench.colour_by(opt("colour", "shade"), opt("morph"))
+    if opt("zoom") is not None:
         bench.zoom(args.zoom)
-    if args.size:
+    if opt("size"):
         w, _, h = args.size.partition("x")
         if not (w.strip().isdigit() and h.strip().isdigit()):
             raise ValueError("--size: ожидалось ШИРИНАxВЫСОТА, например 900x900, а не %r" % args.size)
         bench.resize(int(w), int(h))
-    if args.focus_bone:
+    if opt("focus_bone"):
         bench.focus_bone(args.focus_bone)
-    elif args.focus_morph:
+    elif opt("focus_morph"):
         bench.focus_morph(args.focus_morph)
-    elif args.focus_shape:
+    elif opt("focus_shape"):
         bench.focus_shape(args.focus_shape)
-    if args.view:
+    if opt("view"):
         bench.preset(args.view)
-    if args.look:
+    if opt("look"):
         bench.look(*_numbers(args.look, "--look", 2, 2))
-    if args.pan:
+    if opt("pan"):
         bench.pan(*_numbers(args.pan, "--pan", 2, 2))
-    if args.zoom_at:
+    if opt("zoom_at"):
         bench.zoom_at(*_numbers(args.zoom_at, "--zoom-at", 3, 3))
-    if args.light:
+    if opt("light"):
         bench.light_follow_camera(args.light == "camera")
-    if args.light_dir:
+    if opt("light_dir"):
         bench.light_direction(*_numbers(args.light_dir, "--light-dir", 3, 3))
-    if args.light_power:
+    if opt("light_power"):
         bench.light_power(*_numbers(args.light_power, "--light-power", 1, 3))
-    if getattr(args, "colliders", False):
+    if opt("colliders"):
         if not bench.has_skeleton():
-            raise ValueError("--colliders без скелета: добавьте --skeleton <skeleton.nif>")
-        bench.show_colliders(True, getattr(args, "bumper", False))
+            raise ValueError("--colliders без скелета: рядом с мешем нет %s, добавьте "
+                             "--skeleton <skeleton.nif>" % bench.cfg["skeletonFile"])
+        bench.show_colliders(True, bool(opt("bumper")))
 
 
 def cmd_colliders(args) -> int:
@@ -264,7 +274,7 @@ def cmd_fit(args) -> int:
     if args.save:
         result["saved"] = bench.collider_save(args.save)
     if args.ppb:
-        result["ppb"] = bench.collider_ppb(args.find)
+        result["ppb"] = ppb.lines(bench.collider_local(args.find))
     if args.json:
         _out(args, result)
         return 0
@@ -334,20 +344,56 @@ def cmd_catalog(args) -> int:
 
 
 def cmd_serve(args) -> int:
-    """Страница со списком мешей на локальном порту: выбор тела без перезапуска."""
-    from presenters.serve import WebServer
+    """Страница со списком мешей на локальном порту: выбор тела без перезапуска.
+
+    Без ключей просто поднимает сервер. Если на этом адресе сервер уже поднят, второй
+    не поднимается: ему отдаётся корень обзора и открывается страница. Из-под MO2 это
+    и есть передача пути - Data игры, которую видит этот процесс сквозь usvfs.
+    """
+    from presenters.serve import ServerLink, WebServer
     bench = MorphBench()
-    try:
-        server = WebServer(bench, root=args.root, host=args.host, port=args.port,
-                           with_morphs=not args.all)
-    except (ValueError, PermissionError, FileNotFoundError) as e:
-        print("не могу начать обзор: %s" % e)
-        return 2
+    cfg = bench.cfg
+    link = ServerLink(args.host or cfg["serveHost"],
+                      cfg["servePort"] if args.port is None else args.port)
+    state = link.probe()
+    if state == "busy":
+        raise ValueError("порт %d занят другой программой; назовите другой ключом --port"
+                         % link.port)
+    if state == "ours":
+        return _hand_over(bench, link, args)
+    server = WebServer(bench, root=args.root, host=args.host, port=args.port,
+                       with_morphs=not args.all)
     if args.nif:
-        bench.open(args.nif, args.tri)
-    print("обзор: %s" % server.root)
-    print("страница: %s" % server.url)
+        bench.open(args.nif, args.tri, getattr(args, "skeleton", None))
+    _out(args, {"started": True, "url": server.url,
+                "root": None if server.root is None else str(server.root),
+                "insideMo2": bench.environment()["insideMo2"]} if args.json else
+         "обзор: %s\nстраница: %s" % (server.root or "не задан - назовите папку на странице",
+                                        server.url))
+    sys.stdout.flush()                      # адрес виден сразу, даже если вывод в трубу
     server.run(open_browser=not args.no_browser)
+    return 0
+
+
+def _hand_over(bench: MorphBench, link, args) -> int:
+    """Сервер уже поднят: отдать ему корень и открыть страницу, а не поднимать второй."""
+    here = bench.environment()
+    there = link.environment()
+    if here["insideMo2"] and not there["insideMo2"]:
+        raise ValueError("сервер на %s поднят вне MO2 и не видит мешей сборки; закройте его "
+                         "и запустите снова из-под MO2" % link.url)
+    root = args.root if args.root is not None else here["dataRoot"]
+    handed = link.set_root(root) if root is not None else None
+    if args.nif:
+        raise ValueError("сервер уже поднят на %s: выберите меш на странице, --nif здесь "
+                         "не действует" % link.url)
+    if not args.no_browser:
+        link.open_page()
+    _out(args, {"started": False, "url": link.url, "root": there.get("root") if handed is None
+                else handed["root"], "handed": handed, "insideMo2": there["insideMo2"]}
+         if args.json else
+         "уже поднят: %s%s" % (link.url, "" if handed is None else
+                                "\nобзор: %s (%d мешей)" % (handed["root"], handed["meshes"])))
     return 0
 
 
@@ -414,10 +460,6 @@ def main(argv=None) -> int:
                    help="выдать строки настроек Precision Physic Bodies")
     p.add_argument("--slider", action="append", default=[])
     p.add_argument("--only", default=None)
-    for key in ("colour", "morph", "zoom", "size", "view", "look", "pan", "zoom_at",
-                "light", "light_dir", "light_power", "focus_bone", "focus_morph",
-                "focus_shape", "colliders", "bumper"):
-        p.set_defaults(**{key: None if key != "colour" else "shade"})
 
     for name, fn, hlp in (("render", cmd_render, "кадр в PNG"),
                           ("sheet", cmd_sheet, "несколько ракурсов подряд"),

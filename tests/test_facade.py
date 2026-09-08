@@ -116,8 +116,8 @@ class TestFacadeTables(unittest.TestCase):
         state = self.bench.view_state()
         self.assertTrue(common.is_plain(state), state)
         self.assertEqual(set(state), {"yaw", "pitch", "preset", "zoom", "pan", "colouring",
-                                      "highlightMorph", "visible", "width", "height", "light",
-                                      "focus"})
+                                      "highlightMorph", "visible", "colliders", "bumper",
+                                      "width", "height", "light", "focus"})
         self.assertEqual(set(state["light"]), {"follow", "direction", "cameraDirection",
                                                "worldDirection", "ambient", "diffuse", "fill"})
         self.assertEqual(state["pan"], [0.0, 0.0])

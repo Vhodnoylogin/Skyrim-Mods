@@ -17,6 +17,11 @@
 и `framing()`, свет - `light_vector()` и силы из того же состояния, нормали вершин считаются
 по `vertex_normals` из model.py - поэтому кадр страницы совпадает с PNG.
 
+Капсулы столкновений - если к мешу открыт скелет - вкладываются готовыми треугольниками,
+как их отдаёт `collider_mesh()` и `bumper_mesh()`; страница кладёт их поверх тела так же,
+как растеризатор: полупрозрачно, цветом и прозрачностью из настроек, со своей глубиной
+и не заслоняя тело. Включение слоя - `show_colliders`, тот же метод, что у фасада.
+
 Та же страница умеет приходить и с локального сервера (`mb.py serve`): тогда в блок JSON
 вкладываются ещё список мешей под корнем обзора и окружение, и на панели появляется выбор
 модели. Геометрия в обоих случаях упаковывается одинаково, а страница с сервера обращается
@@ -82,6 +87,33 @@ class WebPage:
             "boneNames": self.bench.shape_bone_names(name),
         }
 
+    # ---- капсулы столкновений ---------------------------------------------------------
+    @classmethod
+    def _chunk(cls, verts, tris) -> dict | None:
+        """Кусок геометрии без костей и морфов - в том же виде, что часть меша: вершины
+        `<f4`, тип номера и треугольники. Пустой кусок - None: рисовать нечего."""
+        tris = np.asarray(tris)
+        if tris.shape[0] == 0:
+            return None
+        verts = np.asarray(verts, dtype=np.float32).reshape(-1, 3)
+        count = int(verts.shape[0])
+        return {"vertexCount": count,
+                "vertices": cls._b64(verts, "<f4"),
+                "indexType": cls._index_type(count),
+                "triangles": cls._indices(tris, count)}
+
+    def _colliders(self) -> dict | None:
+        """Капсулы тел одним куском и бампер отдельно - как их отдаёт фасад, в мировых
+        координатах. Без скелета - None: раздел на панели не строится."""
+        bench = self.bench
+        if not bench.has_skeleton():
+            return None
+        bodies = self._chunk(*bench.collider_mesh())
+        if bodies is None:
+            bodies = {"vertexCount": 0, "vertices": "", "indexType": "u16", "triangles": ""}
+        bodies["bumper"] = self._chunk(*bench.bumper_mesh())
+        return bodies
+
     # ---- морфы ------------------------------------------------------------------------
     def _deltas(self, shape_name: str, morph: str, vertex_count: int) -> dict | None:
         """Смещения морфа на части, сжатые в int16 с одним множителем: max|сдвиг|/32767."""
@@ -138,6 +170,9 @@ class WebPage:
             "sliderStep": float(cfg["sliderStep"]),
             "orbitSensitivity": float(cfg["orbitSensitivity"]),
             "wheelZoomRate": float(cfg["wheelZoomRate"]),
+            # Слой капсул: цвет 0..255 и прозрачность 0..1 - те же ключи, что у растеризатора.
+            "colliderColour": [float(x) for x in cfg["colliderColour"]],
+            "colliderOpacity": float(cfg["colliderOpacity"]),
         }
 
     # ---- сервер: то, что страница знает о нём -----------------------------------------
@@ -187,20 +222,23 @@ class WebPage:
         return {
             "summary": summary,
             "names": {"nif": Path(summary["nif"]).name,
-                      "tri": Path(summary["tri"]).name if summary["tri"] else None},
+                      "tri": Path(summary["tri"]).name if summary["tri"] else None,
+                      "skeleton": Path(summary["skeleton"]).name if summary["skeleton"] else None},
             "shapes": shapes,
             "morphs": morphs,
             "deltas": deltas,
             "strain": strain,
             "targets": targets,
+            "colliders": self._colliders(),
         }
 
     @staticmethod
     def _no_body() -> dict:
         """Меш не открыт: пустой холст, но та же форма данных, чтобы скрипт не ветвился."""
-        return {"summary": None, "names": {"nif": None, "tri": None},
+        return {"summary": None, "names": {"nif": None, "tri": None, "skeleton": None},
                 "shapes": [], "morphs": [], "deltas": {}, "strain": {},
-                "targets": {"bones": [], "morphs": [], "shapes": []}}
+                "targets": {"bones": [], "morphs": [], "shapes": []},
+                "colliders": None}
 
     # ---- всё вместе -------------------------------------------------------------------
     def payload(self) -> dict:
@@ -489,6 +527,20 @@ class Strain {
   }
 }
 
+// Кусок капсул - тела одним куском либо бампер, - как его отдаёт collider_mesh() и
+// bumper_mesh() фасада: уже в мировых координатах, без костей и морфов, поэтому ползунки
+// его не трогают и нормали считаются один раз. Поля те же, что у Shape, - рисующему всё равно.
+class ColliderMesh {
+  constructor(name, raw) {
+    this.name = name;
+    this.pos = Codec.f32(raw.vertices);
+    this.count = raw.vertexCount;
+    this.tris = Codec.index(raw.triangles, raw.indexType);
+    this.triCount = this.tris.length / 3;
+    this.nrm = vertexNormals(this.pos, this.tris, new Float32Array(this.pos.length));
+  }
+}
+
 // ---- зеркало morphbench/view.py: ViewState -----------------------------------------------
 class ViewMirror {
   constructor(settings, presets, init) {
@@ -498,6 +550,10 @@ class ViewMirror {
     this.pan = init.pan ? init.pan.slice() : [0, 0];
     this.visible = init.visible === null ? null : new Set(init.visible);
     this.colouring = init.colouring;
+    // Слой капсул поверх тела и бампер отдельно - числами, как в ядре; старое состояние
+    // без этих ключей означает «выключено».
+    this.colliders = !!init.colliders;
+    this.bumper = !!init.bumper;
     this.highlightMorph = init.highlightMorph;
     this.width = init.width; this.height = init.height;
     this.focus = init.focus ? { name: init.focus.name, centre: init.focus.centre.slice(),
@@ -609,6 +665,13 @@ class ViewMirror {
              worldDirection: this.lightWorldDir.map((x) => rnd(x, 3)),
              ambient: rnd(this.ambient, 3), diffuse: rnd(this.diffuse, 3), fill: rnd(this.fill, 3) };
   }
+  // слой капсул: бампер отдельно и по умолчанию выключен; null или undefined - не менять,
+  // как None у ViewState.show_colliders
+  show_colliders(on, bumper) {
+    this.colliders = on === undefined ? true : !!on;
+    if (bumper !== undefined && bumper !== null) this.bumper = !!bumper;
+    return { colliders: this.colliders, bumper: this.bumper };
+  }
   // слои
   show_all() { this.visible = null; return this; }
   only(names) { this.visible = new Set(names); return this; }
@@ -637,6 +700,7 @@ class ViewMirror {
       pan: [rnd(this.pan[0], 2), rnd(this.pan[1], 2)],
       colouring: this.colouring, highlightMorph: this.highlightMorph,
       visible: this.visible === null ? null : Array.from(this.visible).sort(),
+      colliders: this.colliders, bumper: this.bumper,
       width: this.width, height: this.height,
       light: this.light_state(),
       focus: this.focus === null ? null : { name: this.focus.name,
@@ -667,11 +731,21 @@ class BenchMirror {
       for (const shape in data.strain[morph]) this.strainData[morph][shape] = new Strain(data.strain[morph][shape]);
     }
     this.targets = data.targets;
+    // Капсулы - только при открытом скелете: тела одним куском и бампер отдельно.
+    // Распаковываются и получают нормали один раз - ползунки капсул не касаются.
+    const raw = data.colliders || null;
+    this._colliderMesh = raw ? new ColliderMesh("colliders:bodies", raw) : null;
+    this._bumperMesh = raw && raw.bumper ? new ColliderMesh("colliders:bumper", raw.bumper) : null;
     this.view = new ViewMirror(data.settings, data.presets, data.view);
     this._sliders = new Map(Object.entries(data.sliders));
   }
 
   is_open() { return this.summary !== null; }
+  // скелет и капсулы: геометрия уже сосчитана ядром и лежит в странице
+  has_skeleton() { return this._colliderMesh !== null; }
+  collider_mesh() { return this._colliderMesh; }
+  bumper_mesh() { return this._bumperMesh; }
+  show_colliders(on, bumper) { return this.view.show_colliders(on, bumper); }
   shape_names() { return Array.from(this.shapes.keys()).sort(); }
   shape(name) { const s = this.shapes.get(name); if (!s) throw new Error("в меше нет части " + name); return s; }
   morphs() { return this.morphList.slice(); }
@@ -838,6 +912,7 @@ const FRAGMENT_SHADER = "#version 300 es\n" +
   "uniform vec3 uLight;\n" +
   "uniform float uAmbient, uDiffuse, uFill;\n" +
   "uniform int uFlat;\n" +
+  "uniform float uAlpha;\n" +                                    // 1.0 у тела; у капсул - colliderOpacity
   "out vec4 outColour;\n" +
   "void main() {\n" +
   "  vec3 lit = vLit;\n" +
@@ -847,7 +922,7 @@ const FRAGMENT_SHADER = "#version 300 es\n" +
   "    float lam = dot(n, uLight);\n" +
   "    lit = vCol * (uAmbient + uDiffuse * clamp(lam, 0.0, 1.0) + uFill * clamp(-lam, 0.0, 1.0));\n" +
   "  }\n" +
-  "  outColour = vec4(clamp(lit, 0.0, 1.0), 1.0);\n" +
+  "  outColour = vec4(clamp(lit, 0.0, 1.0), uAlpha);\n" +
   "}\n";
 
 class Renderer {
@@ -862,11 +937,14 @@ class Renderer {
                   col: gl.getAttribLocation(this.program, "aCol") };
     this.uni = {};
     for (const name of ["uRight", "uUp", "uForward", "uCentre", "uScale", "uZc", "uZr", "uHalf",
-                        "uLight", "uAmbient", "uDiffuse", "uFill", "uFlat"])
+                        "uLight", "uAmbient", "uDiffuse", "uFill", "uFlat", "uAlpha"])
       this.uni[name] = gl.getUniformLocation(this.program, name);
     this.meshes = new Map();
     this.bg = settings.background.map((x) => x / 255.0);
     this.flat = settings.shading === "flat";
+    // Слой капсул: цвет и прозрачность из тех же ключей настроек, что у растеризатора.
+    this.colliderTint = settings.colliderColour.map((x) => x / 255.0);
+    this.colliderAlpha = settings.colliderOpacity;
   }
   _shader(type, src) {
     const gl = this.gl, sh = gl.createShader(type);
@@ -914,6 +992,24 @@ class Renderer {
   setPositions(shape) { const m = this.meshes.get(shape.name); if (m) this._refill(m.pos, shape.pos); }
   setNormals(shape) { const m = this.meshes.get(shape.name); if (m) this._refill(m.nrm, shape.nrm); }
   setColours(shape, colours) { const m = this.meshes.get(shape.name); if (m) this._refill(m.col, colours); }
+  // Кусок капсул - те же буферы, что у части меша, но цвет один на все вершины: тень
+  // по нормали шейдер положит на него сам, той же формулой, что на кожу.
+  uploadColliders(chunk) {
+    if (!chunk || !chunk.triCount) return;
+    this.upload(chunk);
+    const t = this.colliderTint, colours = new Float32Array(chunk.count * 3);
+    for (let i = 0; i < chunk.count; i++) { colours[i * 3] = t[0]; colours[i * 3 + 1] = t[1]; colours[i * 3 + 2] = t[2]; }
+    this.setColours(chunk, colours);
+  }
+  // Куски капсул, которые сейчас надо рисовать: тела - когда слой включён, бампер - ещё
+  // и по своему флагу. Без скелета и при выключенном слое - ничего.
+  _colliderChunks(bench) {
+    const view = bench.view, out = [];
+    if (!view.colliders || !bench.has_skeleton()) return out;
+    for (const chunk of [bench.collider_mesh(), view.bumper ? bench.bumper_mesh() : null])
+      if (chunk && chunk.triCount && this.meshes.has(chunk.name)) out.push(chunk);
+    return out;
+  }
   resize() {
     const dpr = window.devicePixelRatio || 1;
     const w = Math.max(1, Math.round(this.canvas.clientWidth * dpr));
@@ -921,11 +1017,12 @@ class Renderer {
     if (this.canvas.width !== w || this.canvas.height !== h) { this.canvas.width = w; this.canvas.height = h; }
   }
   // Диапазон глубины - проекция видимых вершин на ось взгляда, чтобы буфер ничего не отрезал.
+  // Капсулы входят в него, когда включены: бампер вчетверо больше тела и иначе был бы обрезан.
   _depthRange(bench, centre, forward) {
     let zmin = Infinity, zmax = -Infinity;
-    for (const name of bench.visible_shapes()) {
-      const s = bench.shape(name);
-      if (!s.triCount) continue;
+    const clouds = bench.visible_shapes().map((n) => bench.shape(n)).filter((s) => s.triCount > 0)
+      .concat(this._colliderChunks(bench));
+    for (const s of clouds) {
       const p = s.pos;
       for (let i = 0, n = p.length; i < n; i += 3) {
         const z = (p[i] - centre[0]) * forward[0] + (p[i + 1] - centre[1]) * forward[1] + (p[i + 2] - centre[2]) * forward[2];
@@ -966,14 +1063,40 @@ class Renderer {
     gl.uniform1f(this.uni.uDiffuse, view.diffuse);
     gl.uniform1f(this.uni.uFill, view.fill);
     gl.uniform1i(this.uni.uFlat, this.flat ? 1 : 0);
+    gl.uniform1f(this.uni.uAlpha, 1.0);
     for (const name of bench.visible_shapes()) {
       const m = this.meshes.get(name);
       if (!m) continue;
       gl.bindVertexArray(m.vao);
       gl.drawElements(gl.TRIANGLES, m.count, m.type, 0);
     }
+    this._overlayColliders(bench);
     gl.bindVertexArray(null);
     return { scale: scale };
+  }
+  // Капсулы поверх тела - полупрозрачно, со своей глубиной: зеркало _overlay_colliders
+  // растеризатора. Смысл в том, что видно обе оболочки сразу: внутри тела капсула
+  // просвечивает сквозь кожу, снаружи ложится на фон. Поэтому глубина тела капсулы
+  // не режет - перед каждым куском буфер глубины очищается, и кусок сортируется только
+  // сам с собой (передняя стенка капсулы закрывает заднюю, а не тело). Тело к этому
+  // моменту уже нарисовано, и его глубина больше никому не нужна. Цвет вершин - один
+  // на кусок, свет - той же формулой того же шейдера, прозрачность - uAlpha.
+  _overlayColliders(bench) {
+    const chunks = this._colliderChunks(bench);
+    if (!chunks.length) return;
+    const gl = this.gl;
+    gl.enable(gl.BLEND);
+    // Альфа холста остаётся единицей: иначе страница просвечивала бы сквозь капсулы.
+    gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
+    gl.uniform1f(this.uni.uAlpha, this.colliderAlpha);
+    for (const chunk of chunks) {
+      const m = this.meshes.get(chunk.name);
+      gl.clear(gl.DEPTH_BUFFER_BIT);
+      gl.bindVertexArray(m.vao);
+      gl.drawElements(gl.TRIANGLES, m.count, m.type, 0);
+    }
+    gl.uniform1f(this.uni.uAlpha, 1.0);
+    gl.disable(gl.BLEND);
   }
 }
 
@@ -1035,6 +1158,25 @@ class Panel {
       bench.shape_names().length ? parts : el("div", { class: "muted", text: "меш не открыт" }),
       el("div", { class: "row", style: "margin-top:6px" }, [
         el("button", { text: "показать все", on: { click: () => app.invoke("show_all") } })])]));
+
+    // капсулы столкновений - раздел есть только при открытом скелете: без него слоя нет
+    // и в ядре. Обе галочки - один метод фасада show_colliders(on, bumper); галочка
+    // капсул бампер не трогает (null), галочка бампера оставляет слой как есть.
+    this.colliderBox = null; this.bumperBox = null;
+    if (bench.has_skeleton()) {
+      this.colliderBox = el("input", { type: "checkbox",
+        on: { change: () => app.invoke("show_colliders", this.colliderBox.checked, null) } });
+      this.bumperBox = el("input", { type: "checkbox",
+        on: { change: () => app.invoke("show_colliders", bench.view.colliders, this.bumperBox.checked) } });
+      if (!bench.bumper_mesh()) { this.bumperBox.disabled = true; this.bumperBox.title = "в скелете нет цилиндра перемещения"; }
+      root.appendChild(el("section", null, [el("h2", { text: "Капсулы" }),
+        el("div", { class: "current" }, [el("span", { text: bench.names.skeleton }),
+          el("span", { class: "muted", text: " · капсул " + bench.summary.colliders })]),
+        el("div", { class: "row", style: "margin-top:6px" }, [
+          el("label", null, [this.colliderBox, " капсулы"]),
+          el("label", null, [this.bumperBox, " бампер"])]),
+        el("div", { class: "muted", text: "полупрозрачно поверх тела; цвет и прозрачность — colliderColour и colliderOpacity из настроек" })]));
+    }
 
     // раскраска
     this.colourRadios = new Map();
@@ -1232,6 +1374,9 @@ class Panel {
     // части
     for (const [name, box] of this.partBoxes) box.checked = view.is_visible(name);
 
+    // капсулы
+    if (this.colliderBox) { this.colliderBox.checked = view.colliders; this.bumperBox.checked = view.bumper; }
+
     // раскраска
     for (const [mode, r] of this.colourRadios) r.checked = (mode === view.colouring);
     this.morphSelect.value = view.highlightMorph || "";
@@ -1293,6 +1438,11 @@ class Panel {
       const i = state.focus.name.indexOf(":");
       parts.push("--focus-" + state.focus.name.slice(0, i), q(state.focus.name.slice(i + 1)));
     }
+    // Слой капсул: скелет называется явно, даже если render нашёл бы его рядом с мешем сам.
+    if (state.colliders && bench.summary.skeleton) {
+      parts.push("--skeleton", q(bench.summary.skeleton), "--colliders");
+      if (state.bumper) parts.push("--bumper");
+    }
     const light = state.light;
     if (light.follow !== st.lightFollowCamera) parts.push("--light", light.follow ? "camera" : "world");
     const dirDefault = (light.follow ? st.lightCameraDirection : st.lightDirection).map((x) => rnd(x, 3));
@@ -1316,6 +1466,9 @@ class App {
     this.canvas = document.getElementById("canvas");
     this.renderer = new Renderer(this.canvas, data.settings);
     for (const name of this.bench.shape_names()) this.renderer.upload(this.bench.shape(name));
+    // Капсулы - в буферы один раз: ползунки их не двигают, цвет у них один.
+    this.renderer.uploadColliders(this.bench.collider_mesh());
+    this.renderer.uploadColliders(this.bench.bumper_mesh());
     this.refreshPositions();
     this.refreshColours();
     this.panel = new Panel(this, document.getElementById("panel"));
@@ -1429,7 +1582,8 @@ const s = DATA.summary;
 document.getElementById("title").textContent = "morphbench — " + (DATA.names.nif || "меш не открыт");
 document.getElementById("subtitle").textContent = s
   ? "морфы: " + (DATA.names.tri ? DATA.names.tri + " (" + s.triKind + ")" : "нет") +
-    " · частей " + s.shapes + " · вершин " + s.vertices + " · костей " + s.bones + " · ползунков " + s.morphs
+    " · частей " + s.shapes + " · вершин " + s.vertices + " · костей " + s.bones + " · ползунков " + s.morphs +
+    (DATA.names.skeleton ? " · скелет " + DATA.names.skeleton + " · капсул " + s.colliders : "")
   : (DATA.server ? "выберите меш в списке на панели" : "");
 try {
   window.mb = new App(DATA);
