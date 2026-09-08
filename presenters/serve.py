@@ -11,6 +11,11 @@
 с ним. Страница, которую отдаёт сервер, обращается только к нему самому - переходом
 на другой запрос `/?name=...`; запросов наружу у неё нет, как и у файла с диска.
 
+Корень обзора необязателен: сервер поднимается и без него - с пустым списком и полем
+для папки на странице, - а назвать корень можно потом, запросом `/api/root`. Так его
+передаёт запуск из-под MO2: `ServerLink` с той стороны спрашивает, жив ли сервер,
+и отдаёт ему Data игры.
+
 Маршруты:
 
     GET /                                  страница с открытым телом (или пустым холстом)
@@ -20,6 +25,7 @@
     GET /api/environment                   bench.environment()
     GET /api/catalog?root=&all=0|1&rescan=0|1   bench.catalog(...)
     GET /api/payload?index=|name=&root=    open_entry, затем WebPage(bench).payload()
+    GET /api/root?root=<папка>             сделать папку корнем сервера; без root - какой сейчас
 
 Ошибки в /api/* - JSON {"error": ...} с кодом: 400 - запрос не разобран или корень
 не задан, 404 - нет записи или папки, 403 - под MO2 папка вне Data игры. На странице
@@ -28,8 +34,12 @@
 from __future__ import annotations
 
 import json
+import socket
 import sys
 import threading
+import urllib.error
+import urllib.parse
+import urllib.request
 import webbrowser
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -39,6 +49,9 @@ from urllib.parse import parse_qs, urlsplit
 from .web import WebPage
 
 _TRUE = ("1", "true", "yes", "on", "да")
+#: Подпись в заголовке Server: по ней `ServerLink` отличает свой сервер от чужой программы
+#: на том же порту.
+SERVER_NAME = "morphbench/1"
 
 
 class RequestError(Exception):
@@ -105,10 +118,12 @@ class Query:
 class WebServer:
     """Сервер страницы поверх фасада.
 
-    Корень обзора задаётся при старте: явной папкой либо умолчанием окружения (под MO2 -
-    Data игры). Проверяет его сам фасад, и вне MO2 без папки он откажет ValueError -
-    её и увидит тот, кто запустил. Порт занимается сразу, чтобы `url` был верен ещё до
-    `run()` - в том числе для порта 0, который выбирает система.
+    Корень обзора: явная папка, иначе умолчание окружения (под MO2 - Data игры), иначе
+    никакого - сервер поднимается с пустым списком, и папку называют на странице или
+    запросом `/api/root`. Явную папку проверяет фасад сразу: вне MO2 несуществующая
+    откажет FileNotFoundError, под MO2 чужая - PermissionError, и их увидит тот, кто
+    запустил. Порт занимается сразу, чтобы `url` был верен ещё до `run()` - в том числе
+    для порта 0, который выбирает система.
     """
 
     def __init__(self, bench, root=None, host=None, port=None, with_morphs: bool = True):
@@ -117,9 +132,11 @@ class WebServer:
         self.with_morphs = bool(with_morphs)
         self.host = str(host or self.cfg["serveHost"])
         self.lock = threading.Lock()
-        # Корень: фасад проверяет его и делает первый обход - страница всё равно попросит список.
-        bench.catalog(root, self.with_morphs)
-        self.root = Path(root) if root is not None else Path(bench.environment()["dataRoot"])
+        self.root: Path | None = None
+        if root is None:
+            root = bench.environment()["dataRoot"]
+        if root is not None:
+            self.set_root(root)
         self.httpd = ThreadingHTTPServer(
             (self.host, int(self.cfg["servePort"] if port is None else port)),
             partial(_Handler, self))
@@ -130,6 +147,13 @@ class WebServer:
     @property
     def url(self) -> str:
         return "http://%s:%d/" % (self.host, self.port)
+
+    def set_root(self, root) -> dict:
+        """Сделать папку корнем сервера. Фасад проверяет её и делает первый обход -
+        страница всё равно попросит список."""
+        rows = self.bench.catalog(root, self.with_morphs)
+        self.root = Path(root)
+        return {"root": str(self.root), "meshes": len(rows)}
 
     # ---- жизнь сервера ----------------------------------------------------------------
     def run(self, open_browser: bool = True) -> None:
@@ -162,63 +186,145 @@ class WebServer:
         self.httpd.server_close()
 
     # ---- ответы: каждый - вызовы фасада под замком ------------------------------------
-    def _root_of(self, query: Query) -> str:
-        """Папка обзора для запроса: названная в нём либо корень сервера. Фасаду None
-        значит «умолчание окружения», а у сервера умолчание своё - его корень."""
-        return query.root if query.root is not None else str(self.root)
+    def _root_of(self, query: Query) -> str | None:
+        """Папка обзора для запроса: названная в нём либо корень сервера; None - ни той,
+        ни другого. Фасаду None значил бы «умолчание окружения», а у сервера умолчание
+        своё - его корень, - поэтому фасад отсюда None не получает."""
+        return query.root if query.root is not None else (
+            None if self.root is None else str(self.root))
+
+    def _root_required(self, query: Query) -> str:
+        root = self._root_of(query)
+        if root is None:
+            raise RequestError(400, "корень обзора не задан: назовите папку ключом root=")
+        return root
 
     def api_environment(self) -> dict:
         with self.lock:
-            return self.bench.environment()
+            return dict(self.bench.environment(),
+                        root=None if self.root is None else str(self.root))
 
     def api_catalog(self, query: Query) -> list[dict]:
         with self.lock:
-            return self.bench.catalog(self._root_of(query), with_morphs=not query.flag("all"),
+            return self.bench.catalog(self._root_required(query),
+                                      with_morphs=not query.flag("all"),
                                       rescan=query.flag("rescan"))
 
     def api_payload(self, query: Query) -> dict:
         with self.lock:
             key = query.key
             if key is not None:
-                self.bench.open_entry(key, self._root_of(query), not query.flag("all"))
+                self.bench.open_entry(key, self._root_required(query), not query.flag("all"))
             if not self.bench.is_open():
                 raise RequestError(400, "меш не открыт: назовите его ключом name= или index=")
             return WebPage(self.bench).payload()
 
+    def api_root(self, query: Query) -> dict:
+        """Корень сервера: назвать новый либо спросить нынешний."""
+        with self.lock:
+            if query.root is not None:
+                return self.set_root(query.root)
+            return {"root": None if self.root is None else str(self.root),
+                    "meshes": None if self.root is None else len(
+                        self.bench.catalog(str(self.root), self.with_morphs))}
+
     def page(self, query: Query) -> tuple[str, int]:
         """Страница по запросу: список мешей под корнем, открытие названного тела, и всё,
         что не удалось, - текстом на панели, а не пустым ответом. Список при неудаче
-        берётся по корню сервера, чтобы выбирать было из чего."""
+        берётся по корню сервера, чтобы выбирать было из чего; без корня список пуст,
+        и это не ошибка - папку называют на странице."""
         with_morphs = not query.flag("all")
         error, status = None, 200
         with self.lock:
             bench = self.bench
             root = self._root_of(query)
-            shown_root = Path(root)
+            shown_root = root
+            catalog: list[dict] = []
             try:
-                catalog = bench.catalog(root, with_morphs)
+                if root is not None:
+                    catalog = bench.catalog(root, with_morphs)
                 key = query.key
                 if key is not None:
-                    bench.open_entry(key, root, with_morphs)
+                    bench.open_entry(key, self._root_required(query), with_morphs)
             except Exception as e:  # noqa: BLE001 - любой отказ фасада показывается текстом
                 error, status = _message(e), _status_of(e)
-                try:
-                    catalog = bench.catalog(str(self.root), with_morphs)
-                except Exception:  # noqa: BLE001
-                    catalog = []
-                shown_root = self.root
+                catalog = []
+                if self.root is not None:
+                    try:
+                        catalog = bench.catalog(str(self.root), with_morphs)
+                    except Exception:  # noqa: BLE001
+                        catalog = []
+                shown_root = None if self.root is None else str(self.root)
             page = WebPage(bench, server=True, catalog=catalog, environment=bench.environment(),
-                           root=str(shown_root), with_morphs=with_morphs, error=error)
+                           root=shown_root, with_morphs=with_morphs, error=error)
             return page.html(), status
 
     def __repr__(self) -> str:
-        return "WebServer(%s, корень=%s)" % (self.url, self.root)
+        return "WebServer(%s, корень=%s)" % (self.url, self.root or "не задан")
+
+
+class ServerLink:
+    """Сторона клиента: жив ли сервер на этом адресе и наш ли он.
+
+    Нужна запуску: `mb.py serve` сначала спрашивает, не поднят ли сервер уже, и если да -
+    не поднимает второго, а отдаёт ему корень и открывает страницу. Из-под MO2 это и есть
+    передача пути: процесс, запущенный MO2, видит Data игры сквозь usvfs и называет её
+    серверу.
+    """
+
+    def __init__(self, host: str, port: int, timeout: float = 2.0):
+        self.host = str(host)
+        self.port = int(port)
+        self.timeout = float(timeout)
+        # Без прокси: адрес местный, а переменные окружения могут завернуть его наружу.
+        self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+    @property
+    def url(self) -> str:
+        return "http://%s:%d/" % (self.host, self.port)
+
+    def _get(self, path: str) -> dict:
+        with self._opener.open(self.url.rstrip("/") + path, timeout=self.timeout) as r:
+            if not str(r.headers.get("Server", "")).startswith(SERVER_NAME):
+                raise RequestError(502, "на %s отвечает не morphbench" % self.url)
+            return json.loads(r.read().decode("utf-8"))
+
+    def probe(self) -> str:
+        """`free` - порт свободен, `ours` - там наш сервер, `busy` - чужая программа."""
+        try:
+            with socket.create_connection((self.host, self.port), timeout=self.timeout):
+                pass
+        except OSError:
+            return "free"
+        try:
+            self._get("/api/environment")
+        except Exception:  # noqa: BLE001 - любой не наш ответ означает чужую программу
+            return "busy"
+        return "ours"
+
+    def environment(self) -> dict:
+        """Окружение работающего сервера: под MO2 ли он и какой у него корень."""
+        return self._get("/api/environment")
+
+    def set_root(self, root) -> dict:
+        """Отдать серверу корень обзора. Отказ сервера - RequestError с его текстом."""
+        try:
+            return self._get("/api/root?" + urllib.parse.urlencode({"root": str(root)}))
+        except urllib.error.HTTPError as e:
+            try:
+                message = json.loads(e.read().decode("utf-8")).get("error") or str(e)
+            except Exception:  # noqa: BLE001
+                message = str(e)
+            raise RequestError(e.code, message) from None
+
+    def open_page(self) -> None:
+        webbrowser.open(self.url)
 
 
 class _Handler(BaseHTTPRequestHandler):
     """Разбор пути и отправка ответа; содержание - у WebServer."""
 
-    server_version = "morphbench/1"
+    server_version = SERVER_NAME
 
     def __init__(self, owner: WebServer, *args, **kwargs):
         self.owner = owner
@@ -255,6 +361,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(owner.api_catalog(query))
             elif url.path == "/api/payload":
                 self._send_json(owner.api_payload(query))
+            elif url.path == "/api/root":
+                self._send_json(owner.api_root(query))
             elif url.path == "/favicon.ico":
                 # Значок у страницы встроенный; браузеры всё равно спрашивают - молча пусто.
                 self.send_response(204)

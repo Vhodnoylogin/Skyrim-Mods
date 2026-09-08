@@ -128,8 +128,9 @@ class TestWebServer(unittest.TestCase):
 
     def test_environment(self):
         data = self.json("/api/environment")
-        self.assertEqual(set(data), {"insideMo2", "dataRoot", "games", "catalogRoot"})
+        self.assertEqual(set(data), {"insideMo2", "dataRoot", "games", "catalogRoot", "root"})
         self.assertIs(type(data["insideMo2"]), bool)
+        self.assertEqual(Path(data.pop("root")), self.root)     # корень сервера - отдельно
         self.assertEqual(data, self.bench.environment())
 
     def test_catalog(self):

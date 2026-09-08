@@ -17,6 +17,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+from morphbench.model import vertex_normals
+
 
 class Raster:
     """Растеризатор поверх фасада."""
@@ -108,37 +110,39 @@ class Raster:
                 h * 0.5 - local[:, 1] * scale,
                 local[:, 2])
 
-    def image(self) -> Image.Image:
-        view = self.bench.view
-        w, h = view.width, view.height
-        verts, normals, tris, vcols = self._collect()
+    @staticmethod
+    def _face_normals(verts: np.ndarray, tris: np.ndarray) -> np.ndarray:
+        n = np.cross(verts[tris[:, 1]] - verts[tris[:, 0]],
+                     verts[tris[:, 2]] - verts[tris[:, 0]])
+        return n / np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1e-6)
 
+    def _paint(self, colour: np.ndarray, zbuf: np.ndarray, verts: np.ndarray,
+               normals: np.ndarray, tris: np.ndarray, vcols: np.ndarray,
+               alpha: float = 1.0) -> None:
+        """Треугольники в холст с проверкой глубины - один путь и для кожи, и для капсул.
+
+        Затенение. Мягкое - свет считается в вершинах и растягивается по треугольнику
+        вместе с цветом; плоское - одна сила света на треугольник, по его нормали.
+        `alpha` меньше единицы подмешивает цвет к тому, что на холсте уже есть.
+        """
+        h, w = zbuf.shape
         sx, sy, depth = self._screen(verts)
-
-        bg = np.array(self.cfg["background"], dtype=np.float32) / 255.0
-        colour = np.tile(bg, (h, w, 1)).astype(np.float32)
-        zbuf = np.full((h, w), np.inf, dtype=np.float32)
-
         a, b, c = tris[:, 0], tris[:, 1], tris[:, 2]
         ax, ay, bx, by, cx, cy = sx[a], sy[a], sx[b], sy[b], sx[c], sy[c]
         area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
 
-        # Затенение. Мягкое - свет считается в вершинах и растягивается по треугольнику
-        # вместе с цветом; плоское - одна сила света на треугольник, по его нормали.
         if str(self.cfg["shading"]) == "flat":
-            n = np.cross(verts[b] - verts[a], verts[c] - verts[a])
-            n = n / np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1e-6)
-            shade = self._lit(n)
+            shade = self._lit(self._face_normals(verts, tris))
         else:
             vcols = vcols * self._lit(normals)[:, None]
             shade = np.ones(tris.shape[0], dtype=np.float32)
 
-        keep = np.abs(area) > 1e-9
-        order = np.nonzero(keep)[0]
+        order = np.nonzero(np.abs(area) > 1e-9)[0]
         x0 = np.clip(np.floor(np.minimum(np.minimum(ax, bx), cx)).astype(np.int32), 0, w - 1)
         x1 = np.clip(np.ceil(np.maximum(np.maximum(ax, bx), cx)).astype(np.int32), 0, w - 1)
         y0 = np.clip(np.floor(np.minimum(np.minimum(ay, by), cy)).astype(np.int32), 0, h - 1)
         y1 = np.clip(np.ceil(np.maximum(np.maximum(ay, by), cy)).astype(np.int32), 0, h - 1)
+        blend = float(alpha) < 1.0
 
         for t in order:
             xa, xb = x0[t], x1[t]
@@ -168,74 +172,46 @@ class Raster:
             s = 1.0 - u - v
             z = s * depth[a[t]] + u * depth[b[t]] + v * depth[c[t]]
             base = (s[:, None] * vcols[a[t]] + u[:, None] * vcols[b[t]] + v[:, None] * vcols[c[t]])
+            rgb = np.clip(base * shade[t], 0.0, 1.0)
             sub[mask] = z
             csub = colour[ya:yb + 1, xa:xb + 1]
-            csub[mask] = np.clip(base * shade[t], 0.0, 1.0)
+            csub[mask] = csub[mask] * (1.0 - alpha) + rgb * alpha if blend else rgb
+
+    def image(self) -> Image.Image:
+        view = self.bench.view
+        w, h = view.width, view.height
+        verts, normals, tris, vcols = self._collect()
+
+        bg = np.array(self.cfg["background"], dtype=np.float32) / 255.0
+        colour = np.tile(bg, (h, w, 1)).astype(np.float32)
+        zbuf = np.full((h, w), np.inf, dtype=np.float32)
+        self._paint(colour, zbuf, verts, normals, tris, vcols)
 
         if view.colliders and self.bench.has_skeleton():
-            self._overlay_colliders(colour, zbuf)
+            self._overlay_colliders(colour)
         return Image.fromarray((colour * 255.0).astype(np.uint8), mode="RGB")
 
-    def _overlay_colliders(self, colour: np.ndarray, zbuf: np.ndarray) -> None:
+    def _overlay_colliders(self, colour: np.ndarray) -> None:
         """Капсулы поверх тела - полупрозрачно, с собственной глубиной.
 
         Смысл прозрачности в том, что видно обе оболочки сразу: там, где капсула лежит
         внутри тела, она просвечивает сквозь кожу, а там, где вылезает наружу, ложится
         прямо на фон и сразу бросается в глаза. Ради этого капсулы НЕ пишут в общий
         буфер глубины - иначе они закрыли бы собой то, что мы и хотим с ними сравнить.
+        Бампер кладётся только по просьбе: он вчетверо больше любой части тела.
         """
-        verts, tris = self.bench.collider_mesh()
-        if tris.shape[0] == 0:
-            return
+        view = self.bench.view
+        chunks = [self.bench.collider_mesh()]
+        if view.bumper:
+            chunks.append(self.bench.bumper_mesh())
         alpha = float(self.cfg["colliderOpacity"])
         tint = np.array(self.cfg["colliderColour"], dtype=np.float32) / 255.0
-        sx, sy, depth = self._screen(verts)
-        normals = self._face_normals(verts, tris)
-        shade = self._lit(normals)
-        own = np.full(zbuf.shape, np.inf, dtype=np.float32)
-        for t in range(tris.shape[0]):
-            a, b, c = tris[t]
-            self._paint_triangle(colour, own, sx, sy, depth, a, b, c,
-                                 np.clip(tint * shade[t], 0.0, 1.0), alpha)
-
-    @staticmethod
-    def _face_normals(verts: np.ndarray, tris: np.ndarray) -> np.ndarray:
-        n = np.cross(verts[tris[:, 1]] - verts[tris[:, 0]],
-                     verts[tris[:, 2]] - verts[tris[:, 0]])
-        return n / np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1e-6)
-
-    @staticmethod
-    def _paint_triangle(colour, zbuf, sx, sy, depth, a, b, c, rgb, alpha) -> None:
-        """Один треугольник ровным цветом с проверкой глубины и подмешиванием."""
-        h, w = zbuf.shape
-        ax, ay, bx, by, cx, cy = sx[a], sy[a], sx[b], sy[b], sx[c], sy[c]
-        area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
-        if abs(area) < 1e-9:
-            return
-        xa = max(int(np.floor(min(ax, bx, cx))), 0)
-        xb = min(int(np.ceil(max(ax, bx, cx))), w - 1)
-        ya = max(int(np.floor(min(ay, by, cy))), 0)
-        yb = min(int(np.ceil(max(ay, by, cy))), h - 1)
-        if xb < xa or yb < ya:
-            return
-        gx, gy = np.meshgrid(np.arange(xa, xb + 1, dtype=np.float32) + 0.5,
-                             np.arange(ya, yb + 1, dtype=np.float32) + 0.5)
-        inv = 1.0 / area
-        w0 = ((bx - ax) * (gy - ay) - (by - ay) * (gx - ax)) * inv
-        w1 = ((gx - ax) * (cy - ay) - (gy - ay) * (cx - ax)) * inv
-        inside = (w0 >= 0) & (w1 >= 0) & (w0 + w1 <= 1.0)
-        if not inside.any():
-            return
-        z = np.where(inside,
-                     (1.0 - w1 - w0) * depth[a] + w1 * depth[b] + w0 * depth[c],
-                     np.inf)
-        sub = zbuf[ya:yb + 1, xa:xb + 1]
-        mask = inside & (z < sub)
-        if not mask.any():
-            return
-        sub[mask] = z[mask]
-        csub = colour[ya:yb + 1, xa:xb + 1]
-        csub[mask] = csub[mask] * (1.0 - alpha) + rgb * alpha
+        for verts, tris in chunks:
+            if tris.shape[0] == 0:
+                continue
+            own = np.full(colour.shape[:2], np.inf, dtype=np.float32)
+            self._paint(colour, own, verts, vertex_normals(verts, tris), tris,
+                        np.tile(tint, (verts.shape[0], 1)), alpha)
 
     def save(self, path) -> Path:
         path = Path(path)

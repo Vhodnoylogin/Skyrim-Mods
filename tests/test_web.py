@@ -109,5 +109,84 @@ class TestWebPage(unittest.TestCase):
         self.assertNotIn("https://", text)
 
 
+def _unpack(b64, dtype):
+    import base64
+    import numpy as np
+    return np.frombuffer(base64.b64decode(b64), dtype=dtype)
+
+
+def _index_dtype(kind):
+    return "<u2" if kind == "u16" else "<u4"
+
+
+def _rig(with_bumper: bool = False):
+    """Скелет в памяти помощниками из test_colliders: одна кость с одной капсулой и,
+    по просьбе, бампер. Путь у него - memory.nif, как у всех фигур в памяти."""
+    from test_colliders import body, cap, rig
+    bumper = body("Bump", cap("Bump", radius=25.0), kind="bhkSimpleShapePhantom") if with_bumper else None
+    return rig(body("B", cap(radius=2.0)), bumper=bumper)
+
+
+@unittest.skipIf(WebPage is None, "presenters/web.py ещё нет")
+class TestWebPageColliders(unittest.TestCase):
+    """Слой капсул: без скелета его в странице нет, со скелетом капсулы вложены целиком —
+    теми же треугольниками, что отдаёт фасад, — а состояние слоя идёт из view_state()."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.bench = common.bench(self.tmp.name, common.sample_model(), common.sample_morphs())
+
+    def test_without_skeleton(self):
+        """Скелета нет — colliders None, имя скелета None, слой в состоянии выключен."""
+        page = WebPage(self.bench)
+        payload = page.payload()
+        self.assertFalse(self.bench.has_skeleton())
+        self.assertIsNone(payload["colliders"])
+        self.assertIsNone(payload["names"]["skeleton"])
+        self.assertFalse(payload["view"]["colliders"])
+        self.assertFalse(payload["view"]["bumper"])
+        # Раздел «Капсулы» панель строит по этому же признаку, поэтому в данных
+        # страницы капсул нет вовсе.
+        self.assertIn('"colliders":null', page.html())
+
+    def test_with_skeleton_in_memory(self):
+        """Капсулы в странице — те же вершины и треугольники, что у collider_mesh()."""
+        import numpy as np
+        self.bench.rig = _rig()
+        payload = WebPage(self.bench).payload()
+        verts, tris = self.bench.collider_mesh()
+        got = payload["colliders"]
+        self.assertIsNotNone(got)
+        self.assertEqual(got["vertexCount"], verts.shape[0])
+        np.testing.assert_array_equal(_unpack(got["vertices"], "<f4").reshape(-1, 3), verts)
+        np.testing.assert_array_equal(
+            _unpack(got["triangles"], _index_dtype(got["indexType"])).reshape(-1, 3), tris)
+        self.assertIsNone(got["bumper"], "бампера в этом скелете нет")
+        self.assertEqual(payload["names"]["skeleton"], "memory.nif")
+        self.assertEqual(payload["summary"]["colliders"], 1)
+        # Слой выключен, пока не попросили, и включается тем же методом фасада.
+        self.assertFalse(payload["view"]["colliders"])
+        self.bench.show_colliders(True)
+        payload = WebPage(self.bench).payload()
+        self.assertTrue(payload["view"]["colliders"])
+        self.assertFalse(payload["view"]["bumper"])
+        self.assertEqual(payload["view"], self.bench.view_state(precise=True))
+
+    def test_bumper_is_packed_apart(self):
+        """Цилиндр перемещения — отдельным куском, чтобы страница клала его по своему флагу."""
+        self.bench.rig = _rig(with_bumper=True)
+        got = WebPage(self.bench).payload()["colliders"]
+        self.assertIsNotNone(got["bumper"])
+        self.assertEqual(got["bumper"]["vertexCount"], self.bench.bumper_mesh()[0].shape[0])
+        self.assertEqual(got["vertexCount"], self.bench.collider_mesh()[0].shape[0])
+
+    def test_settings_carry_colour_and_opacity(self):
+        """Цвет и прозрачность слоя — из тех же ключей настроек, что у растеризатора."""
+        st = WebPage(self.bench).payload()["settings"]
+        self.assertEqual(st["colliderColour"], [float(x) for x in self.bench.cfg["colliderColour"]])
+        self.assertEqual(st["colliderOpacity"], float(self.bench.cfg["colliderOpacity"]))
+
+
 if __name__ == "__main__":
     common.main()
