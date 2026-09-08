@@ -1,13 +1,13 @@
 """Слой показа: картинка PNG прямо из чисел ядра.
 
-Своими средствами, без Blender и без игры: ортографическая камера, буфер глубины и плоское
-затенение. Тело вервольфа - тридцать четыре тысячи треугольников - рисуется за секунды,
+Своими средствами, без Blender и без игры: ортографическая камера, буфер глубины и затенение
+по нормали вершины. Тело вервольфа - тридцать четыре тысячи треугольников - рисуется за секунды,
 а не за минуту, и это единственное, ради чего слой существует: увидеть результат сразу
 после сборки, а не в следующем игровом прогоне.
 
-Ничего не вычисляет сам. Вершины берёт у `MorphBench.deformed`, признак раскраски -
-у `vertex_colour_key`, положение камеры - у `ViewState`. Перевод признака в цвет живёт здесь,
-потому что цвет - это уже показ.
+Ничего не вычисляет сам. Вершины берёт у `MorphBench.deformed`, нормали - у `vertex_normals`,
+кадр - у `framing`, признак раскраски - у `vertex_colour_key`, направление и силы света -
+у `ViewState`. Перевод признака в цвет живёт здесь, потому что цвет - это уже показ.
 """
 from __future__ import annotations
 
@@ -65,8 +65,8 @@ class Raster:
 
     # ---- геометрия сцены --------------------------------------------------------------
     def _collect(self):
-        """Все видимые части в одном массиве: вершины, треугольники, цвета вершин."""
-        verts, tris, cols = [], [], []
+        """Все видимые части в одном массиве: вершины, нормали, треугольники, цвета вершин."""
+        verts, norms, tris, cols = [], [], [], []
         base = 0
         for name in self.bench.visible_shapes():
             shape = self.bench.model.shape(name)
@@ -75,24 +75,33 @@ class Raster:
             v = self.bench.deformed(name)
             c = self._vertex_colours(name, shape.vertex_count)
             verts.append(v)
+            norms.append(self.bench.vertex_normals(name))
             tris.append(shape.tris + base)
             cols.append(np.full((shape.vertex_count, 3), 0.72, np.float32) if c is None else c)
             base += shape.vertex_count
         if not verts:
             raise RuntimeError("нечего рисовать: все части меша скрыты")
-        return (np.vstack(verts), np.vstack(tris), np.vstack(cols))
+        return (np.vstack(verts), np.vstack(norms), np.vstack(tris), np.vstack(cols))
+
+    # ---- свет -------------------------------------------------------------------------
+    def _lit(self, normals: np.ndarray) -> np.ndarray:
+        """Сила света на нормали: рассеянная плюс направленная с той стороны, откуда светит,
+        плюс встречная подсветка с противоположной - чтобы тень не была слепой."""
+        view = self.bench.view
+        light = np.asarray(view.light_vector(), dtype=np.float32)
+        lam = normals @ light
+        return (view.ambient + view.diffuse * np.clip(lam, 0.0, 1.0)
+                + view.fill * np.clip(-lam, 0.0, 1.0)).astype(np.float32)
 
     # ---- рисование --------------------------------------------------------------------
     def image(self) -> Image.Image:
         view = self.bench.view
         w, h = view.width, view.height
-        verts, tris, vcols = self._collect()
+        verts, normals, tris, vcols = self._collect()
 
         basis = view.basis()
-        # Кадр: либо вся модель, либо сфера, на которую наведена камера, - решает ядро.
-        whole = 0.5 * (verts.min(axis=0) + verts.max(axis=0))
-        half = float(np.abs(((verts - whole) @ basis.T)[:, :2]).max())
-        centre, half = view.framing(whole, half)
+        # Кадр - вся модель, сфера наведения или панорама - решает ядро.
+        centre, half = self.bench.framing()
         local = (verts - centre) @ basis.T          # x вправо, y вверх, z от зрителя
 
         span = half * 2.0
@@ -109,15 +118,15 @@ class Raster:
         ax, ay, bx, by, cx, cy = sx[a], sy[a], sx[b], sy[b], sx[c], sy[c]
         area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
 
-        # Затенение по нормали треугольника: одного направленного источника хватает,
-        # чтобы форма читалась, а лишнего в картинку не попадало.
-        n = np.cross(verts[b] - verts[a], verts[c] - verts[a])
-        ln = np.linalg.norm(n, axis=1, keepdims=True)
-        n = n / np.maximum(ln, 1e-6)
-        light = np.array(self.cfg["lightDirection"], dtype=np.float32)
-        light /= max(float(np.linalg.norm(light)), 1e-6)
-        lam = np.clip(n @ light, 0.0, 1.0)
-        shade = float(self.cfg["ambient"]) + float(self.cfg["diffuse"]) * lam
+        # Затенение. Мягкое - свет считается в вершинах и растягивается по треугольнику
+        # вместе с цветом; плоское - одна сила света на треугольник, по его нормали.
+        if str(self.cfg["shading"]) == "flat":
+            n = np.cross(verts[b] - verts[a], verts[c] - verts[a])
+            n = n / np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1e-6)
+            shade = self._lit(n)
+        else:
+            vcols = vcols * self._lit(normals)[:, None]
+            shade = np.ones(tris.shape[0], dtype=np.float32)
 
         keep = np.abs(area) > 1e-9
         order = np.nonzero(keep)[0]

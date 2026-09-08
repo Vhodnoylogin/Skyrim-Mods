@@ -14,7 +14,13 @@
 его отдаёт `view_state()`, и командную строку `mb.py render`, которая даст тот же кадр без окна.
 
 Палитры перенесены из растеризатора один в один, камера повторяет `ViewState.basis()`
-и `framing()`, свет и фон берутся из настроек - поэтому кадр страницы совпадает с PNG.
+и `framing()`, свет - `light_vector()` и силы из того же состояния, нормали вершин считаются
+по `vertex_normals` из model.py - поэтому кадр страницы совпадает с PNG.
+
+Та же страница умеет приходить и с локального сервера (`mb.py serve`): тогда в блок JSON
+вкладываются ещё список мешей под корнем обзора и окружение, и на панели появляется выбор
+модели. Геометрия в обоих случаях упаковывается одинаково, а страница с сервера обращается
+только к своему серверу - переходом на другой запрос, без единого запроса наружу.
 """
 from __future__ import annotations
 
@@ -26,11 +32,25 @@ import numpy as np
 
 
 class WebPage:
-    """Страница поверх фасада: числа ядра, упакованные в один файл."""
+    """Страница поверх фасада: числа ядра, упакованные в один файл.
 
-    def __init__(self, bench):
+    Без сервера страница самодостаточна и открывается с диска. С сервера (`server=True`)
+    она получает ещё список мешей `catalog` (как его отдаёт `bench.catalog`), окружение
+    `environment`, корень обзора `root`, признак «и без морфов» и текст ошибки последнего
+    запроса: этого хватает панели, чтобы предложить выбор модели ссылкой на тот же сервер.
+    Меш при этом может быть и не открыт - тогда страница показывает пустой холст и список.
+    """
+
+    def __init__(self, bench, server: bool = False, catalog=None, environment=None,
+                 root=None, with_morphs: bool = True, error: str | None = None):
         self.bench = bench
         self.cfg = bench.cfg
+        self.server = bool(server)
+        self.catalog = list(catalog or [])
+        self.environment = dict(environment or {})
+        self.root = None if root is None else str(root)
+        self.with_morphs = bool(with_morphs)
+        self.error = None if error is None else str(error)
 
     # ---- упаковка массивов ------------------------------------------------------------
     @staticmethod
@@ -98,12 +118,17 @@ class WebPage:
 
     # ---- настройки, которые нужны показу ----------------------------------------------
     def _settings(self) -> dict:
+        """Единственный источник чисел для страницы: ни одно из них в скрипте не зашито."""
         cfg = self.cfg
         return {
             "background": [float(x) for x in cfg["background"]],
+            "lightFollowCamera": bool(cfg["lightFollowCamera"]),
+            "lightCameraDirection": [float(x) for x in cfg["lightCameraDirection"]],
             "lightDirection": [float(x) for x in cfg["lightDirection"]],
             "ambient": float(cfg["ambient"]),
             "diffuse": float(cfg["diffuse"]),
+            "fill": float(cfg["fill"]),
+            "shading": str(cfg["shading"]),
             "imageWidth": int(cfg["imageWidth"]),
             "imageHeight": int(cfg["imageHeight"]),
             "frameFill": float(cfg["frameFill"]),
@@ -115,10 +140,20 @@ class WebPage:
             "wheelZoomRate": float(cfg["wheelZoomRate"]),
         }
 
-    # ---- всё вместе -------------------------------------------------------------------
-    def payload(self) -> dict:
-        """Всё, что страница знает о меше, - одним словарём. Здесь нет ни одного вычисления,
-        только вопросы к фасаду и упаковка ответов."""
+    # ---- сервер: то, что страница знает о нём -----------------------------------------
+    def _server(self) -> dict | None:
+        """Список мешей, окружение и корень - только когда страницу отдаёт сервер.
+        В файле с диска здесь None, и панель не предлагает того, чего сделать не может."""
+        if not self.server:
+            return None
+        return {"root": self.root, "withMorphs": self.with_morphs,
+                "catalog": self.catalog, "environment": self.environment,
+                "error": self.error}
+
+    # ---- тело: геометрия, морфы, цели -------------------------------------------------
+    def _body(self) -> dict:
+        """Всё про открытый меш. Здесь нет ни одного вычисления - только вопросы
+        к фасаду и упаковка ответов."""
         bench = self.bench
         summary = bench.summary()
         names = bench.model.shape_names()
@@ -153,23 +188,41 @@ class WebPage:
             "summary": summary,
             "names": {"nif": Path(summary["nif"]).name,
                       "tri": Path(summary["tri"]).name if summary["tri"] else None},
-            "settings": self._settings(),
-            "presets": bench.presets(),
             "shapes": shapes,
             "morphs": morphs,
             "deltas": deltas,
             "strain": strain,
             "targets": targets,
-            "view": bench.view_state(),
-            "sliders": bench.sliders(),
         }
+
+    @staticmethod
+    def _no_body() -> dict:
+        """Меш не открыт: пустой холст, но та же форма данных, чтобы скрипт не ветвился."""
+        return {"summary": None, "names": {"nif": None, "tri": None},
+                "shapes": [], "morphs": [], "deltas": {}, "strain": {},
+                "targets": {"bones": [], "morphs": [], "shapes": []}}
+
+    # ---- всё вместе -------------------------------------------------------------------
+    def payload(self) -> dict:
+        """Всё, что страница знает о меше, настройках и - если есть - сервере, одним словарём."""
+        bench = self.bench
+        data = self._body() if bench.is_open() else self._no_body()
+        data.update({
+            "settings": self._settings(),
+            "presets": bench.presets(),
+            "view": bench.view_state(precise=True),
+            "sliders": bench.sliders(),
+            "server": self._server(),
+        })
+        return data
 
     def html(self) -> str:
         """Готовая страница строкой. Данные лежат в блоке <script type="application/json">;
         последовательность `</` внутри строк экранируется, чтобы имя части не закрыло блок."""
         data = json.dumps(self.payload(), ensure_ascii=False, separators=(",", ":"))
         data = data.replace("</", "<\\/")
-        title = "morphbench — %s" % Path(self.bench.summary()["nif"]).name
+        name = Path(self.bench.summary()["nif"]).name if self.bench.is_open() else "меш не открыт"
+        title = "morphbench — %s" % name
         return _PAGE.replace("__MB_TITLE__", _escape(title)).replace("__MB_DATA__", data)
 
     def save(self, path) -> Path:
@@ -186,7 +239,8 @@ def _escape(text: str) -> str:
 
 # Сама страница. Ниже - разметка, стили и скрипт; данные подставляются на место __MB_DATA__.
 # Скрипт написан теми же объектами, что ядро: ViewMirror повторяет ViewState, BenchMirror -
-# MorphBench, и у каждого действия на панели есть метод с тем же именем.
+# MorphBench, vertexNormals - одноимённую функцию model.py, и у каждого действия на панели
+# есть метод с тем же именем.
 _PAGE = r"""<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -219,10 +273,13 @@ _PAGE = r"""<!DOCTYPE html>
            padding: 3px 9px; cursor: pointer; font: inherit; }
   button:hover { border-color: var(--accent); }
   button.on { background: var(--accent); color: #1a1c20; border-color: var(--accent); }
-  select, input[type=number] { background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+  select, input[type=number], input[type=text] { background: var(--panel2); color: var(--text); border: 1px solid var(--line);
            border-radius: 4px; padding: 2px 4px; font: inherit; }
   select { max-width: 100%; }
+  input.short { width: 68px; }
+  input.wide { flex: 1; min-width: 120px; }
   label { cursor: pointer; }
+  .current { word-break: break-all; }
   .parts .part { display: flex; align-items: center; gap: 6px; padding: 1px 0; }
   .parts label { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
   .parts .only { color: var(--muted); font-size: 11px; cursor: pointer; }
@@ -248,7 +305,7 @@ _PAGE = r"""<!DOCTYPE html>
 </header>
 <main>
   <canvas id="canvas"></canvas>
-  <div id="hint">левая кнопка — орбита · колесо — масштаб · правая кнопка — панорама · двойной щелчок — сброс</div>
+  <div id="hint">левая кнопка — орбита · колесо — масштаб к курсору · правая кнопка — панорама · двойной щелчок — сброс</div>
   <div id="nogl">В этом браузере нет WebGL2 — нарисовать тело нечем.</div>
 </main>
 <aside id="panel"></aside>
@@ -263,8 +320,15 @@ const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 // Округление как у round() в Python - к ближайшему чётному на ровной половине, - чтобы
 // as_dict страницы и ядра давали одни и те же числа.
 const rnd = (x, digits) => {
-  const k = Math.pow(10, digits), s = x * k, f = Math.floor(s), d = s - f;
-  return (d > 0.5 || (d === 0.5 && f % 2 !== 0) ? f + 1 : f) / k;
+  const k = Math.pow(10, digits), s = x * k;
+  if (Number.isInteger(s * 2) && !Number.isInteger(s)) {
+    // Точная двоичная половина (0.125, 22.25): к чётному, как round() в Python.
+    const f = Math.floor(s);
+    return (f % 2 === 0 ? f : f + 1) / k;
+  }
+  // Остальное - к ближайшему по десятичной записи: toFixed округляет верно там, где
+  // произведение x·k уже наврало бы в последнем знаке.
+  return Number(x.toFixed(digits));
 };
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
@@ -351,12 +415,36 @@ const Palette = {
   },
 };
 
+// ---- зеркало morphbench/model.py: vertex_normals ------------------------------------------
+// Нормаль в каждой вершине: сумма нормалей прилегающих треугольников, взвешенных их площадью
+// (длина векторного произведения - удвоенная площадь, вес выходит сам собой), приведённая
+// к единичной длине. Вершина без треугольников смотрит вверх, (0, 0, 1).
+function vertexNormals(pos, tris, out) {
+  out.fill(0);
+  for (let t = 0, n = tris.length; t < n; t += 3) {
+    const a = tris[t] * 3, b = tris[t + 1] * 3, c = tris[t + 2] * 3;
+    const abx = pos[b] - pos[a], aby = pos[b + 1] - pos[a + 1], abz = pos[b + 2] - pos[a + 2];
+    const acx = pos[c] - pos[a], acy = pos[c + 1] - pos[a + 1], acz = pos[c + 2] - pos[a + 2];
+    const nx = aby * acz - abz * acy, ny = abz * acx - abx * acz, nz = abx * acy - aby * acx;
+    out[a] += nx; out[a + 1] += ny; out[a + 2] += nz;
+    out[b] += nx; out[b + 1] += ny; out[b + 2] += nz;
+    out[c] += nx; out[c + 1] += ny; out[c + 2] += nz;
+  }
+  for (let i = 0, n = out.length; i < n; i += 3) {
+    const l = Math.sqrt(out[i] * out[i] + out[i + 1] * out[i + 1] + out[i + 2] * out[i + 2]);
+    if (l < 1e-12) { out[i] = 0; out[i + 1] = 0; out[i + 2] = 1; }
+    else { out[i] /= l; out[i + 1] /= l; out[i + 2] /= l; }
+  }
+  return out;
+}
+
 // ---- данные ядра, как они вложены в страницу ----------------------------------------------
 class Shape {
   constructor(raw) {
     this.name = raw.name;
     this.base = Codec.f32(raw.vertices);          // исходные вершины, не трогаются
     this.pos = new Float32Array(this.base);        // вершины с применёнными ползунками
+    this.nrm = new Float32Array(this.base.length); // нормали вершин по деформированным позициям
     this.count = raw.vertexCount;
     this.tris = Codec.index(raw.triangles, raw.indexType);
     this.triCount = this.tris.length / 3;
@@ -414,6 +502,18 @@ class ViewMirror {
     this.width = init.width; this.height = init.height;
     this.focus = init.focus ? { name: init.focus.name, centre: init.focus.centre.slice(),
                                 radius: init.focus.radius } : null;
+    // Свет: за камерой (направление в осях камеры - вправо, вверх, к зрителю) либо отдельно
+    // (мировое направление). Ядро отдаёт оба направления; настройки - лишь запас
+    // на случай старого состояния без них.
+    const light = init.light;
+    this.lightFollow = !!light.follow;
+    this.lightCameraDir = (light.cameraDirection
+      || (light.follow ? light.direction : settings.lightCameraDirection)).slice();
+    this.lightWorldDir = (light.worldDirection
+      || (light.follow ? settings.lightDirection : light.direction)).slice();
+    this.ambient = light.ambient; this.diffuse = light.diffuse; this.fill = light.fill;
+    // Полуразмах последнего кадра: по нему масштаб к точке переводит доли кадра в единицы.
+    this.frameHalf = null;
   }
   // камера
   orbit(dYaw, dPitch) { this.yaw = mod360(this.yaw + dYaw); this.pitch = clamp(this.pitch + dPitch, -89, 89); return this; }
@@ -432,6 +532,21 @@ class ViewMirror {
     return null;
   }
   set_zoom(factor) { this.zoom = Math.max(0.05, Number(factor)); return this; }
+  // Масштаб к точке: точка сцены под курсором остаётся на месте. fx, fy - положение курсора
+  // от центра кадра в долях половины меньшей стороны холста, вправо и вверх. Без полуразмаха
+  // последнего кадра точка неизвестна, и масштаб идёт от центра - как в ядре.
+  zoom_at(factor, fx, fy) {
+    const old = this.zoom, next = Math.max(0.05, Number(factor));
+    if (this.frameHalf !== null && old > 0.0 && next !== old) {
+      const fill = this.settings.frameFill;
+      const u = Number(fx) * this.frameHalf / (fill * old);
+      const v = Number(fy) * this.frameHalf / (fill * old);
+      const k = 1.0 - old / next;
+      this.pan = [this.pan[0] - u * k, this.pan[1] - v * k];
+    }
+    this.zoom = next;
+    return this;
+  }
   resize(width, height) { this.width = Math.trunc(width); this.height = Math.trunc(height); return this; }
   // панорама: сдвиг кадра вдоль осей экрана - вправо и вверх - в единицах модели
   set_pan(dx, dy) { this.pan = [Number(dx), Number(dy)]; return this; }
@@ -440,7 +555,7 @@ class ViewMirror {
   focus_on(centre, radius, name) { this.focus = { name: name, centre: centre.slice(), radius: Math.max(radius, 1e-3) }; return this; }
   focus_all() { this.focus = null; return this; }
   // Кадр: сфера наведения с запасом либо переданный охват; панорама сдвигает центр - то же
-  // правило, что у ViewState.framing() в ядре.
+  // правило, что у ViewState.framing() в ядре. Полуразмах запоминается для zoom_at.
   framing(centre, halfSpan) {
     let c = centre, half = halfSpan;
     if (this.focus !== null) { c = this.focus.centre; half = this.focus.radius * this.settings.focusPadding; }
@@ -448,7 +563,51 @@ class ViewMirror {
       const b = this.basis();
       c = [0, 1, 2].map((i) => c[i] - b.right[i] * this.pan[0] - b.up[i] * this.pan[1]);
     }
+    this.frameHalf = half;
     return [c, half];
+  }
+  // свет
+  light_follow_camera(on) { this.lightFollow = !!on; return this; }
+  light_direction(x, y, z) {
+    const v = [Number(x), Number(y), Number(z)];
+    if (norm(v) < 1e-6) throw new Error("направление света не может быть нулевым");
+    if (this.lightFollow) this.lightCameraDir = v; else this.lightWorldDir = v;
+    return this;
+  }
+  light_power(ambient, diffuse, fill) {
+    if (ambient !== undefined && ambient !== null) this.ambient = Math.max(0.0, Number(ambient));
+    if (diffuse !== undefined && diffuse !== null) this.diffuse = Math.max(0.0, Number(diffuse));
+    if (fill !== undefined && fill !== null) this.fill = Math.max(0.0, Number(fill));
+    return this;
+  }
+  // Свет как в настройках: режим, оба направления и силы - зеркало ViewState.light_reset.
+  light_reset() {
+    const st = this.settings;
+    this.lightFollow = !!st.lightFollowCamera;
+    this.lightCameraDir = st.lightCameraDirection.slice();
+    this.lightWorldDir = st.lightDirection.slice();
+    this.ambient = Number(st.ambient); this.diffuse = Number(st.diffuse); this.fill = Number(st.fill);
+    return this;
+  }
+  // Единичный вектор на источник в мировых координатах - то, что нужно рисующему. За камерой
+  // он собирается из осей камеры: right·x + up·y - forward·z, поэтому едет вместе с ракурсом.
+  light_vector() {
+    let v;
+    if (this.lightFollow) {
+      const b = this.basis(), d = this.lightCameraDir;
+      v = [0, 1, 2].map((i) => b.right[i] * d[0] + b.up[i] * d[1] - b.forward[i] * d[2]);
+    } else {
+      v = this.lightWorldDir.slice();
+    }
+    const n = norm(v);
+    return n > 1e-6 ? v.map((x) => x / n) : [0, 0, 1];
+  }
+  light_state() {
+    const d = this.lightFollow ? this.lightCameraDir : this.lightWorldDir;
+    return { follow: this.lightFollow, direction: d.map((x) => rnd(x, 3)),
+             cameraDirection: this.lightCameraDir.map((x) => rnd(x, 3)),
+             worldDirection: this.lightWorldDir.map((x) => rnd(x, 3)),
+             ambient: rnd(this.ambient, 3), diffuse: rnd(this.diffuse, 3), fill: rnd(this.fill, 3) };
   }
   // слои
   show_all() { this.visible = null; return this; }
@@ -479,6 +638,7 @@ class ViewMirror {
       colouring: this.colouring, highlightMorph: this.highlightMorph,
       visible: this.visible === null ? null : Array.from(this.visible).sort(),
       width: this.width, height: this.height,
+      light: this.light_state(),
       focus: this.focus === null ? null : { name: this.focus.name,
         centre: this.focus.centre.map((x) => rnd(x, 2)), radius: rnd(this.focus.radius, 2) },
     };
@@ -490,8 +650,10 @@ class ViewMirror {
 // зовёт метод отсюда, а он один в один соответствует вызову ядра.
 class BenchMirror {
   constructor(data) {
-    this.summary = data.summary;
+    this.summary = data.summary;               // null - меш не открыт (страница с сервера)
+    this.names = data.names;
     this.settings = data.settings;
+    this.server = data.server || null;         // список мешей и окружение - только с сервера
     this.shapes = new Map(data.shapes.map((raw) => [raw.name, new Shape(raw)]));
     this.morphList = data.morphs;
     this.deltas = {};
@@ -509,6 +671,7 @@ class BenchMirror {
     this._sliders = new Map(Object.entries(data.sliders));
   }
 
+  is_open() { return this.summary !== null; }
   shape_names() { return Array.from(this.shapes.keys()).sort(); }
   shape(name) { const s = this.shapes.get(name); if (!s) throw new Error("в меше нет части " + name); return s; }
   morphs() { return this.morphList.slice(); }
@@ -526,8 +689,7 @@ class BenchMirror {
   sliders() { return Object.fromEntries(this._sliders); }
   reset_sliders() { this._sliders.clear(); return {}; }
 
-  // геометрия: base + сумма amount × scale × int16 - единственный счёт, который страница
-  // делает сама, и это тот же счёт, что делает Morph.apply в ядре
+  // геометрия: base + сумма amount × scale × int16 - тот же счёт, что делает Morph.apply в ядре
   deformed(name) {
     const s = this.shape(name);
     s.pos.set(s.base);
@@ -536,6 +698,40 @@ class BenchMirror {
       if (d) d.applyTo(s.pos, amount);
     }
     return s.pos;
+  }
+  // нормали вершин части с применёнными ползунками - для мягкого затенения
+  vertex_normals(name) {
+    const s = this.shape(name);
+    return vertexNormals(this.deformed(name), s.tris, s.nrm);
+  }
+  // Центр и полуразмах кадра: охват видимых частей с применёнными ползунками в осях камеры,
+  // затем наведение и панорама - зеркало MorphBench.framing(). Полуразмах остаётся в ViewMirror,
+  // и масштаб к точке знает, какой кадр был на экране.
+  framing() {
+    const shapes = this.visible_shapes().map((n) => this.shape(n)).filter((s) => s.triCount > 0);
+    if (!shapes.length) throw new Error("нечего показывать: все части меша скрыты");
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    for (const s of shapes) {
+      const p = this.deformed(s.name);
+      for (let i = 0, n = p.length; i < n; i += 3) {
+        if (p[i] < lo[0]) lo[0] = p[i]; if (p[i] > hi[0]) hi[0] = p[i];
+        if (p[i + 1] < lo[1]) lo[1] = p[i + 1]; if (p[i + 1] > hi[1]) hi[1] = p[i + 1];
+        if (p[i + 2] < lo[2]) lo[2] = p[i + 2]; if (p[i + 2] > hi[2]) hi[2] = p[i + 2];
+      }
+    }
+    const whole = [0.5 * (lo[0] + hi[0]), 0.5 * (lo[1] + hi[1]), 0.5 * (lo[2] + hi[2])];
+    const b = this.view.basis(), r = b.right, u = b.up;
+    let half = 0.0;
+    for (const s of shapes) {
+      const p = s.pos;
+      for (let i = 0, n = p.length; i < n; i += 3) {
+        const dx = p[i] - whole[0], dy = p[i + 1] - whole[1], dz = p[i + 2] - whole[2];
+        const x = Math.abs(dx * r[0] + dy * r[1] + dz * r[2]);
+        const y = Math.abs(dx * u[0] + dy * u[1] + dz * u[2]);
+        if (x > half) half = x; if (y > half) half = y;
+      }
+    }
+    return this.view.framing(whole, half);
   }
 
   // признаки раскраски: числа, а не цвета
@@ -568,6 +764,9 @@ class BenchMirror {
   preset_name() { return this.view.preset_name(); }
   zoom(factor) { return this.view.set_zoom(factor).as_dict(); }
   resize(width, height) { return this.view.resize(width, height).as_dict(); }
+  // Масштаб к точке под курсором: кадр пересчитывается здесь же, чтобы точка бралась с того
+  // кадра, который на экране, - как в фасаде.
+  zoom_at(factor, fx, fy) { this.framing(); return this.view.zoom_at(factor, fx, fy).as_dict(); }
   pan(dx, dy) { return this.view.set_pan(dx, dy).as_dict(); }
   pan_by(dx, dy) { return this.view.pan_by(dx, dy).as_dict(); }
   colour_by(mode, morph) { return this.view.colour_by(mode, morph).as_dict(); }
@@ -578,6 +777,13 @@ class BenchMirror {
   hide(name) { if (this.view.visible === null) this.view.only(this.shape_names()); return this.view.hide(name).as_dict(); }
   show(name) { return this.view.show(name).as_dict(); }
   view_state() { return this.view.as_dict(); }
+
+  // свет: тоже состояние показа
+  light_follow_camera(on) { return this.view.light_follow_camera(on).as_dict(); }
+  light_direction(x, y, z) { return this.view.light_direction(x, y, z).as_dict(); }
+  light_power(ambient, diffuse, fill) { return this.view.light_power(ambient, diffuse, fill).as_dict(); }
+  light_reset() { return this.view.light_reset().as_dict(); }
+  light_vector() { return this.view.light_vector(); }
 
   // наведение: центры и радиусы уже посчитаны ядром и лежат в focus_targets
   _target(kind, name) {
@@ -592,16 +798,23 @@ class BenchMirror {
   focus_targets() { return this.targets; }
 }
 
-// ---- отрисовка: WebGL2, ортографическая камера, плоское затенение -------------------------
+// ---- отрисовка: WebGL2, ортографическая камера, затенение как у растеризатора --------------
+// Мягкое затенение: свет считается в вершине по её нормали и растягивается по треугольнику
+// вместе с цветом - ровно так складывает vcols × lit растеризатор. Формула та же:
+// ambient + diffuse·max(n·L, 0) + fill·max(-n·L, 0).
 const VERTEX_SHADER = "#version 300 es\n" +
   "precision highp float;\n" +
   "in vec3 aPos;\n" +
+  "in vec3 aNrm;\n" +
   "in vec3 aCol;\n" +
   "uniform vec3 uRight, uUp, uForward, uCentre;\n" +
   "uniform float uScale, uZc, uZr;\n" +
   "uniform vec2 uHalf;\n" +
+  "uniform vec3 uLight;\n" +
+  "uniform float uAmbient, uDiffuse, uFill;\n" +
   "out vec3 vWorld;\n" +
   "out vec3 vCol;\n" +
+  "out vec3 vLit;\n" +
   "void main() {\n" +
   "  vec3 d = aPos - uCentre;\n" +                         // (v - центр) @ basis.T, как в растеризаторе
   "  float x = dot(d, uRight) * uScale;\n" +
@@ -610,22 +823,31 @@ const VERTEX_SHADER = "#version 300 es\n" +
   "  gl_Position = vec4(x / uHalf.x, y / uHalf.y, (z - uZc) / uZr, 1.0);\n" +
   "  vWorld = aPos;\n" +
   "  vCol = aCol;\n" +
+  "  float lam = dot(normalize(aNrm), uLight);\n" +
+  "  vLit = aCol * (uAmbient + uDiffuse * clamp(lam, 0.0, 1.0) + uFill * clamp(-lam, 0.0, 1.0));\n" +
   "}\n";
 
-// Нормаль треугольника - из производных мировой позиции по экрану: это нормаль плоскости
-// треугольника, направленная к зрителю, что для лицевых граней совпадает с геометрической
-// нормалью растеризатора. Свет задан в мировых координатах, поэтому и нормаль мировая.
+// Плоское затенение (shading = flat в настройках): нормаль треугольника из производных мировой
+// позиции по экрану - нормаль плоскости, направленная к зрителю, что для лицевых граней
+// совпадает с геометрической нормалью растеризатора. Свет в мировых координатах, как и нормаль.
 const FRAGMENT_SHADER = "#version 300 es\n" +
   "precision highp float;\n" +
   "in vec3 vWorld;\n" +
   "in vec3 vCol;\n" +
+  "in vec3 vLit;\n" +
   "uniform vec3 uLight;\n" +
-  "uniform float uAmbient, uDiffuse;\n" +
+  "uniform float uAmbient, uDiffuse, uFill;\n" +
+  "uniform int uFlat;\n" +
   "out vec4 outColour;\n" +
   "void main() {\n" +
-  "  vec3 n = normalize(cross(dFdx(vWorld), dFdy(vWorld)));\n" +
-  "  float lam = clamp(dot(n, uLight), 0.0, 1.0);\n" +
-  "  outColour = vec4(clamp(vCol * (uAmbient + uDiffuse * lam), 0.0, 1.0), 1.0);\n" +
+  "  vec3 lit = vLit;\n" +
+  "  if (uFlat == 1) {\n" +
+  "    vec3 n = normalize(cross(dFdx(vWorld), dFdy(vWorld)));\n" +
+  "    if (!gl_FrontFacing) n = -n;\n" +                       // нормаль по обходу, как в растеризаторе
+  "    float lam = dot(n, uLight);\n" +
+  "    lit = vCol * (uAmbient + uDiffuse * clamp(lam, 0.0, 1.0) + uFill * clamp(-lam, 0.0, 1.0));\n" +
+  "  }\n" +
+  "  outColour = vec4(clamp(lit, 0.0, 1.0), 1.0);\n" +
   "}\n";
 
 class Renderer {
@@ -636,14 +858,15 @@ class Renderer {
     if (!gl) throw new Error("нет WebGL2");
     this.gl = gl;
     this.program = this._program(VERTEX_SHADER, FRAGMENT_SHADER);
-    this.attr = { pos: gl.getAttribLocation(this.program, "aPos"), col: gl.getAttribLocation(this.program, "aCol") };
+    this.attr = { pos: gl.getAttribLocation(this.program, "aPos"), nrm: gl.getAttribLocation(this.program, "aNrm"),
+                  col: gl.getAttribLocation(this.program, "aCol") };
     this.uni = {};
-    for (const name of ["uRight", "uUp", "uForward", "uCentre", "uScale", "uZc", "uZr", "uHalf", "uLight", "uAmbient", "uDiffuse"])
+    for (const name of ["uRight", "uUp", "uForward", "uCentre", "uScale", "uZc", "uZr", "uHalf",
+                        "uLight", "uAmbient", "uDiffuse", "uFill", "uFlat"])
       this.uni[name] = gl.getUniformLocation(this.program, name);
     this.meshes = new Map();
     this.bg = settings.background.map((x) => x / 255.0);
-    const l = settings.lightDirection, ln = Math.max(norm(l), 1e-6);
-    this.light = l.map((x) => x / ln);
+    this.flat = settings.shading === "flat";
   }
   _shader(type, src) {
     const gl = this.gl, sh = gl.createShader(type);
@@ -659,75 +882,57 @@ class Renderer {
     if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error("программа: " + gl.getProgramInfoLog(p));
     return p;
   }
-  // буферы части: позиции и цвета меняются, треугольники - нет
+  _attribute(buffer, data, location, usage) {
+    const gl = this.gl;
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, data, usage);
+    gl.enableVertexAttribArray(location);
+    gl.vertexAttribPointer(location, 3, gl.FLOAT, false, 0, 0);
+  }
+  // буферы части: позиции, нормали и цвета меняются, треугольники - нет
   upload(shape) {
     const gl = this.gl;
     if (!shape.triCount) return;
     const vao = gl.createVertexArray();
     gl.bindVertexArray(vao);
-    const pos = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, pos);
-    gl.bufferData(gl.ARRAY_BUFFER, shape.pos, gl.DYNAMIC_DRAW);
-    gl.enableVertexAttribArray(this.attr.pos);
-    gl.vertexAttribPointer(this.attr.pos, 3, gl.FLOAT, false, 0, 0);
-    const col = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, col);
-    gl.bufferData(gl.ARRAY_BUFFER, shape.count * 12, gl.DYNAMIC_DRAW);
-    gl.enableVertexAttribArray(this.attr.col);
-    gl.vertexAttribPointer(this.attr.col, 3, gl.FLOAT, false, 0, 0);
+    const pos = gl.createBuffer(), nrm = gl.createBuffer(), col = gl.createBuffer();
+    this._attribute(pos, shape.pos, this.attr.pos, gl.DYNAMIC_DRAW);
+    this._attribute(nrm, shape.nrm, this.attr.nrm, gl.DYNAMIC_DRAW);
+    this._attribute(col, shape.count * 12, this.attr.col, gl.DYNAMIC_DRAW);
     const idx = gl.createBuffer();
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idx);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, shape.tris, gl.STATIC_DRAW);
     gl.bindVertexArray(null);
-    this.meshes.set(shape.name, { vao, pos, col, count: shape.tris.length,
+    this.meshes.set(shape.name, { vao, pos, nrm, col, count: shape.tris.length,
       type: shape.tris instanceof Uint32Array ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT });
   }
-  setPositions(shape) {
-    const m = this.meshes.get(shape.name);
-    if (!m) return;
-    this.gl.bindBuffer(this.gl.ARRAY_BUFFER, m.pos);
-    this.gl.bufferSubData(this.gl.ARRAY_BUFFER, 0, shape.pos);
+  _refill(buffer, data) {
+    if (!buffer) return;
+    this.gl.bindBuffer(this.gl.ARRAY_BUFFER, buffer);
+    this.gl.bufferSubData(this.gl.ARRAY_BUFFER, 0, data);
   }
-  setColours(shape, colours) {
-    const m = this.meshes.get(shape.name);
-    if (!m) return;
-    this.gl.bindBuffer(this.gl.ARRAY_BUFFER, m.col);
-    this.gl.bufferSubData(this.gl.ARRAY_BUFFER, 0, colours);
-  }
+  setPositions(shape) { const m = this.meshes.get(shape.name); if (m) this._refill(m.pos, shape.pos); }
+  setNormals(shape) { const m = this.meshes.get(shape.name); if (m) this._refill(m.nrm, shape.nrm); }
+  setColours(shape, colours) { const m = this.meshes.get(shape.name); if (m) this._refill(m.col, colours); }
   resize() {
     const dpr = window.devicePixelRatio || 1;
     const w = Math.max(1, Math.round(this.canvas.clientWidth * dpr));
     const h = Math.max(1, Math.round(this.canvas.clientHeight * dpr));
     if (this.canvas.width !== w || this.canvas.height !== h) { this.canvas.width = w; this.canvas.height = h; }
   }
-  // Кадр по правилу растеризатора: охват видимых частей - центр и полуразмах проекции,
-  // затем ViewState.framing решает, смотреть на всё или на сферу наведения.
-  frame(bench, basis) {
-    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
-    const shapes = bench.visible_shapes().map((n) => bench.shape(n)).filter((s) => s.triCount > 0);
-    if (!shapes.length) return null;
-    for (const s of shapes) {
+  // Диапазон глубины - проекция видимых вершин на ось взгляда, чтобы буфер ничего не отрезал.
+  _depthRange(bench, centre, forward) {
+    let zmin = Infinity, zmax = -Infinity;
+    for (const name of bench.visible_shapes()) {
+      const s = bench.shape(name);
+      if (!s.triCount) continue;
       const p = s.pos;
       for (let i = 0, n = p.length; i < n; i += 3) {
-        if (p[i] < lo[0]) lo[0] = p[i]; if (p[i] > hi[0]) hi[0] = p[i];
-        if (p[i + 1] < lo[1]) lo[1] = p[i + 1]; if (p[i + 1] > hi[1]) hi[1] = p[i + 1];
-        if (p[i + 2] < lo[2]) lo[2] = p[i + 2]; if (p[i + 2] > hi[2]) hi[2] = p[i + 2];
+        const z = (p[i] - centre[0]) * forward[0] + (p[i + 1] - centre[1]) * forward[1] + (p[i + 2] - centre[2]) * forward[2];
+        if (z < zmin) zmin = z; if (z > zmax) zmax = z;
       }
     }
-    const whole = [0.5 * (lo[0] + hi[0]), 0.5 * (lo[1] + hi[1]), 0.5 * (lo[2] + hi[2])];
-    const r = basis.right, u = basis.up;
-    let half = 0.0;
-    for (const s of shapes) {
-      const p = s.pos;
-      for (let i = 0, n = p.length; i < n; i += 3) {
-        const dx = p[i] - whole[0], dy = p[i + 1] - whole[1], dz = p[i + 2] - whole[2];
-        const x = Math.abs(dx * r[0] + dy * r[1] + dz * r[2]);
-        const y = Math.abs(dx * u[0] + dy * u[1] + dz * u[2]);
-        if (x > half) half = x; if (y > half) half = y;
-      }
-    }
-    const framed = bench.view.framing(whole, half);
-    return { centre: framed[0], half: framed[1], lo, hi };
+    return [zmin, zmax];
   }
   draw(bench) {
     const gl = this.gl, view = bench.view;
@@ -737,19 +942,15 @@ class Renderer {
     gl.clearColor(this.bg[0], this.bg[1], this.bg[2], 1.0);
     gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LESS); gl.disable(gl.CULL_FACE);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    // Кадр - вся модель, сфера наведения или панорама - решает зеркало ядра; нечего
+    // показывать - пустой холст, как растеризатору нечего рисовать.
+    let framed;
+    try { framed = bench.framing(); } catch (_) { return null; }
+    const c = framed[0], half = framed[1];
     const basis = view.basis();
-    const fr = this.frame(bench, basis);
-    if (!fr) return null;
-    const span = fr.half * 2.0;
+    const span = half * 2.0;
     const scale = (Math.min(w, h) * this.settings.frameFill) / Math.max(span, 1e-3) * view.zoom;
-    const c = fr.centre;                       // панорама уже учтена в framing()
-    // Диапазон глубины по углам охвата, чтобы ничего не отрезалось буфером.
-    let zmin = Infinity, zmax = -Infinity;
-    for (let k = 0; k < 8; k++) {
-      const p = [(k & 1) ? fr.hi[0] : fr.lo[0], (k & 2) ? fr.hi[1] : fr.lo[1], (k & 4) ? fr.hi[2] : fr.lo[2]];
-      const z = dot([p[0] - c[0], p[1] - c[1], p[2] - c[2]], basis.forward);
-      if (z < zmin) zmin = z; if (z > zmax) zmax = z;
-    }
+    const [zmin, zmax] = this._depthRange(bench, c, basis.forward);
     gl.useProgram(this.program);
     gl.uniform3fv(this.uni.uRight, basis.right);
     gl.uniform3fv(this.uni.uUp, basis.up);
@@ -759,9 +960,12 @@ class Renderer {
     gl.uniform1f(this.uni.uZc, 0.5 * (zmin + zmax));
     gl.uniform1f(this.uni.uZr, Math.max(0.5 * (zmax - zmin), 1e-3) * 1.01);
     gl.uniform2f(this.uni.uHalf, w * 0.5, h * 0.5);
-    gl.uniform3fv(this.uni.uLight, this.light);
-    gl.uniform1f(this.uni.uAmbient, this.settings.ambient);
-    gl.uniform1f(this.uni.uDiffuse, this.settings.diffuse);
+    // Свет - из состояния показа на каждый кадр: за камерой он меняется вместе с ракурсом.
+    gl.uniform3fv(this.uni.uLight, bench.light_vector());
+    gl.uniform1f(this.uni.uAmbient, view.ambient);
+    gl.uniform1f(this.uni.uDiffuse, view.diffuse);
+    gl.uniform1f(this.uni.uFill, view.fill);
+    gl.uniform1i(this.uni.uFlat, this.flat ? 1 : 0);
     for (const name of bench.visible_shapes()) {
       const m = this.meshes.get(name);
       if (!m) continue;
@@ -782,8 +986,11 @@ class Panel {
     this.build();
   }
   build() {
-    const bench = this.bench, app = this.app, view = bench.view;
+    const bench = this.bench, app = this.app, view = bench.view, st = bench.settings;
     const root = this.root;
+
+    // модель: что открыто и, с сервера, из чего выбирать
+    root.appendChild(this.buildModel());
 
     // ракурсы
     this.presetButtons = new Map();
@@ -824,7 +1031,8 @@ class Panel {
         el("label", null, [box, el("span", { text: name }), el("span", { class: "muted", text: s.count + " в." })]),
         el("span", { class: "only", text: "только", on: { click: () => app.invoke("only", [name]) } })]));
     }
-    root.appendChild(el("section", null, [el("h2", { text: "Части меша" }), parts,
+    root.appendChild(el("section", null, [el("h2", { text: "Части меша" }),
+      bench.shape_names().length ? parts : el("div", { class: "muted", text: "меш не открыт" }),
       el("div", { class: "row", style: "margin-top:6px" }, [
         el("button", { text: "показать все", on: { click: () => app.invoke("show_all") } })])]));
 
@@ -844,9 +1052,30 @@ class Panel {
       el("div", { class: "row", style: "margin-top:6px" }, [el("span", { class: "muted", text: "морф для режимов «морф» и «растяжение»:" })]),
       this.morphSelect]));
 
+    // свет: за камерой или мировой, направление на источник, три силы
+    this.lightFollowBox = el("input", { type: "checkbox",
+      on: { change: () => app.invoke("light_follow_camera", this.lightFollowBox.checked) } });
+    this.lightDirLabel = el("span", { class: "muted" });
+    this.lightDirInputs = [0, 1, 2].map(() => el("input", { type: "number", step: "any", class: "short",
+      on: { change: () => this.onLightDir() } }));
+    this.lightPowerInputs = {};
+    const powerRow = el("div", { class: "row" });
+    for (const [key, title] of [["ambient", "рассеянный"], ["diffuse", "направленный"], ["fill", "встречный"]]) {
+      const inp = el("input", { type: "number", step: "any", min: "0", class: "short", on: { change: () => this.onLightPower() } });
+      this.lightPowerInputs[key] = inp;
+      powerRow.appendChild(el("label", null, [title + " ", inp]));
+    }
+    root.appendChild(el("section", null, [el("h2", { text: "Свет" }),
+      el("div", { class: "row" }, [el("label", null, [this.lightFollowBox, " за камерой"])]),
+      el("div", { class: "row", style: "margin-top:6px" }, [this.lightDirLabel].concat(this.lightDirInputs)),
+      el("div", { class: "muted", style: "margin-top:6px", text: "силы света:" }), powerRow,
+      el("div", { class: "row", style: "margin-top:6px" }, [
+        el("button", { text: "как в настройках", on: { click: () => this.resetLight() } }),
+        el("span", { class: "muted", text: "затенение: " + st.shading })])]));
+
     // ползунки
     this.sliderRows = new Map();
-    const range = bench.settings.sliderRange, step = String(bench.settings.sliderStep);
+    const range = st.sliderRange, step = String(st.sliderStep);
     const sliders = el("div");
     for (const name of bench.morphs()) {
       const rng = el("input", { type: "range", min: range[0], max: range[1], step: step });
@@ -858,7 +1087,7 @@ class Panel {
       sliders.appendChild(row);
     }
     root.appendChild(el("section", null, [el("h2", { text: "Ползунки" }),
-      bench.morphs().length ? sliders : el("div", { class: "muted", text: "к мешу не открыт файл морфов" }),
+      bench.morphs().length ? sliders : el("div", { class: "muted", text: bench.is_open() ? "к мешу не открыт файл морфов" : "меш не открыт" }),
       el("div", { class: "row", style: "margin-top:6px" }, [
         el("button", { text: "сбросить", on: { click: () => app.invoke("reset_sliders") } }),
         el("span", { class: "muted", text: "пределы " + range[0] + " … " + range[1] + " из настроек" })])]));
@@ -866,7 +1095,7 @@ class Panel {
     // легенда костей
     this.legendSelect = el("select", { on: { change: () => this.refreshLegend() } });
     for (const name of bench.shape_names()) this.legendSelect.appendChild(el("option", { value: name, text: name }));
-    if (bench.shapes.has(bench.settings.baseShape)) this.legendSelect.value = bench.settings.baseShape;
+    if (bench.shapes.has(st.baseShape)) this.legendSelect.value = st.baseShape;
     this.legend = el("div", { class: "legend" });
     this.legendSection = el("section", null, [el("h2", { text: "Легенда костей" }), this.legendSelect, this.legend]);
     root.appendChild(this.legendSection);
@@ -881,6 +1110,58 @@ class Panel {
       el("div", { class: "muted", text: "последний вызов фасада:" }), this.lastCall,
       el("div", { class: "muted", text: "view_state() и sliders():" }), this.state,
       el("div", { class: "muted", text: "тот же кадр без окна:" }), this.command, this.note, this.error]));
+  }
+
+  // Раздел «Модель». В файле с диска - только имя открытого меша: выбирать не из чего, и
+  // страница не обращается никуда. С сервера - список мешей под корнем обзора, папка
+  // и обход без морфов; выбор ведёт на тот же сервер с другим запросом.
+  buildModel() {
+    const bench = this.bench, names = bench.names, srv = bench.server;
+    const current = el("div", { class: "current" }, [
+      el("span", { text: names.nif || "меш не открыт" }),
+      names.tri ? el("span", { class: "muted", text: " · морфы: " + names.tri + " (" + bench.summary.triKind + ")" }) : null]);
+    if (!srv) {
+      return el("section", null, [el("h2", { text: "Модель" }), current,
+        el("div", { class: "muted", text: "выбор модели — в mb.py serve" })]);
+    }
+    const env = srv.environment || {};
+    const envLine = el("div", { class: "muted", text:
+      "под MO2: " + (env.insideMo2 ? "да" : "нет") + " · корень: " + (srv.root || "не задан") });
+    // список мешей: группы по папке от корня, в строке - файл и формат морфов
+    this.modelSelect = el("select", { on: { change: () => this.onModel() } });
+    this.modelSelect.appendChild(el("option", { value: "",
+      text: srv.catalog.length ? "— выбрать меш (" + srv.catalog.length + ") —" : "— мешей под корнем нет —" }));
+    const groups = new Map();
+    const same = (a, b) => !!a && !!b && a.replace(/\\/g, "/").toLowerCase() === b.replace(/\\/g, "/").toLowerCase();
+    let currentName = "";
+    for (const e of srv.catalog) {
+      let g = groups.get(e.folder);
+      if (!g) { g = el("optgroup", { label: e.folder || "." }); groups.set(e.folder, g); this.modelSelect.appendChild(g); }
+      g.appendChild(el("option", { value: e.name, text: e.file + " · " + (e.kind || "без морфов") }));
+      if (bench.summary && same(e.nif, bench.summary.nif)) currentName = e.name;
+    }
+    this.modelSelect.value = currentName;
+    // папка обзора и обход без морфов
+    this.rootInput = el("input", { type: "text", class: "wide", value: srv.root || "", title: "папка обзора" });
+    this.allBox = el("input", { type: "checkbox", on: { change: () => this.go({ root: this.rootInput.value }) } });
+    this.allBox.checked = !srv.withMorphs;
+    return el("section", null, [el("h2", { text: "Модель" }), current, this.modelSelect,
+      el("div", { class: "row", style: "margin-top:6px" }, [this.rootInput,
+        el("button", { text: "обзор", on: { click: () => this.go({ root: this.rootInput.value }) } })]),
+      el("div", { class: "row" }, [el("label", null, [this.allBox, " и без морфов"])]),
+      envLine, el("div", { class: "err", text: srv.error || "" })]);
+  }
+  // Переход на тот же сервер с другим телом или корнем: страница держит одно тело, поэтому
+  // смена модели - это перезагрузка с другим запросом, а не второй набор геометрии.
+  go(params) {
+    const q = [];
+    for (const k in params) if (params[k] !== undefined && params[k] !== null && params[k] !== "") q.push(k + "=" + encodeURIComponent(params[k]));
+    if (this.allBox && this.allBox.checked) q.push("all=1");
+    window.location.href = "/?" + q.join("&");
+  }
+  onModel() {
+    const name = this.modelSelect.value;
+    if (name) this.go({ name: name, root: this.bench.server.root });
   }
 
   // --- действия панели: каждое - вызов метода зеркала фасада ---
@@ -904,8 +1185,34 @@ class Panel {
     const morph = this.morphSelect.value || null;
     this.app.invoke("colour_by", mode, (mode === "morph" || mode === "strain") ? morph : null);
   }
+  onLightDir() {
+    const v = this.lightDirInputs.map((i) => Number(i.value) || 0);
+    this.app.invoke("light_direction", v[0], v[1], v[2]);
+    this.showLight(this.bench.view.as_dict().light, true);   // в полях - то, что принял фасад
+  }
+  onLightPower() {
+    const v = (key) => Number(this.lightPowerInputs[key].value) || 0;
+    this.app.invoke("light_power", v("ambient"), v("diffuse"), v("fill"));
+    this.showLight(this.bench.view.as_dict().light, true);
+  }
+  // Свет как в настройках - один вызов фасада, у которого есть такой же метод в ядре.
+  resetLight() {
+    this.app.invoke("light_reset");
+  }
 
   // --- отражение состояния ---
+  showLight(light, force) {
+    this.lightFollowBox.checked = light.follow;
+    this.lightDirLabel.textContent = light.follow ? "вправо, вверх, к зрителю:" : "X, Y, Z мировые:";
+    light.direction.forEach((v, i) => {
+      const inp = this.lightDirInputs[i];
+      if (force || document.activeElement !== inp) inp.value = v;
+    });
+    for (const key in this.lightPowerInputs) {
+      const inp = this.lightPowerInputs[key];
+      if (force || document.activeElement !== inp) inp.value = light[key];
+    }
+  }
   refresh() {
     const bench = this.bench, view = bench.view, state = view.as_dict();
     const preset = state.preset;
@@ -928,8 +1235,11 @@ class Panel {
     // раскраска
     for (const [mode, r] of this.colourRadios) r.checked = (mode === view.colouring);
     this.morphSelect.value = view.highlightMorph || "";
-    this.legendSection.style.display = view.colouring === "bone" ? "" : "none";
-    if (view.colouring === "bone" && this.legendFor !== this.legendSelect.value) this.refreshLegend();
+    this.legendSection.style.display = view.colouring === "bone" && bench.shape_names().length ? "" : "none";
+    if (view.colouring === "bone" && this.legendSelect.value && this.legendFor !== this.legendSelect.value) this.refreshLegend();
+
+    // свет
+    this.showLight(state.light, false);
 
     // ползунки
     const sliders = bench.sliders();
@@ -962,9 +1272,11 @@ class Panel {
   }
   // Командная строка mb.py render с теми же ключами, что принимает cmd_render: всё, что
   // нажато на странице, можно повторить без окна. Пары чисел идут через знак равенства,
-  // чтобы минус впереди не был принят разборщиком за ключ.
+  // чтобы минус впереди не был принят разборщиком за ключ. Свет попадает в команду только
+  // там, где отличается от настроек: без ключей render светит так же, как настройки.
   buildCommand(preset) {
-    const bench = this.bench, state = bench.view.as_dict(), sliders = bench.sliders();
+    const bench = this.bench, st = bench.settings, state = bench.view.as_dict(), sliders = bench.sliders();
+    if (!bench.summary) return "меш не открыт — кадр брать не с чего";
     const q = (s) => /[^\w.\-=:\\\/]/.test(s) ? '"' + s.replace(/"/g, '\\"') + '"' : s;
     const parts = ["python", "mb.py", "render", q(bench.summary.nif), "--out", "кадр.png"];
     if (bench.summary.tri) parts.push("--tri", q(bench.summary.tri));
@@ -975,12 +1287,18 @@ class Panel {
     if (state.visible !== null) parts.push("--only", q(state.visible.join(",")));
     if (Math.abs(state.zoom - 1.0) > 1e-9) parts.push("--zoom", fmt(state.zoom));
     if (state.pan[0] !== 0 || state.pan[1] !== 0) parts.push("--pan=" + state.pan[0] + "," + state.pan[1]);
-    if (state.width !== bench.settings.imageWidth || state.height !== bench.settings.imageHeight)
+    if (state.width !== st.imageWidth || state.height !== st.imageHeight)
       parts.push("--size", state.width + "x" + state.height);
     if (state.focus) {
       const i = state.focus.name.indexOf(":");
       parts.push("--focus-" + state.focus.name.slice(0, i), q(state.focus.name.slice(i + 1)));
     }
+    const light = state.light;
+    if (light.follow !== st.lightFollowCamera) parts.push("--light", light.follow ? "camera" : "world");
+    const dirDefault = (light.follow ? st.lightCameraDirection : st.lightDirection).map((x) => rnd(x, 3));
+    if (light.direction.some((x, i) => x !== dirDefault[i])) parts.push("--light-dir=" + light.direction.join(","));
+    if (light.ambient !== rnd(st.ambient, 3) || light.diffuse !== rnd(st.diffuse, 3) || light.fill !== rnd(st.fill, 3))
+      parts.push("--light-power=" + [light.ambient, light.diffuse, light.fill].join(","));
     return parts.join(" ");
   }
 }
@@ -1021,11 +1339,14 @@ class App {
     this.panel.refresh();
     this.draw();
   }
+  // Позиции с применёнными ползунками и нормали по ним - в буферы; нормали пересчитываются
+  // после каждого движения ползунка, потому что затенение идёт по деформированному телу.
   refreshPositions() {
     for (const name of this.bench.shape_names()) {
       const s = this.bench.shape(name);
-      this.bench.deformed(name);
+      this.bench.vertex_normals(name);         // внутри - deformed(): позиции и нормали разом
       this.renderer.setPositions(s);
+      this.renderer.setNormals(s);
     }
   }
   // Признак у фасада, цвет - здесь: то же правило, что у растеризатора.
@@ -1059,6 +1380,14 @@ class App {
     const r = this.renderer.draw(this.bench);
     if (r) this.scale = r.scale;
   }
+  // Точка курсора в долях половины меньшей стороны холста от центра, вправо и вверх, -
+  // в пикселях холста с учётом плотности экрана и положения холста на странице.
+  cursorFraction(e) {
+    const c = this.canvas, rect = c.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    const px = (e.clientX - rect.left) * dpr, py = (e.clientY - rect.top) * dpr;
+    const w = c.width, h = c.height, m = Math.min(w, h) * 0.5;
+    return [(px - w * 0.5) / m, (h * 0.5 - py) / m];
+  }
   bindMouse() {
     const c = this.canvas;
     let drag = null;
@@ -1083,9 +1412,12 @@ class App {
     const stop = (e) => { drag = null; try { c.releasePointerCapture(e.pointerId); } catch (_) {} };
     c.addEventListener("pointerup", stop);
     c.addEventListener("pointercancel", stop);
+    // Колесо - масштаб к точке под курсором: zoom_at фасада с новым масштабом и долями кадра.
     c.addEventListener("wheel", (e) => {
       e.preventDefault();
-      this.invoke("zoom", rnd(this.bench.view.zoom * Math.exp(-e.deltaY * this.bench.settings.wheelZoomRate), 3));
+      const f = this.cursorFraction(e);
+      const z = rnd(this.bench.view.zoom * Math.exp(-e.deltaY * this.bench.settings.wheelZoomRate), 3);
+      this.invoke("zoom_at", z, rnd(f[0], 3), rnd(f[1], 3));
     }, { passive: false });
     c.addEventListener("dblclick", () => { this.invoke("pan", 0, 0); this.invoke("zoom", 1.0); });
   }
@@ -1094,10 +1426,11 @@ class App {
 // ---- запуск ---------------------------------------------------------------------------------
 const DATA = JSON.parse(document.getElementById("mb-data").textContent);
 const s = DATA.summary;
-document.getElementById("title").textContent = "morphbench — " + DATA.names.nif;
-document.getElementById("subtitle").textContent =
-  "морфы: " + (DATA.names.tri ? DATA.names.tri + " (" + s.triKind + ")" : "нет") +
-  " · частей " + s.shapes + " · вершин " + s.vertices + " · костей " + s.bones + " · ползунков " + s.morphs;
+document.getElementById("title").textContent = "morphbench — " + (DATA.names.nif || "меш не открыт");
+document.getElementById("subtitle").textContent = s
+  ? "морфы: " + (DATA.names.tri ? DATA.names.tri + " (" + s.triKind + ")" : "нет") +
+    " · частей " + s.shapes + " · вершин " + s.vertices + " · костей " + s.bones + " · ползунков " + s.morphs
+  : (DATA.server ? "выберите меш в списке на панели" : "");
 try {
   window.mb = new App(DATA);
 } catch (e) {
