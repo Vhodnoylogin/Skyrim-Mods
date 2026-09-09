@@ -50,7 +50,7 @@ class TestEnvAndCatalog(unittest.TestCase):
         with mo2(False):
             for argv in (["env", "--json"], ["--json", "env"]):
                 data = json.loads(run(argv, self.cfg))
-                self.assertEqual(set(data), {"insideMo2", "dataRoot", "games", "catalogRoot"})
+                self.assertEqual(set(data), {"insideMo2", "dataRoot", "games", "catalogRoot", "candidates"})
                 self.assertFalse(data["insideMo2"])
                 self.assertIsNone(data["dataRoot"])
                 self.assertEqual(data["catalogRoot"], "")

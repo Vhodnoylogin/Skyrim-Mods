@@ -434,7 +434,11 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json({"error": _message(e)}, _status_of(e))
 
     def log_message(self, fmt, *args) -> None:
-        """Строка журнала без падения на консоли, которой чужд UTF-8."""
+        """Строка журнала без падения на консоли, которой чужд UTF-8. Опрос состояния
+        (окно спрашивает его каждые несколько секунд) в журнал не пишется - иначе он
+        заслонил бы собой всё остальное."""
+        if args and any(p in str(args[0]) for p in ("/api/environment", "/api/root ")):
+            return
         line = "%s - %s\n" % (self.address_string(), fmt % args)
         try:
             sys.stderr.write(line)
