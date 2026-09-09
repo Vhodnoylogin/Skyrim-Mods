@@ -47,7 +47,7 @@ static class Program
             string python = home == null ? null : Module.FindPython(home);
             string text = home == null ? "нет mb.py" : python == null ? "нет python"
                 : new Launcher(home, python).Cli("env --json") + "\n---catalog---\n"
-                  + new Launcher(home, python).Cli("catalog --find werewolf --json");
+                  + new Launcher(home, python).Cli("render --entry assets/malebodywerewolf_0.nif --size 300x300 --colliders --out morphbench.diag.png --json");
             File.WriteAllText(Path.Combine(home ?? AppDomain.CurrentDomain.BaseDirectory, "morphbench.diag.json"),
                               text, new UTF8Encoding(false));
             return;
