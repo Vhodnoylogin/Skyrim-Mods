@@ -92,6 +92,20 @@ class TestRootlessServer(unittest.TestCase):
         self.assertIn("нет папки", ctx.exception.message)
         self.assertEqual(self.json("/api/root")["root"], self.server.root and str(self.server.root))
 
+    def test_03b_probe_does_not_wait_for_the_facade_lock(self):
+        """Пока сервер держит замок на обходе большой папки, опознание отвечает сразу:
+        окружение читается без замка. Корень за это время не узнать - и это не «чужой»."""
+        with self.server.lock:
+            self.assertEqual(self.link.probe(), "ours")
+            status = self.link.status()
+        self.assertEqual(status["state"], "ours")
+        self.assertIn("insideMo2", status)
+
+    def test_03c_second_server_on_the_same_port_fails_loudly(self):
+        """SO_REUSEADDR на Windows пустил бы второй сервер на тот же порт молча."""
+        with self.assertRaises(OSError):
+            WebServer(self.bench, host="127.0.0.1", port=self.server.port)
+
     def test_04_handing_over_the_root_fills_the_list(self):
         got = self.link.set_root(str(self.root))
         self.assertEqual((Path(got["root"]), got["meshes"]), (self.root, 1))
@@ -104,6 +118,31 @@ class TestRootlessServer(unittest.TestCase):
         self.assertIn(b"tiny_0.nif", body)
 
 
+@unittest.skipIf(WebServer is None, "presenters/serve.py не загрузился")
+class TestShutdown(unittest.TestCase):
+    """Остановка по запросу: ответ уходит, цикл завершается, порт освобождается."""
+
+    def test_shutdown_stops_the_loop_and_answers_first(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bench = MorphBench(common.config(tmp))
+            with quiet():
+                server = WebServer(bench, host="127.0.0.1", port=0).start()
+                link = ServerLink("127.0.0.1", server.port, timeout=2.0)
+                try:
+                    status = link.status()
+                    self.assertEqual((status["state"], status["url"]), ("ours", server.url))
+                    self.assertIsNone(status["root"])
+                    got = link.shutdown()
+                    self.assertEqual(got, {"stopping": True, "url": server.url})
+                    # Цикл обслуживания остановился сам: поток выходит без stop().
+                    server._thread.join(5.0)
+                    self.assertFalse(server._thread.is_alive())
+                finally:
+                    server.stop()
+            self.assertEqual(link.probe(), "free")
+            self.assertEqual(link.status()["state"], "free")
+
+
 @unittest.skipIf(ServerLink is None, "presenters/serve.py не загрузился")
 class TestLinkProbe(unittest.TestCase):
     def test_free_port(self):
@@ -112,6 +151,33 @@ class TestLinkProbe(unittest.TestCase):
             s.bind(("127.0.0.1", 0))
             port = s.getsockname()[1]
         self.assertEqual(ServerLink("127.0.0.1", port, timeout=1.0).probe(), "free")
+
+    def test_wildcard_host_is_dialled_on_loopback(self):
+        """Слушать на 0.0.0.0 можно, набирать этот адрес нельзя: url и опрос идут на loopback."""
+        with tempfile.TemporaryDirectory() as tmp:
+            bench = MorphBench(common.config(tmp))
+            with quiet():
+                server = WebServer(bench, host="0.0.0.0", port=0).start()
+                try:
+                    self.assertTrue(server.url.startswith("http://127.0.0.1:"), server.url)
+                    link = ServerLink("0.0.0.0", server.port, timeout=2.0)
+                    self.assertEqual(link.url, server.url)
+                    self.assertEqual(link.probe(), "ours")
+                finally:
+                    server.stop()
+
+    def test_silent_server_is_slow_not_busy(self):
+        """Соединение есть, ответа нет: это «медленно», а не «чужая программа»."""
+        import socket
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(16)         # очередь на несколько неотвеченных соединений подряд
+        try:
+            link = ServerLink("127.0.0.1", listener.getsockname()[1], timeout=0.5)
+            self.assertEqual(link.probe(), "slow")
+            self.assertEqual(link.status()["state"], "slow")
+        finally:
+            listener.close()
 
     def test_stranger_on_the_port(self):
         """Чужой HTTP-сервер отвечает, но не подписывается morphbench - это «занято»."""
