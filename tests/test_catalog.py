@@ -285,7 +285,7 @@ class TestEnvironment(unittest.TestCase):
 
     def test_describe_keys_and_types(self):
         d = self.env().describe()
-        self.assertEqual(set(d), {"insideMo2", "dataRoot", "games", "catalogRoot"})
+        self.assertEqual(set(d), {"insideMo2", "dataRoot", "games", "catalogRoot", "candidates"})
         self.assertIs(type(d["insideMo2"]), bool)
         self.assertTrue(common.is_plain(d), d)
 

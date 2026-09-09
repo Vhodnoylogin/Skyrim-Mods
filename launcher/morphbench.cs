@@ -38,7 +38,21 @@ static class Program
     {
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
-        Application.Run(new MainForm(Options.Parse(args)));
+        var options = Options.Parse(args);
+        if (options.Diag)
+        {
+            // Диагностика без окна: что python видит из-под MO2 - в файл рядом с exe.
+            // Так проверяют VFS без человека у экрана: запуск через MO2, ответ - в файле.
+            string home = Module.FindHome(options.Home);
+            string python = home == null ? null : Module.FindPython(home);
+            string text = home == null ? "нет mb.py" : python == null ? "нет python"
+                : new Launcher(home, python).Cli("env --json") + "\n---catalog---\n"
+                  + new Launcher(home, python).Cli("catalog --find werewolf --json");
+            File.WriteAllText(Path.Combine(home ?? AppDomain.CurrentDomain.BaseDirectory, "morphbench.diag.json"),
+                              text, new UTF8Encoding(false));
+            return;
+        }
+        Application.Run(new MainForm(options));
     }
 }
 
@@ -48,6 +62,7 @@ class Options
     public string Home;          // папка с mb.py, если названа доводом
     public string Root;          // корень обзора на этот запуск
     public bool Start;           // поднять сервер сразу
+    public bool Diag;            // без окна: env --json в файл и выйти
 
     public static Options Parse(string[] args)
     {
@@ -56,6 +71,7 @@ class Options
         {
             string a = args[i];
             if (a == "--start") o.Start = true;
+            else if (a == "--diag") o.Diag = true;
             else if (a == "--root" && i + 1 < args.Length) o.Root = args[++i];
             else if (a.StartsWith("--root=")) o.Root = a.Substring(7);
             else if (!a.StartsWith("--")) o.Home = a;
@@ -238,6 +254,7 @@ class Launcher
     {
         var st = new ServerStatus();
         string outp = RunCli("serve --status --json");
+        Log(outp.Trim());                      // что верстак знает об окружении - целиком
         try
         {
             var d = js.Deserialize<Dictionary<string, object>>(FirstJson(outp));
@@ -256,6 +273,8 @@ class Launcher
         }
         return st;
     }
+
+    public string Cli(string args) { return RunCli(args); }
 
     string RunCli(string args)
     {
@@ -447,6 +466,7 @@ class MainForm : Form
     ServerStatus status = new ServerStatus();
     bool probing;
     bool warnedForeign;                     // предупреждение о сервере вне MO2 - один раз
+    int waitTicks;                          // сколько секунд ещё ждать подъёма своего сервера
 
     readonly Label stateLabel = new Label();
     readonly Label envLabel = new Label();
@@ -549,8 +569,10 @@ class MainForm : Form
         grid.Controls.Add(logBox, 0, 4);
         Controls.Add(grid);
 
-        timer.Interval = 2000;
-        timer.Tick += (s, e) => Refresh(false);
+        // Состояние спрашивается по кнопке и после каждого действия. Таймер нужен только
+        // пока ждём, когда поднятый нами сервер ответит, - и гаснет, как только ответил.
+        timer.Interval = 1000;
+        timer.Tick += (s, e) => { if (--waitTicks <= 0) timer.Stop(); Refresh(false); };
     }
 
     // -- жизнь окна --
@@ -591,7 +613,6 @@ class MainForm : Form
             : st.HereInsideMo2 ? (st.HereDataRoot ?? "")
             : (st.Up && !string.IsNullOrEmpty(st.Root)) ? st.Root : remembered.Root;
         Show(st);
-        timer.Start();
         if (options.Start) StartServer();
     }
 
@@ -641,6 +662,8 @@ class MainForm : Form
         // Страницу открываем, как только сервер ответит, - см. Refresh.
         pendingOpen = options.Start;
         options.Start = false;
+        waitTicks = 60;
+        timer.Start();
         Refresh(true);
     }
 
@@ -721,6 +744,7 @@ class MainForm : Form
                 bool cameUp = st.Up && !previous.Up;
                 status = st;
                 Show(st);
+                if (st.Up) timer.Stop();
                 if (cameUp && pendingOpen) { pendingOpen = false; OpenPage(); }
             }));
         });

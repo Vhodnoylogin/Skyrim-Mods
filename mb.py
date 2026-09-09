@@ -401,6 +401,7 @@ def _serve_status(bench: MorphBench, link, args) -> int:
     here = bench.environment()
     status["hereInsideMo2"] = here["insideMo2"]
     status["hereDataRoot"] = here["dataRoot"]
+    status["hereCandidates"] = here["candidates"]     # что этот процесс видит в Data игр
     if args.json:
         _out(args, status)
         return 0
