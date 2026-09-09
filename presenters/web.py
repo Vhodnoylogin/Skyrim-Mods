@@ -85,6 +85,9 @@ class WebPage:
             "triangles": self._indices(shape.tris, count),
             "boneKey": self._b64(self.bench.bone_key(name), "<i2"),
             "boneNames": self.bench.shape_bone_names(name),
+            # Кости с непустыми весами - по ним ядро решает, чья капсула видна вместе
+            # с частью (visible_collider_bones); boneNames может нести и пустые.
+            "heldBones": self.bench.held_bones(name),
         }
 
     # ---- капсулы столкновений ---------------------------------------------------------
@@ -103,16 +106,18 @@ class WebPage:
                 "triangles": cls._indices(tris, count)}
 
     def _colliders(self) -> dict | None:
-        """Капсулы тел одним куском и бампер отдельно - как их отдаёт фасад, в мировых
-        координатах. Без скелета - None: раздел на панели не строится."""
+        """Капсулы тел кусками по костям (`collider_meshes` фасада) и бампер отдельно,
+        в мировых координатах. По костям - чтобы страница прятала капсулу вместе с частью
+        меша, не спрашивая ядро. Без скелета - None: раздел на панели не строится."""
         bench = self.bench
         if not bench.has_skeleton():
             return None
-        bodies = self._chunk(*bench.collider_mesh())
-        if bodies is None:
-            bodies = {"vertexCount": 0, "vertices": "", "indexType": "u16", "triangles": ""}
-        bodies["bumper"] = self._chunk(*bench.bumper_mesh())
-        return bodies
+        bodies = []
+        for piece in bench.collider_meshes():
+            chunk = self._chunk(piece["verts"], piece["tris"])
+            if chunk is not None:
+                bodies.append({"bone": piece["bone"], **chunk})
+        return {"bodies": bodies, "bumper": self._chunk(*bench.bumper_mesh())}
 
     # ---- морфы ------------------------------------------------------------------------
     def _deltas(self, shape_name: str, morph: str, vertex_count: int) -> dict | None:
@@ -173,6 +178,7 @@ class WebPage:
             # Слой капсул: цвет 0..255 и прозрачность 0..1 - те же ключи, что у растеризатора.
             "colliderColour": [float(x) for x in cfg["colliderColour"]],
             "colliderOpacity": float(cfg["colliderOpacity"]),
+            "collidersFollowParts": bool(cfg["collidersFollowParts"]),
         }
 
     # ---- сервер: то, что страница знает о нём -----------------------------------------
@@ -488,6 +494,7 @@ class Shape {
     this.triCount = this.tris.length / 3;
     this.boneKey = Codec.i16(raw.boneKey);
     this.boneNames = raw.boneNames;
+    this.heldBones = raw.heldBones;      // кости с вершинами: по ним видимость капсул
   }
 }
 
@@ -527,12 +534,14 @@ class Strain {
   }
 }
 
-// Кусок капсул - тела одним куском либо бампер, - как его отдаёт collider_mesh() и
-// bumper_mesh() фасада: уже в мировых координатах, без костей и морфов, поэтому ползунки
-// его не трогают и нормали считаются один раз. Поля те же, что у Shape, - рисующему всё равно.
+// Кусок капсул - капсулы одной кости либо бампер, - как его отдают collider_meshes() и
+// bumper_mesh() фасада: уже в мировых координатах, без морфов, поэтому ползунки его
+// не трогают и нормали считаются один раз. Поля те же, что у Shape, - рисующему всё равно;
+// bone - кость, на которой висит кусок (у бампера null).
 class ColliderMesh {
-  constructor(name, raw) {
+  constructor(name, raw, bone) {
     this.name = name;
+    this.bone = bone === undefined ? null : bone;
     this.pos = Codec.f32(raw.vertices);
     this.count = raw.vertexCount;
     this.tris = Codec.index(raw.triangles, raw.indexType);
@@ -731,10 +740,11 @@ class BenchMirror {
       for (const shape in data.strain[morph]) this.strainData[morph][shape] = new Strain(data.strain[morph][shape]);
     }
     this.targets = data.targets;
-    // Капсулы - только при открытом скелете: тела одним куском и бампер отдельно.
+    // Капсулы - только при открытом скелете: тела кусками по костям и бампер отдельно.
     // Распаковываются и получают нормали один раз - ползунки капсул не касаются.
     const raw = data.colliders || null;
-    this._colliderMesh = raw ? new ColliderMesh("colliders:bodies", raw) : null;
+    this._colliderMeshes = raw
+      ? raw.bodies.map((b) => new ColliderMesh("colliders:" + b.bone, b, b.bone)) : null;
     this._bumperMesh = raw && raw.bumper ? new ColliderMesh("colliders:bumper", raw.bumper) : null;
     this.view = new ViewMirror(data.settings, data.presets, data.view);
     this._sliders = new Map(Object.entries(data.sliders));
@@ -742,8 +752,28 @@ class BenchMirror {
 
   is_open() { return this.summary !== null; }
   // скелет и капсулы: геометрия уже сосчитана ядром и лежит в странице
-  has_skeleton() { return this._colliderMesh !== null; }
-  collider_mesh() { return this._colliderMesh; }
+  has_skeleton() { return this._colliderMeshes !== null; }
+  collider_bones() { return this.has_skeleton() ? this._colliderMeshes.map((m) => m.bone) : []; }
+  // Кости с телом, чьи вершины есть хотя бы в одной видимой части, - зеркало
+  // visible_collider_bones() ядра: скрыл голову - капсула головы не нужна. Кость «держит»
+  // часть, если она главная для её вершин (heldBones, считает ядро); при выключенном
+  // collidersFollowParts - все кости.
+  visible_collider_bones() {
+    const bones = this.collider_bones();
+    if (!this.settings.collidersFollowParts) return bones;
+    const held = new Set();
+    for (const name of this.visible_shapes()) for (const b of this.shape(name).heldBones) held.add(b);
+    return bones.filter((b) => held.has(b));
+  }
+  // все куски по костям - в буферы их кладут один раз
+  collider_meshes() { return this.has_skeleton() ? this._colliderMeshes.slice() : []; }
+  // куски только видимых костей - зеркало collider_mesh() ядра, которое отдаёт их одним
+  // куском; здесь список, чтобы не склеивать геометрию на каждый кадр
+  collider_mesh() {
+    if (!this.has_skeleton()) return [];
+    const keep = new Set(this.visible_collider_bones());
+    return this._colliderMeshes.filter((m) => keep.has(m.bone));
+  }
   bumper_mesh() { return this._bumperMesh; }
   show_colliders(on, bumper) { return this.view.show_colliders(on, bumper); }
   shape_names() { return Array.from(this.shapes.keys()).sort(); }
@@ -1001,12 +1031,12 @@ class Renderer {
     for (let i = 0; i < chunk.count; i++) { colours[i * 3] = t[0]; colours[i * 3 + 1] = t[1]; colours[i * 3 + 2] = t[2]; }
     this.setColours(chunk, colours);
   }
-  // Куски капсул, которые сейчас надо рисовать: тела - когда слой включён, бампер - ещё
-  // и по своему флагу. Без скелета и при выключенном слое - ничего.
+  // Куски капсул, которые сейчас надо рисовать: капсулы видимых костей - когда слой
+  // включён, бампер - ещё и по своему флагу. Без скелета и при выключенном слое - ничего.
   _colliderChunks(bench) {
     const view = bench.view, out = [];
     if (!view.colliders || !bench.has_skeleton()) return out;
-    for (const chunk of [bench.collider_mesh(), view.bumper ? bench.bumper_mesh() : null])
+    for (const chunk of bench.collider_mesh().concat([view.bumper ? bench.bumper_mesh() : null]))
       if (chunk && chunk.triCount && this.meshes.has(chunk.name)) out.push(chunk);
     return out;
   }
@@ -1017,7 +1047,8 @@ class Renderer {
     if (this.canvas.width !== w || this.canvas.height !== h) { this.canvas.width = w; this.canvas.height = h; }
   }
   // Диапазон глубины - проекция видимых вершин на ось взгляда, чтобы буфер ничего не отрезал.
-  // Капсулы входят в него, когда включены: бампер вчетверо больше тела и иначе был бы обрезан.
+  // Капсулы входят в него, когда включены, и только видимые (те же куски, что рисуются):
+  // бампер вчетверо больше тела и иначе был бы обрезан.
   _depthRange(bench, centre, forward) {
     let zmin = Infinity, zmax = -Infinity;
     const clouds = bench.visible_shapes().map((n) => bench.shape(n)).filter((s) => s.triCount > 0)
@@ -1077,10 +1108,12 @@ class Renderer {
   // Капсулы поверх тела - полупрозрачно, со своей глубиной: зеркало _overlay_colliders
   // растеризатора. Смысл в том, что видно обе оболочки сразу: внутри тела капсула
   // просвечивает сквозь кожу, снаружи ложится на фон. Поэтому глубина тела капсулы
-  // не режет - перед каждым куском буфер глубины очищается, и кусок сортируется только
-  // сам с собой (передняя стенка капсулы закрывает заднюю, а не тело). Тело к этому
-  // моменту уже нарисовано, и его глубина больше никому не нужна. Цвет вершин - один
-  // на кусок, свет - той же формулой того же шейдера, прозрачность - uAlpha.
+  // не режет - перед слоем буфер глубины очищается один раз на весь слой, и капсулы
+  // сортируются только между собой (передняя стенка закрывает заднюю и соседнюю капсулу,
+  // а не тело). Куски идут по костям, но буфер у них общий: свой на кость - и капсулы
+  // резали бы друг друга не по глубине, а по порядку рисования. Тело к этому моменту
+  // уже нарисовано, и его глубина больше никому не нужна. Цвет вершин - один на кусок,
+  // свет - той же формулой того же шейдера, прозрачность - uAlpha.
   _overlayColliders(bench) {
     const chunks = this._colliderChunks(bench);
     if (!chunks.length) return;
@@ -1089,9 +1122,9 @@ class Renderer {
     // Альфа холста остаётся единицей: иначе страница просвечивала бы сквозь капсулы.
     gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
     gl.uniform1f(this.uni.uAlpha, this.colliderAlpha);
+    gl.clear(gl.DEPTH_BUFFER_BIT);
     for (const chunk of chunks) {
       const m = this.meshes.get(chunk.name);
-      gl.clear(gl.DEPTH_BUFFER_BIT);
       gl.bindVertexArray(m.vao);
       gl.drawElements(gl.TRIANGLES, m.count, m.type, 0);
     }
@@ -1466,8 +1499,9 @@ class App {
     this.canvas = document.getElementById("canvas");
     this.renderer = new Renderer(this.canvas, data.settings);
     for (const name of this.bench.shape_names()) this.renderer.upload(this.bench.shape(name));
-    // Капсулы - в буферы один раз: ползунки их не двигают, цвет у них один.
-    this.renderer.uploadColliders(this.bench.collider_mesh());
+    // Капсулы - в буферы один раз, все куски по костям: ползунки их не двигают, цвет
+    // у них один, а какие из них рисовать, решает collider_mesh() на каждый кадр.
+    for (const chunk of this.bench.collider_meshes()) this.renderer.uploadColliders(chunk);
     this.renderer.uploadColliders(this.bench.bumper_mesh());
     this.refreshPositions();
     this.refreshColours();

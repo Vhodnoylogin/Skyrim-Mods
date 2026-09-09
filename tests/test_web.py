@@ -120,17 +120,27 @@ def _index_dtype(kind):
 
 
 def _rig(with_bumper: bool = False):
-    """Скелет в памяти помощниками из test_colliders: одна кость с одной капсулой и,
-    по просьбе, бампер. Путь у него - memory.nif, как у всех фигур в памяти."""
+    """Скелет в памяти помощниками из test_colliders: по капсуле на костях Hand и Fur
+    образца (Hand держит кожу, Fur — оболочку) и, по просьбе, бампер. Путь у него -
+    memory.nif, как у всех фигур в памяти."""
     from test_colliders import body, cap, rig
     bumper = body("Bump", cap("Bump", radius=25.0), kind="bhkSimpleShapePhantom") if with_bumper else None
-    return rig(body("B", cap(radius=2.0)), bumper=bumper)
+    return rig(body("Hand", cap("Hand", radius=2.0)), body("Fur", cap("Fur", radius=1.0)), bumper=bumper)
+
+
+def _chunk_verts(chunk):
+    return _unpack(chunk["vertices"], "<f4").reshape(-1, 3)
+
+
+def _chunk_tris(chunk):
+    return _unpack(chunk["triangles"], _index_dtype(chunk["indexType"])).reshape(-1, 3)
 
 
 @unittest.skipIf(WebPage is None, "presenters/web.py ещё нет")
 class TestWebPageColliders(unittest.TestCase):
     """Слой капсул: без скелета его в странице нет, со скелетом капсулы вложены целиком —
-    теми же треугольниками, что отдаёт фасад, — а состояние слоя идёт из view_state()."""
+    кусками по костям, теми же треугольниками, что отдаёт фасад, — а состояние слоя идёт
+    из view_state()."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -151,20 +161,25 @@ class TestWebPageColliders(unittest.TestCase):
         self.assertIn('"colliders":null', page.html())
 
     def test_with_skeleton_in_memory(self):
-        """Капсулы в странице — те же вершины и треугольники, что у collider_mesh()."""
+        """Капсулы в странице — кусками по костям, с именами костей, и в каждом те же
+        вершины и треугольники, что у collider_meshes() фасада."""
         import numpy as np
         self.bench.rig = _rig()
         payload = WebPage(self.bench).payload()
-        verts, tris = self.bench.collider_mesh()
         got = payload["colliders"]
         self.assertIsNotNone(got)
-        self.assertEqual(got["vertexCount"], verts.shape[0])
-        np.testing.assert_array_equal(_unpack(got["vertices"], "<f4").reshape(-1, 3), verts)
-        np.testing.assert_array_equal(
-            _unpack(got["triangles"], _index_dtype(got["indexType"])).reshape(-1, 3), tris)
+        pieces = self.bench.collider_meshes()
+        self.assertEqual([b["bone"] for b in got["bodies"]], [p["bone"] for p in pieces])
+        self.assertEqual([b["bone"] for b in got["bodies"]], ["Hand", "Fur"])
+        for chunk, piece in zip(got["bodies"], pieces):
+            self.assertEqual(chunk["vertexCount"], piece["verts"].shape[0])
+            np.testing.assert_array_equal(_chunk_verts(chunk), piece["verts"])
+            np.testing.assert_array_equal(_chunk_tris(chunk), piece["tris"])
+        self.assertEqual(sum(b["vertexCount"] for b in got["bodies"]),
+                         sum(p["verts"].shape[0] for p in pieces))
         self.assertIsNone(got["bumper"], "бампера в этом скелете нет")
         self.assertEqual(payload["names"]["skeleton"], "memory.nif")
-        self.assertEqual(payload["summary"]["colliders"], 1)
+        self.assertEqual(payload["summary"]["colliders"], 2)
         # Слой выключен, пока не попросили, и включается тем же методом фасада.
         self.assertFalse(payload["view"]["colliders"])
         self.bench.show_colliders(True)
@@ -179,7 +194,26 @@ class TestWebPageColliders(unittest.TestCase):
         got = WebPage(self.bench).payload()["colliders"]
         self.assertIsNotNone(got["bumper"])
         self.assertEqual(got["bumper"]["vertexCount"], self.bench.bumper_mesh()[0].shape[0])
-        self.assertEqual(got["vertexCount"], self.bench.collider_mesh()[0].shape[0])
+        self.assertEqual([b["bone"] for b in got["bodies"]], ["Hand", "Fur"],
+                         "бампер не попадает в куски по костям")
+
+    def test_payload_keeps_every_bone_when_a_part_is_hidden(self):
+        """Скрытая часть не меняет payload: страница несёт куски ВСЕХ костей и прячет
+        капсулу сама, по heldBones видимых частей, — зеркалом visible_collider_bones().
+        Что ядро при этом отдаёт в collider_mesh() меньше вершин, проверяет test_colliders."""
+        self.bench.rig = _rig()
+        whole = WebPage(self.bench).payload()
+        self.bench.only(["body"])                       # оболочка fur (кость Fur) скрыта
+        payload = WebPage(self.bench).payload()
+        self.assertEqual([b["bone"] for b in payload["colliders"]["bodies"]], ["Hand", "Fur"])
+        self.assertEqual(sum(b["vertexCount"] for b in payload["colliders"]["bodies"]),
+                         sum(b["vertexCount"] for b in whole["colliders"]["bodies"]))
+        # То, по чему страница решает: у кожи веса только у Hand и Finger, у оболочки - у Fur.
+        by_name = {s["name"]: s for s in payload["shapes"]}
+        self.assertEqual(sorted(by_name["body"]["heldBones"]), ["Finger", "Hand"])
+        self.assertEqual(by_name["fur"]["heldBones"], ["Fur"])
+        self.assertEqual(self.bench.visible_collider_bones(), ["Hand"])
+        self.assertTrue(payload["settings"]["collidersFollowParts"])
 
     def test_settings_carry_colour_and_opacity(self):
         """Цвет и прозрачность слоя — из тех же ключей настроек, что у растеризатора."""
