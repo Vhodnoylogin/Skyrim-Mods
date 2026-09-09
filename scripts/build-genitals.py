@@ -46,6 +46,11 @@ addon_utils.enable("io_scene_nifly", default_set=False, persistent=True)
 
 argv = sys.argv[sys.argv.index("--") + 1:]
 BODYMORPHS = None
+DONOR = None
+if '--donor' in argv:
+    k = argv.index('--donor')
+    DONOR = argv[k + 1]
+    argv = argv[:k] + argv[k + 2:]
 if '--body-morphs' in argv:
     k = argv.index('--body-morphs')
     BODYMORPHS = argv[k + 1]
@@ -57,6 +62,17 @@ spec = json.load(open(SPEC, encoding='utf-8'))
 for o in list(bpy.data.objects):
     bpy.data.objects.remove(o, do_unlink=True)
 
+donor_co = None
+if DONOR:
+    # Донор читается ОТДЕЛЬНЫМ проходом и сразу выбрасывается: PyNifly при
+    # повторном импорте вливает данные в существующие объекты, и два тела
+    # в одной сцене не уживаются.
+    bpy.ops.import_scene.pynifly(filepath=DONOR)
+    donor_co = {o.name: [v.co.copy() for v in o.data.vertices]
+                for o in bpy.data.objects if o.type == 'MESH'}
+    for o in list(bpy.data.objects):
+        bpy.data.objects.remove(o, do_unlink=True)
+    print('GEN|донор прочитан: форм %d' % len(donor_co))
 bpy.ops.import_scene.pynifly(filepath=BODY)
 body = bpy.data.objects['body']
 arm = next(o for o in bpy.data.objects if o.type == 'ARMATURE')
@@ -347,10 +363,17 @@ for i, v in enumerate(mesh.vertices):
             if kb in gen.vertex_groups:
                 gen.vertex_groups[kb].add([i], w['knotWeight'], 'REPLACE')
     else:
-        bb = w['ballsBones'][0] if verts[i].x < 0 else w['ballsBones'][1]
-        if bb in gen.vertex_groups:
+        # Костей мошонки может быть две (своя на каждый шар) или одна на обе:
+        # когда она одна, стороны не различаются - вся мошонка висит на теле.
+        bones = w['ballsBones']
+        bb = bones[0] if len(bones) < 2 or verts[i].x < 0 else bones[1]
+        if bb == w['root'] or bb not in gen.vertex_groups:
+            # Мошонка на той же кости, что и труба: остаток отдавать некому,
+            # и второе присвоение той же группе просто затёрло бы вес нулём.
+            gen.vertex_groups[w['root']].add([i], 1.0, 'REPLACE')
+        else:
             gen.vertex_groups[bb].add([i], w['ballsWeight'], 'REPLACE')
-        gen.vertex_groups[w['root']].add([i], 1.0 - w['ballsWeight'], 'REPLACE')
+            gen.vertex_groups[w['root']].add([i], 1.0 - w['ballsWeight'], 'REPLACE')
 
 gen.parent = arm
 gen.modifiers.new(name="Armature", type='ARMATURE').object = arm
@@ -362,7 +385,7 @@ for i in range(n_tube):
     mesh.vertices[i].co = ret_verts[i]
 # Мошонка — такая же часть анатомии, и в покое её быть видно не должно. Она
 # уводится за поверхность паха и уменьшается; обратно её выводит тот же
-# CLAWGenitalState, что и ствол.
+# ползунком втягивания, что и ствол.
 pull = float(ret.get('ballsPullback', 0.0))
 bscale = float(ret.get('ballsScale', 1.0))
 for a, bnd, c in ball_spans:
@@ -374,6 +397,22 @@ print("GEN|состояние покоя: ствол сжат в Y %.1f..%.1f" %
 # ---------------------------------------------------------------- морфы ------
 gen.shape_key_add(name='Basis', from_mix=False)
 ms = spec['morphs']
+
+# Имена паховых ползунков берутся из рецепта по их отличительным полям, а не
+# зашиты здесь: переименовать ползунок в рецепте - право рецепта, и сборка от
+# этого падать не должна.
+def _role(field):
+    for name, spec in ms.items():
+        if isinstance(spec, dict) and field in spec:
+            return name
+    raise KeyError("в рецепте нет пахового ползунка с полем %r" % field)
+
+
+M_STATE = _role('from')
+M_LONG = _role('lengthScale')
+M_KNOT = _role('knotScale')
+M_BALLS = _role('spread')
+
 
 
 def add_key(name, coords):
@@ -387,12 +426,12 @@ def add_key(name, coords):
 
 
 # State: покой -> вытянутое
-add_key('CLAWGenitalState',
+add_key(M_STATE,
         {i: extended[i] for i in
          list(range(n_tube)) + [k for a, bnd, _c in ball_spans for k in range(a, bnd)]})
 
 # Size: прибавка ПОВЕРХ вытянутого, поэтому дельта считается от вытянутого
-sz = ms['CLAWGenitalSize']
+sz = ms[M_LONG]
 y_base = sheath[-1][0]
 big = {}
 for i in range(n_tube):
@@ -404,10 +443,10 @@ for i in range(n_tube):
     big[i] = Vector((e.x * sz['girthScale'], yy,
                      69.2 + (e.z - 69.2) * sz['girthScale']))
     big[i] = mesh.vertices[i].co + (big[i] - e)
-add_key('CLAWGenitalSize', big)
+add_key(M_LONG, big)
 
 # Knot: только узел, тоже поверх вытянутого
-kn = ms['CLAWGenitalKnot']
+kn = ms[M_KNOT]
 kyy0, kyy1 = kn['yRange']
 knot = {}
 for i in range(n_tube):
@@ -418,10 +457,10 @@ for i in range(n_tube):
     s = kn['knotScale']
     d = Vector((e.x * (s - 1.0), 0.0, (e.z - 68.7) * (s - 1.0)))
     knot[i] = mesh.vertices[i].co + d
-add_key('CLAWGenitalKnot', knot)
+add_key(M_KNOT, knot)
 
 # Balls: мошонка видна всегда, поэтому её дельта считается от базы
-bs = ms['CLAWBallsSize']
+bs = ms[M_BALLS]
 spread = float(bs.get('spread', 1.0))
 balls = {}
 for a, bnd, c in ball_spans:
@@ -432,12 +471,19 @@ for a, bnd, c in ball_spans:
         e = extended[i]
         big = c2 + (e - c) * bs['scale']
         balls[i] = mesh.vertices[i].co + (big - e)
-add_key('CLAWBallsSize', balls)
+add_key(M_BALLS, balls)
 
 # ------------------------------------------------- морфы самого тела ---------
 if BODYMORPHS:
     meshes = {o.name: o for o in bpy.data.objects if o.type == 'MESH'}
-    morphlib.apply_recipe(json.load(open(BODYMORPHS, encoding='utf-8')),
+    _spec = [_it for _it in json.load(open(BODYMORPHS, encoding='utf-8'))
+             if _it.get('sex', 'any') in ('any', 'male')]
+    # Ползунки «к форме другого тела» требуют донора и считаются отдельно.
+    for _it in _spec:
+        if _it.get('mode') == 'toShape':
+            morphlib.apply_to_shape(_it, {o.name: o for o in bpy.data.objects
+                                          if o.type == 'MESH'}, donor_co, print)
+    morphlib.apply_recipe([_it for _it in _spec if _it.get('mode') != 'toShape'],
                           meshes, arm)
 
 # ------------------------------------------------------- проверка -----------
@@ -492,7 +538,7 @@ def report_hidden(label, active):
 
 
 report_hidden('покой', {})
-report_hidden('вытянуто', {'CLAWGenitalState': 1.0})
+report_hidden('вытянуто', {M_STATE: 1.0})
 
 # ---------------------------------------------------------------- вывод ------
 morphlib.export_clean(OUT)
@@ -572,10 +618,10 @@ def setkeys(active):
 groin = mathutils.Vector((0.0, 12.0, 66.0))
 states = [
     ("0-pokoy", {}),
-    ("1-state", {"CLAWGenitalState": 1.0}),
-    ("2-size", {"CLAWGenitalState": 1.0, "CLAWGenitalSize": 1.0}),
-    ("3-knot", {"CLAWGenitalState": 1.0, "CLAWGenitalKnot": 1.0}),
-    ("4-balls", {"CLAWGenitalState": 1.0, "CLAWBallsSize": 1.0}),
+    ("1-state", {M_STATE: 1.0}),
+    ("2-size", {M_STATE: 1.0, M_LONG: 1.0}),
+    ("3-knot", {M_STATE: 1.0, M_KNOT: 1.0}),
+    ("4-balls", {M_STATE: 1.0, M_BALLS: 1.0}),
 ]
 others = [o for o in bpy.data.objects if o.type == 'MESH' and o is not gen]
 for label, active in states:

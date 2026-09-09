@@ -19,9 +19,22 @@
              вертикальная; для руки, идущей вбок, и для хвоста, идущего назад,
              её надо задать своей -- иначе конечность толстеет только в одной
              плоскости.
+  spike   -- острый отросток тянется вдоль своей оси от своего основания:
+             коготь, клык. Каждый островок геометрии считается сам по себе,
+             поэтому общая кость не разводит их веером, а основание остаётся
+             на месте и деталь не отрывается от тела.
+  toShape -- цель берётся у ДРУГОГО тела вершина в вершину: тела полов
+             топологически одинаковы, и разница между ними - готовое поле.
+             Знак ведёт к донору или, наоборот, продолжает разницу за него.
+  swell   -- вздутие в одну сторону: живот вперёд, грудь вперёд. Все вершины
+             едут одним направлением, сила спадает от оси роста в плоскости
+             поперёк неё. Слои от этого не расходятся, а поверхность не комкается,
+             как при сдвиге по нормалям.
   bumps   -- местные выпуклости или впадины в заданных точках: вершина едет
              по своей нормали, сила спадает от центра к краю. Ряд сосков,
-             ниша вульвы -- всё, что не описывается ни костью, ни поясом.
+             ниша вульвы, грудные полудиски, круглое брюхо -- всё, что не
+             описывается ни костью, ни поясом. Область можно дополнительно
+             ограничить костями: без этого выпуклость груди захватывает плечо.
   scaleAxis -- растяжение по каждой оси отдельно от кости-опоры. Длина морды,
              ширина челюсти, длина хвоста: там, где нужен не обхват, а размер
              вдоль своего направления.
@@ -38,6 +51,9 @@ import math
 from mathutils import Vector
 
 
+ZERO = Vector((0.0, 0.0, 0.0))
+
+
 def smooth(t):
     """Плавная ступенька 0..1: без неё край области видно швом."""
     t = 0.0 if t < 0.0 else (1.0 if t > 1.0 else t)
@@ -50,11 +66,99 @@ def bone_head(arm, name):
     return arm.matrix_world @ arm.data.bones[name].head_local
 
 
+def _window(part, co):
+    """Окно по координатам: 1 внутри, 0 снаружи, плавно на краях.
+
+    Кость владеет всей своей территорией, а морфу порой нужна лишь её часть:
+    челюсть должна укрупнять морду, но не затылок, хотя обе висят на одних
+    и тех же костях головы. Окно и вырезает нужный кусок. Ключей нет - окна
+    нет, и поведение прежнее.
+    """
+    factor = 1.0
+    for key, value in (('xRange', co.x), ('yRange', co.y), ('zRange', co.z)):
+        rng = part.get(key)
+        if not rng:
+            continue
+        fade = float(part.get(key[0] + 'Fade', part.get('fade', 6.0)))
+        factor *= smooth((value - rng[0]) / fade) * smooth((rng[1] - value) / fade)
+    return factor
+
+
 def _weight_of(v, gi):
     return min(1.0, sum(g.weight for g in v.groups if g.group in gi))
 
 
-def deltas_for(obj, part, arm, log=None):
+def _islands(obj, keep):
+    """Разбивает выбранные вершины на связные куски по рёбрам меша.
+
+    Когти лежат в одной форме, но каждый коготь - отдельный островок геометрии,
+    ни одним ребром не связанный с соседями. Островки и есть отдельные когти.
+    """
+    parent = {i: i for i in keep}
+
+    def find(a):
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    for e in obj.data.edges:
+        a, b = e.vertices[0], e.vertices[1]
+        if a in parent and b in parent:
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[ra] = rb
+    groups = {}
+    for i in keep:
+        groups.setdefault(find(i), []).append(i)
+    return list(groups.values())
+
+
+def _spike(obj, part, gi, amount):
+    """Отросток удлиняется вдоль СВОЕЙ оси от СВОЕГО основания.
+
+    Основание не двигается вовсе, поэтому коготь не отрывается от пальца и
+    остаётся в него утопленным при любом положении ползунка; вытягивается
+    только остриё. Кость здесь нужна лишь чтобы выбрать вершины: опоры у неё
+    не спрашивают, ось и основание находятся по самой геометрии когтя. Это
+    важно для задних лап, где все когти висят на ОДНОЙ кости пальца и общей
+    опорой их развело бы веером.
+
+    `amount` - прибавка длины в единицах модели, а не множитель.
+    """
+    out = {}
+    co = [obj.matrix_world @ v.co for v in obj.data.vertices]
+    keep = set(i for i, v in enumerate(obj.data.vertices) if _weight_of(v, gi) > 0.01)
+    if not keep:
+        return out
+    for island in _islands(obj, keep):
+        if len(island) < 4:
+            continue
+        pts = [co[i] for i in island]
+        centre = sum(pts, Vector((0.0, 0.0, 0.0))) / len(pts)
+        p0 = max(pts, key=lambda p: (p - centre).length)
+        p1 = max(pts, key=lambda p: (p - p0).length)
+        axis = p1 - p0
+        span = axis.length
+        if span < 1e-4:
+            continue
+        axis = axis / span
+        ts = [max(0.0, min(1.0, (p - p0).dot(axis) / span)) for p in pts]
+        # Остриё - тот конец, где вершины ближе к оси: коготь сходит на конус.
+        def radius(lo, hi):
+            vals = [((p - p0) - axis * ((p - p0).dot(axis))).length
+                    for p, t in zip(pts, ts) if lo <= t <= hi]
+            return sum(vals) / len(vals) if vals else 0.0
+
+        if radius(0.0, 0.25) < radius(0.75, 1.0):
+            axis, ts = -axis, [1.0 - t for t in ts]
+        for i, t in zip(island, ts):
+            if t > 0.0:
+                out[i] = axis * (amount * smooth(t))
+    return out
+
+
+def deltas_for(obj, part, arm, log=None, strict=True):
     """Поле сдвигов одной части ползунка: {индекс вершины: смещение}."""
     out = {}
     amount = float(part.get('amount', 1.0))   # scaleAxis величину берёт из scale
@@ -83,14 +187,78 @@ def deltas_for(obj, part, arm, log=None):
             r = Vector((co.x - ax.x, co.y - ax.y, 0.0))
             if r.length < 1e-4:
                 continue
-            shift = min(r.length * (amount - 1.0), cap)
+            # Потолок держит гриву, висящую вчетверо дальше от оси, чем кожа.
+            # Но ОБРЫВ на потолке даёт плоскую площадку: всё, что за ним, сдвигается
+            # на одно и то же, и туловище становится коробкой с рёбрами. Поэтому
+            # насыщение мягкое: до половины потолка сдвиг почти линеен, дальше плавно
+            # выходит на предел и площадки не образует.
+            want = r.length * (amount - 1.0)
+            shift = cap * math.tanh(want / cap) if cap < 1e8 else want
             out[i] = r.normalized() * (shift * w)
         return out
 
+    if mode == 'swell':
+        # ВЗДУТИЕ: живот, грудные полудиски. Все затронутые вершины едут в ОДНУ
+        # сторону, а не каждая по своей нормали.
+        #
+        # Почему не по нормалям. У низкополигонального тела нормали соседних
+        # вершин смотрят заметно врозь, и сдвиг по ним не раздувает поверхность,
+        # а комкает её: вместо одной выпуклости получаются две-три складки
+        # с оврагами между. Пользователь это и увидел на брюхе.
+        #
+        # Сила спада меряется в плоскости, ПЕРПЕНДИКУЛЯРНОЙ направлению роста.
+        # Тогда кожа и шерсть над ней, стоящие на одной высоте и на одном боку,
+        # получают одинаковый сдвиг независимо от того, насколько шерсть дальше
+        # от оси, - зазор между слоями сохраняется, и уступа на границе нет.
+        # Спереди участвует только то, что впереди самой точки роста, и переход
+        # задан положением, а не нормалью, иначе вернулась бы та же огранка.
+        d = Vector(part.get('direction', [0.0, 1.0, 0.0])).normalized()
+        rad = float(part.get('radius', 20.0))
+        front = float(part.get('frontFade', 12.0))
+        centers = [Vector(c) for c in part.get('centers', [])]
+        keep = [g.index for g in obj.vertex_groups
+                if any(k.lower() in g.name.lower()
+                       for k in part.get('includeContains', []))]
+        for i, v in enumerate(obj.data.vertices):
+            co = obj.matrix_world @ v.co
+            best = 0.0
+            for c in centers:
+                rel = co - c
+                along = rel.dot(d)
+                across = (rel - d * along).length
+                t = smooth(1.0 - across / rad) * smooth(along / front)
+                if t > best:
+                    best = t
+            if best <= 0.01:
+                continue
+            if keep:
+                w = min(1.0, sum(g.weight for g in v.groups if g.group in keep))
+                best *= smooth((w - 0.15) / 0.25)
+                if best <= 0.01:
+                    continue
+            # Окно по высоте отделяет грудь от живота. Одного спада от точки роста
+            # мало: у зверя грудь и брюхо стоят вплотную, и круглая область
+            # непременно залезает на соседа - тогда ползунок груди раздувает пресс.
+            best *= _window(part, co)
+            if best <= 0.01:
+                continue
+            out[i] = d * (amount * best)
+        return out
+
     if mode == 'bumps':
-        # Работает без костей: область задана точками, а не развеской.
+        # Область задаётся точками, но её можно ещё и ограничить костями.
+        # Без ограничения выпуклость груди захватывала плечо и руку: они рядом,
+        # а расстояние до точки роста ничего не знает про то, чья это часть тела.
         centers = [Vector(c) for c in part.get('centers', [])]
         rad = float(part.get('radius', 5.0))
+        keep = [g.index for g in obj.vertex_groups
+                if any(k.lower() in g.name.lower()
+                       for k in part.get('includeContains', []))]
+        drop = [g.index for g in obj.vertex_groups
+                if any(k.lower() in g.name.lower()
+                       for k in part.get('excludeContains', []))]
+        facing = part.get('direction')
+        facing = Vector(facing).normalized() if facing else None
         obj.data.calc_normals_split() if hasattr(obj.data, 'calc_normals_split') else None
         for i, v in enumerate(obj.data.vertices):
             co = obj.matrix_world @ v.co
@@ -101,13 +269,50 @@ def deltas_for(obj, part, arm, log=None):
                     best = t
             if best <= 0.0:
                 continue
-            out[i] = v.normal.normalized() * (amount * smooth(best))
+            # Кости здесь - ПРОПУСК, а не сила: вопрос "принадлежит ли вершина
+            # туловищу", а не "насколько". Умножение на самый вес глушило морф
+            # в разы: кожа груди делит вес между позвоночником, ключицей и
+            # скрутками, и на позвоночник ей достаётся едва треть.
+            if keep:
+                w = min(1.0, sum(g.weight for g in v.groups if g.group in keep))
+                best *= smooth((w - 0.15) / 0.25)
+            if drop:
+                w = min(1.0, sum(g.weight for g in v.groups if g.group in drop))
+                best *= 1.0 - smooth((w - 0.15) / 0.25)
+            if best <= 0.01:
+                continue
+            nrm = v.normal.normalized()
+            if facing is not None:
+                # Брюхо пухнет ВПЕРЁД, а не во все стороны. Точка роста лежит внутри
+                # тела, чтобы дотянуться и до кожи, и до шерсти над ней, а сторону
+                # задаёт направление: участвует только та поверхность, что смотрит
+                # туда. Без этого спина раздувалась наравне с животом.
+                side = nrm.dot(facing)
+                if side <= 0.0:
+                    continue
+                best *= side
+                if best <= 0.01:
+                    continue
+            out[i] = nrm * (amount * smooth(best))
         return out
 
-    gi = [obj.vertex_groups[b].index for b in part.get('bones', [])
-          if b in obj.vertex_groups]
+    wanted = part.get('bones', [])
+    gi = [obj.vertex_groups[b].index for b in wanted if b in obj.vertex_groups]
+    # Опечатка в имени кости раньше проходила молча: ползунок собирался, попадал
+    # в файл, принимал значение и не двигал ничего. Так пропал CLAWNeck. Теперь
+    # о каждой ненайденной кости говорится вслух, а часть без единой найденной -
+    # это ошибка рецепта, а не пустой результат.
+    missing = [b for b in wanted if b not in obj.vertex_groups]
+    if missing and log and strict:
+        log("MORPH|%s: нет привязок %s" % (obj.name, ", ".join(missing)))
+    if wanted and not gi and strict:
+        raise KeyError("%s: ни одна из костей %s не найдена в форме"
+                       % (obj.name, ", ".join(wanted)))
     if not gi:
         return out
+    if mode == 'spike':
+        return _spike(obj, part, gi, amount)
+
     if mode == 'scaleAxis':
         pivot = bone_head(arm, part.get('pivot') or (part.get('bones') or [''])[0])
         if pivot is None:
@@ -118,6 +323,9 @@ def deltas_for(obj, part, arm, log=None):
             if w <= 0.01:
                 continue
             co = obj.matrix_world @ v.co
+            w *= _window(part, co)
+            if w <= 0.01:
+                continue
             d = co - pivot
             out[i] = Vector((d.x * (sc.x - 1.0), d.y * (sc.y - 1.0),
                              d.z * (sc.z - 1.0))) * w
@@ -135,6 +343,9 @@ def deltas_for(obj, part, arm, log=None):
             if w <= 0.01:
                 continue
             co = obj.matrix_world @ v.co
+            w *= _window(part, co)
+            if w <= 0.01:
+                continue
             m = Matrix.Rotation(ang * w, 4, axis)
             out[i] = (m @ (co - pivot)) + pivot - co
         return out
@@ -148,6 +359,9 @@ def deltas_for(obj, part, arm, log=None):
         if w <= 0.01:
             continue
         co = obj.matrix_world @ v.co
+        w *= _window(part, co)
+        if w <= 0.01:
+            continue
         if mode == 'grow':
             out[i] = (co - pivot) * ((amount - 1.0) * w)
         else:
@@ -175,7 +389,7 @@ def _put_key(obj, morph, delta, log):
         % (morph, obj.name, len(delta), len(obj.data.vertices), mx))
 
 
-def carry_field(src_obj, src_delta, dst_obj, k=6):
+def carry_field(src_obj, src_delta, dst_obj, k=6, max_dist=6.0):
     """Переносит поле сдвигов с кожи на оболочку, лежащую поверх неё.
 
     Тело зверя собрано слоями: кожа, шесть оболочек шерсти и сшивки между ними.
@@ -202,16 +416,96 @@ def carry_field(src_obj, src_delta, dst_obj, k=6):
     for j, v in enumerate(dst_obj.data.vertices):
         co = dst_obj.matrix_world @ v.co
         tot, acc = 0.0, Vector((0.0, 0.0, 0.0))
+        # Наследование обязано быть МЕСТНЫМ. Оболочки шерсти лежат в одной-двух
+        # единицах над кожей, а голова, морда и заплатки головы - в десятках:
+        # без предела голова целиком уезжала вместе с грудью, потому что её
+        # ближайшими вершинами кожи оказывалась шея.
+        #
+        # Предел этот обязан быть ПЛАВНЫМ. Резкая отсечка "дальше max_dist не
+        # наследуем" рвёт поверхность ровно так же, как рвал пропуск несдвинутых
+        # вершин: соседние вершины оболочки по разные стороны порога получают
+        # одна полный сдвиг, другая ноль. Замер это показал сразу - у шерсти
+        # живота растяжение подскочило с 6.45 до 23.25. Поэтому сила наследования
+        # спадает по расстоянию до ближайшей вершины источника, а не обрывается.
+        nearest = None
         for _c, i, dist in tree.find_n(co, k):
-            d = src_delta.get(i)
-            if d is None:
-                continue
+            # Вершину кожи, которую морф не двигает, надо взять НУЛЁМ, а не пропустить.
+            # Пропуск означал, что оболочка над краем области получала полный сдвиг
+            # единственной сдвинутой соседки, тогда как кожа под ней почти не двигалась:
+            # у гладкого поля на коже появлялся обрыв на оболочке, и она рвалась там,
+            # где кожа цела. Замер это и показывал - растяжение рёбер на шерсти вдвое
+            # больше, чем на коже, при любом положении ползунка.
+            if nearest is None:
+                nearest = dist
+            d = src_delta.get(i, ZERO)
             w = 1.0 / max(dist, 1e-4)
             acc += d * w
             tot += w
-        if tot > 0.0 and (acc / tot).length > 0.001:
-            out[j] = acc / tot
+        if tot <= 0.0 or nearest is None:
+            continue
+        # Полная сила до половины предела, ноль на пределе, плавно между ними.
+        atten = smooth((max_dist - nearest) / max(max_dist * 0.5, 1e-4))
+        if atten <= 0.0:
+            continue
+        got = (acc / tot) * atten
+        if got.length > 0.001:
+            out[j] = got
     return out
+
+
+def apply_to_shape(item, objects, donor, log=print):
+    """Ползунок «к форме другого тела»: цель берётся у донора вершина в вершину.
+
+    Тела полов топологически одинаковы - совпадает и число вершин, и их порядок, -
+    поэтому разница между ними это готовое поле сдвига, считать нечего. Знак решает,
+    в какую сторону по этому полю идти: `sign` 1 ведёт К донору, -1 ведёт ОТ него,
+    то есть продолжает ту же разницу за пределы обоих тел. Второе и позволяет отдать
+    самцу тот же ползунок, что и самке: у самца поле «к самцу» было бы нулевым.
+
+    Область режется тремя ограничителями сразу, и все три нужны: пояс по высоте,
+    предел по ширине и пропуск по привязке. Грудь и плечо лежат на одной высоте
+    и на одном удалении от осевой линии, а тела полов различаются не только грудью,
+    но и рукой - ни высота, ни ширина их не разделяют, разделяет только кость.
+    """
+    base = objects.get(item['base'])
+    if base is None or donor is None:
+        log("MORPH|%-16s нет опорной формы или донора" % item['morph'])
+        return
+    target = donor.get(base.name)
+    if target is None or len(target) != len(base.data.vertices):
+        log("MORPH|%-16s донор не подходит к форме %s" % (item['morph'], base.name))
+        return
+    gate = [g.index for g in base.vertex_groups
+            if any(k.lower() in g.name.lower() for k in item.get('includeContains', []))]
+    z0, z1 = item['zRange']
+    fade = float(item.get('zFade', 8.0))
+    xlim = item.get('xLimit')
+    sign = float(item.get('sign', 1.0))
+    delta = {}
+    for i, v in enumerate(base.data.vertices):
+        co = base.matrix_world @ v.co
+        w = smooth((co.z - z0) / fade) * smooth((z1 - co.z) / fade)
+        if xlim:
+            w *= smooth((float(xlim) - abs(co.x)) / 4.0)
+        if gate:
+            wb = min(1.0, sum(g.weight for g in v.groups if g.group in gate))
+            w *= smooth((wb - 0.15) / 0.25)
+        if w <= 0.01:
+            continue
+        d = (target[i] - v.co) * (w * sign)
+        if d.length > 0.001:
+            delta[i] = d
+    if not delta:
+        log("MORPH|%-16s поле пустое" % item['morph'])
+        return
+    _put_key(base, item['morph'], delta, log)
+    for shape in item.get('carry', []):
+        dst = objects.get(shape)
+        if dst is None:
+            continue
+        got = carry_field(base, delta, dst)
+        if got:
+            _put_key(dst, item['morph'], got, log)
 
 
 def apply_recipe(spec, objects, arm, log=print):
@@ -244,31 +538,81 @@ def apply_recipe(spec, objects, arm, log=print):
                 log("MORPH|%-16s %-14s костей нет, пропуск" % (morph, item['base']))
                 continue
             _put_key(src, morph, delta, log)
-            for shape in item.get('carry', []):
+            # Наследование идёт ЦЕПОЧКОЙ, а не веером от кожи ко всем сразу.
+            # Тело собрано в несколько слоёв: кожа, над ней шерсть живота и спины,
+            # а шерсть груди, заплатки швов и голова лежат уже над ЭТОЙ шерстью,
+            # в десятках единиц от кожи. Поле от кожи до них не достаёт, и до
+            # порога расстояния они получали чужой сдвиг, а после порога -
+            # никакого. Поэтому запись наследника может назвать свой источник:
+            # {"shape": "fur_chest", "from": "fur_belly"}. Простая строка
+            # означает прежнее поведение - наследование прямо от опорной формы.
+            fields = {item['base']: delta}
+            for entry in item.get('carry', []):
+                shape = entry if isinstance(entry, str) else entry['shape']
+                origin = item['base'] if isinstance(entry, str) else entry.get('from', item['base'])
                 dst = objects.get(shape)
                 if dst is None:
                     log("MORPH|%-16s нет формы %s" % (morph, shape))
                     continue
-                got = carry_field(src, delta, dst, int(item.get('carryNeighbours', 6)))
+                if origin not in fields:
+                    log("MORPH|%-16s %-14s источник %s ещё не посчитан"
+                        % (morph, shape, origin))
+                    continue
+                reach = float(entry.get('maxDist', 6.0)) if isinstance(entry, dict) else 6.0
+                got = carry_field(objects[origin], fields[origin], dst,
+                                  int(item.get('carryNeighbours', 6)), reach)
+                # Приращённая ДЕТАЛЬ следует за телом целиком, а не растягивается
+                # поперёк себя. Узел длиной пятнадцать единиц лежит поперёк области
+                # морфа, и разные его концы наследовали разный сдвиг: сборка рвалась
+                # по собственному шву. Жёсткое следование берёт средний сдвиг и
+                # двигает деталь как одно тело.
+                if got and isinstance(entry, dict) and entry.get('rigid'):
+                    mean = Vector((0.0, 0.0, 0.0))
+                    for d in got.values():
+                        mean += d
+                    mean /= len(got)
+                    got = {j: mean.copy() for j in range(len(dst.data.vertices))}
+                fields[shape] = got
                 if got:
                     _put_key(dst, morph, got, log)
                 else:
-                    log("MORPH|%-16s %-14s поле не дотянулось" % (morph, shape))
+                    log("MORPH|%-16s %-14s поле не дотянулось от %s"
+                        % (morph, shape, origin))
             continue
 
-        for shape in item.get('shapes', []):
+        # Морф, заданный КОСТЬЮ - поворот, рост, растяжение вдоль оси, обхват, -
+        # считается на каждой части меша по ЕЁ СОБСТВЕННЫМ привязкам, а не берётся
+        # с кожи полем по близости. Кость двигает и кожу, и коготь, и шерсть хвоста
+        # согласованно - ровно так, как это делает движок при анимации.
+        #
+        # Наследование по близости для таких морфов было прямой ошибкой: коготь,
+        # шерсть хвоста и нижняя челюсть висят далеко от кожи, и ближайшая вершина
+        # кожи к ним не имеет отношения. Коготь получал сдвиг ближайшей точки пальца
+        # и улетал; хвост рассыпался; челюсть уезжала без зубов.
+        #
+        # Звёздочка означает "на всех частях": часть без нужных костей просто ничего
+        # не получит, и это законно, а не ошибка рецепта.
+        wanted = item.get('shapes', [])
+        every = wanted == '*'
+        names = sorted(objects) if every else wanted
+        touched = []
+        for shape in names:
             obj = objects.get(shape)
             if obj is None:
                 log("MORPH|%-16s нет формы %s" % (morph, shape))
                 continue
             delta = {}
             for part in item['parts']:
-                for i, d in deltas_for(obj, part, arm, log).items():
+                for i, d in deltas_for(obj, part, arm, log, not every).items():
                     delta[i] = delta.get(i, Vector((0, 0, 0))) + d
             if not delta:
-                log("MORPH|%-16s %-14s костей нет, пропуск" % (morph, shape))
+                if not every:
+                    log("MORPH|%-16s %-14s костей нет, пропуск" % (morph, shape))
                 continue
             _put_key(obj, morph, delta, log)
+            touched.append(shape)
+        if every and not touched:
+            raise KeyError("%s: ни одна часть меша не отозвалась на кости рецепта" % morph)
 
 
 def export_clean(out_path, log=print):

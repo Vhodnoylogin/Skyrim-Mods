@@ -131,40 +131,24 @@ if SLIM is not None:
     print("FEM|половина по весу: обхват %.2f, сдвинуто %d вершин кожи" % (SLIM, len(d)))
 
 # ---- ползунки ----------------------------------------------------------------
-morphlib.apply_recipe(json.load(open(FULL, encoding='utf-8')), meshes, arm)
+# Общий рецепт держит ползунки обоих полов: у ползунка «к форме другого пола»
+# знак у самца и самки разный, поэтому запись помечена полом и чужая пропускается.
+full = [it for it in json.load(open(FULL, encoding='utf-8'))
+        if it.get('sex', 'any') in ('any', 'female')]
+for it in full:
+    if it.get('mode') == 'toShape':
+        morphlib.apply_to_shape(it, meshes, {'body': male_co.get('body')}, print)
+morphlib.apply_recipe([it for it in full if it.get('mode') != 'toShape'], meshes, arm)
 
 fem = json.load(open(FEM, encoding='utf-8'))
 plain = [it for it in fem if it.get('mode') != 'toShape']
 morphlib.apply_recipe(plain, meshes, arm)
 
-# «к мужской груди»: цель — вершины донора, погашенные по высоте
+# Ползунки «к форме другого тела» считает morphlib: то же самое нужно и сборщику
+# самца, и второй копии этой логики быть не должно.
 for it in fem:
-    if it.get('mode') != 'toShape':
-        continue
-    base = meshes.get(it['base'])
-    z0, z1 = it['zRange']
-    fade = float(it.get('zFade', 8.0))
-    donor = male_co.get(base.name)
-    delta = {}
-    for i, v in enumerate(base.data.vertices):
-        co = base.matrix_world @ v.co
-        w = morphlib.smooth((co.z - z0) / fade) * morphlib.smooth((z1 - co.z) / fade)
-        if w <= 0.01:
-            continue
-        d = (donor[i] - v.co) * w
-        if d.length > 0.001:
-            delta[i] = d
-    if not delta:
-        print("FEM|%s: поле пустое" % it['morph'])
-        continue
-    morphlib._put_key(base, it['morph'], delta, print)
-    for shape in it.get('carry', []):
-        dst = meshes.get(shape)
-        if dst is None:
-            continue
-        got = morphlib.carry_field(base, delta, dst)
-        if got:
-            morphlib._put_key(dst, it['morph'], got, print)
+    if it.get('mode') == 'toShape':
+        morphlib.apply_to_shape(it, meshes, {'body': male_co.get('body')}, print)
 
 morphlib.export_clean(OUT)
 print("FEM|экспорт ok ->", OUT)
