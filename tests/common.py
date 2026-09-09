@@ -130,6 +130,41 @@ def write_nif(pynifly, path, shapes: dict, game: str = "SKYRIM") -> Path:
     return path
 
 
+def write_skeleton(pynifly, path, bones: dict) -> Path:
+    """Крошечный скелет штатным PyNifly: узел на кость, у каждого тело с одной капсулой.
+
+    `bones` - имя кости -> (сдвиг узла по z, (p1, p2, радиус) капсулы в единицах Havok).
+    Так проверяется запись связок: PyNifly создаёт скелет, верстак его правит и пишет,
+    PyNifly читает обратно. Любой отказ API - пропуск набора, а не сбой.
+    """
+    path = Path(path)
+    try:
+        from pyn.nifdefs import TransformBuf, bhkCapsuleShapeProps, bhkRigidBodyProps  # noqa: WPS433
+        nif = pynifly.NifFile()
+        nif.initialize("SKYRIMSE", str(path))
+        for name, (dz, (p1, p2, r)) in bones.items():
+            xf = TransformBuf()
+            xf.set_identity()
+            xf.translation = (0.0, 0.0, float(dz))
+            node = nif.add_node(name, xf, parent=nif.rootNode)
+            col = node.add_collision(None)
+            rb = bhkRigidBodyProps()
+            rb.collisionFilter_layer, rb.collisionResponse = 8, 1
+            body = pynifly.bhkRigidBody.New(file=nif, properties=rb, parent=col)
+            props = bhkCapsuleShapeProps()
+            props.bhkMaterial = 591247106                     # SKIN
+            props.bhkRadius = props.radius1 = props.radius2 = float(r)
+            props.point1, props.point2 = tuple(map(float, p1)), tuple(map(float, p2))
+            body.add_shape(props)
+        nif.save()
+        del nif
+    except Exception as e:  # noqa: BLE001
+        raise unittest.SkipTest("PyNifly не смог создать скелет (%s: %s)" % (type(e).__name__, e))
+    if not path.is_file():
+        raise unittest.SkipTest("PyNifly отработал без ошибки, но файла %s нет" % path)
+    return path
+
+
 # ---- фигуры в памяти ---------------------------------------------------------------------
 def grid(name: str, nx: int, ny: int, spacing: float = 1.0, z: float = 0.0,
          x0: float = 0.0, y0: float = 0.0, bones: dict | None = None) -> Shape:

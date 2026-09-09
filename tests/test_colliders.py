@@ -19,7 +19,7 @@ import numpy as np
 import common
 from common import bench, bone, grid, main, model
 from morphbench.colliders import Capsule, CollisionBody, ColliderSet
-from morphbench.nifpatch import NifPatch
+from morphbench.nifpatch import NifPatch  # заголовок и подвал: шары охвата правятся байтами
 from presenters import ppb
 
 
@@ -170,19 +170,24 @@ class TestColliderSet(unittest.TestCase):
         self.assertEqual(cs.body("B").capsules[0].block, 5)
         self.assertAlmostEqual(cs.body("B").capsules[0].radius, 2.0, places=5)
 
-    def test_apply_fit_inherits_block_and_folds_bundle(self):
-        """Севшая капсула наследует блок первой; блоки остальных капсул связки
-        запоминаются, чтобы при записи получить те же числа."""
-        cs = rig(body("B", cap(block=5), cap(index=1, block=6), cap(index=2, block=7)))
-        fitted = cs.apply_fit("B", cap(radius=9.0))
-        self.assertEqual((fitted.block, fitted.index), (5, 0))
-        self.assertEqual(cs.body("B").capsules, [fitted])
-        self.assertEqual(cs.body("B").spare_blocks, [6, 7])
-        self.assertFalse(cs.body("B").is_bundle)
-        # Повторная посадка не теряет запасных блоков и не дублирует их.
-        again = cs.apply_fit("B", cap(radius=1.0))
-        self.assertEqual(again.block, 5)
-        self.assertEqual(cs.body("B").spare_blocks, [6, 7])
+    def test_apply_fit_replaces_the_shape_and_marks_the_body_changed(self):
+        """Севшая капсула (или связка) становится формой тела: номера по порядку, материал
+        прежней формы, блока нет - его даст запись; тело помнит, что менялось."""
+        cs = rig(body("B", cap(block=5), cap(index=1, block=6)))
+        cs.bodies["B"].capsules[0].material = 77
+        self.assertFalse(cs.bodies["B"].changed)
+        got = cs.apply_fit("B", cap(radius=9.0))
+        self.assertEqual([(c.index, c.block, c.material) for c in got], [(0, -1, 77)])
+        self.assertTrue(cs.bodies["B"].changed)
+        self.assertEqual(cs.changed_bodies(), ["B"])
+        many = cs.apply_fit("B", [cap(radius=1.0), cap(radius=2.0), cap(radius=3.0)])
+        self.assertEqual([c.index for c in many], [0, 1, 2])
+        self.assertTrue(cs.body("B").is_bundle)
+
+    def test_value_edit_marks_the_body_changed(self):
+        cs = rig(body("B", cap()))
+        cs.body("B").capsules[0].radius = 4.0
+        self.assertTrue(cs.body("B").changed)
 
     def test_unknown_bone_names_the_near_ones(self):
         cs = rig(body("NPC L Thigh [LThg]", cap()))
@@ -195,10 +200,111 @@ class TestColliderSet(unittest.TestCase):
         self.assertEqual(verts.shape[0], 0)
         self.assertEqual(tris.shape[0], 0)
 
-    def test_save_refuses_without_blocks(self):
-        """Капсулы, собранные в памяти, не знают блоков: записывать нечего и некуда."""
-        with self.assertRaises((RuntimeError, FileNotFoundError)):
+    def test_save_refuses_when_nothing_changed(self):
+        with self.assertRaises(ValueError):
             rig(body("B", cap())).save_as(Path(tempfile.gettempdir()) / "mb-never.nif")
+
+
+class TestSplit(unittest.TestCase):
+    def setUp(self):
+        # Две трубы под прямым углом: у такого облака одна капсула не садится, две - да.
+        self.pts = np.vstack([tube(1.0, 0.0, 20.0), tube(1.0, 0.0, 20.0)[:, [2, 1, 0]]])
+
+    def test_axis_slices_are_equal_and_cover_everything(self):
+        from morphbench.colliders import split_points
+        chunks = split_points(self.pts, 4, "axis")
+        self.assertEqual(len(chunks), 4)
+        self.assertEqual(sorted(np.concatenate(chunks).tolist()), list(range(self.pts.shape[0])))
+        self.assertLessEqual(max(c.size for c in chunks) - min(c.size for c in chunks), 1)
+
+    def test_kmeans_finds_the_two_arms(self):
+        from morphbench.colliders import split_points
+        chunks = split_points(self.pts, 2, "kmeans")
+        self.assertEqual(len(chunks), 2)
+        n = tube(1.0, 0.0, 20.0).shape[0]
+        # Каждый кусок - почти целиком одна труба: сгустки нашли рукава сами.
+        for chunk in chunks:
+            first = (chunk < n).mean()
+            self.assertTrue(first > 0.8 or first < 0.2, first)
+
+    def test_one_chunk_and_unknown_method(self):
+        from morphbench.colliders import split_points
+        self.assertEqual(split_points(self.pts, 1)[0].size, self.pts.shape[0])
+        with self.assertRaises(ValueError):
+            split_points(self.pts, 2, "magic")
+
+    def test_bundle_covers_what_one_capsule_cannot(self):
+        """Угол из двух труб: одна капсула оставляет снаружи много кожи, связка из двух - нет."""
+        cs = rig(body("B", cap()))
+        one = cs.fit("B", self.pts)
+        cs.apply_fit("B", one)
+        alone = cs.clearance("B", self.pts)
+        pair = cs.fit_bundle("B", self.pts, 2, "kmeans", 90.0, 12)
+        self.assertEqual(len(pair), 2)
+        cs.apply_fit("B", pair)
+        together = cs.clearance("B", self.pts)
+        # Одна капсула на угол: дальняя кожа в 2.7 снаружи, а сама капсула раздута
+        # (глубже всего -6.8). Две: снаружи меньше половины единицы, раздутия нет.
+        self.assertGreater(alone["worst"], 2.0)
+        self.assertLess(together["worst"], 0.8)
+        self.assertLess(abs(together["deepest"]), abs(alone["deepest"]) / 3.0)
+
+    def test_small_chunks_are_skipped(self):
+        cs = rig(body("B", cap()))
+        self.assertEqual(cs.fit_bundle("B", self.pts[:20], 5, "axis", 90.0, 12), [])
+
+
+class TestSaveThroughPyNifly(unittest.TestCase):
+    """Запись: PyNifly создаёт скелет, верстак сажает связку, PyNifly читает обратно."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.cfg = common.config(self.tmp.name)
+        self.pynifly = common.load_pynifly(self.cfg)
+        self.path = common.write_skeleton(self.pynifly, Path(self.tmp.name) / "skel.nif", {
+            "A": (0.0, ((0, 0, 0), (0, 0, 0.1), 0.03)),
+            "B": (10.0, ((0, 0, 0), (0, 0, 0.2), 0.02))})
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_reads_what_pynifly_wrote(self):
+        cs = ColliderSet.from_nif(self.path, self.cfg)
+        self.assertEqual(cs.bone_names(), ["A", "B"])
+        from morphbench.colliders import HAVOK_SCALE
+        self.assertAlmostEqual(cs.body("B").capsules[0].radius, 0.02 * HAVOK_SCALE, places=3)
+        self.assertAlmostEqual(float(cs.matrix("B")[2, 3]), 10.0, places=4)
+        self.assertEqual(cs.body("A").capsules[0].material, 591247106)
+
+    def test_bundle_is_written_as_a_list_and_read_back(self):
+        cs = ColliderSet.from_nif(self.path, self.cfg)
+        cs.apply_fit("B", [cap("B", p1=(0, 0, 0), p2=(0, 0, 7), radius=1.0),
+                           cap("B", index=1, p1=(0, 0, 7), p2=(0, 0, 14), radius=2.0)])
+        cs.apply_fit("A", cap("A", p1=(0, 0, 0), p2=(0, 0, 3), radius=0.5))
+        out = cs.save_as(Path(self.tmp.name) / "out" / "skel2.nif", self.cfg)
+        self.assertTrue(out.is_file())
+        again = ColliderSet.from_nif(out, self.cfg)
+        b = again.body("B")
+        self.assertTrue(b.is_bundle)
+        self.assertEqual(len(b.capsules), 2)
+        self.assertAlmostEqual(b.capsules[1].radius, 2.0, places=3)
+        self.assertAlmostEqual(float(b.capsules[1].p2[2]), 14.0, places=3)
+        self.assertEqual(b.capsules[0].material, 591247106)      # материал унаследован
+        a = again.body("A")
+        self.assertEqual(len(a.capsules), 1)
+        self.assertAlmostEqual(a.capsules[0].radius, 0.5, places=3)
+        self.assertFalse(again.body("A").changed)
+        self.assertEqual(cs.bone_names(), again.bone_names())
+
+    def test_untouched_bodies_keep_their_bytes(self):
+        """Меняется одно тело - у второго форма та же, до последнего числа."""
+        cs = ColliderSet.from_nif(self.path, self.cfg)
+        cs.apply_fit("A", cap("A", p1=(0, 0, 0), p2=(0, 0, 3), radius=0.5))
+        out = cs.save_as(Path(self.tmp.name) / "skel3.nif", self.cfg)
+        before = ColliderSet.from_nif(self.path, self.cfg).body("B").capsules[0]
+        after = ColliderSet.from_nif(out, self.cfg).body("B").capsules[0]
+        self.assertTrue(np.allclose(before.p2, after.p2))
+        self.assertAlmostEqual(before.radius, after.radius, places=5)
 
 
 # ---- точечная правка файла --------------------------------------------------------------
@@ -235,36 +341,6 @@ class TestNifPatch(unittest.TestCase):
         self.assertEqual(patch.sizes, [60, 48])
         self.assertEqual(patch.offsets[1] - patch.offsets[0], 60)
         self.assertTrue(patch.consistent())
-
-    def test_capsule_roundtrip_in_its_block(self):
-        """Что записано в блок капсулы, то из него и читается; соседний блок цел."""
-        patch = NifPatch(self.path)
-        before = bytes(patch.raw)
-        patch.write_capsule(1, (1.0, 2.0, 3.0), (4.0, 5.0, 6.0), 0.5)
-        p1, p2, r = patch.read_capsule(1)
-        self.assertEqual((p1, p2, r), ((1.0, 2.0, 3.0), (4.0, 5.0, 6.0), 0.5))
-        self.assertEqual(bytes(patch.raw[:patch.offsets[1]]), before[:patch.offsets[1]])
-        self.assertEqual(bytes(patch.raw[patch.end:]), before[patch.end:])
-        saved = patch.save(Path(self.tmp.name) / "out" / "tiny.nif")
-        self.assertEqual(len(saved.read_bytes()), len(before))
-
-    def test_refuses_a_block_that_is_not_a_capsule(self):
-        patch = NifPatch(self.path)
-        with self.assertRaises(ValueError):
-            patch.write_capsule(0, (0, 0, 0), (0, 0, 1), 1.0)
-        with self.assertRaises(KeyError):
-            patch.write_capsule(9, (0, 0, 0), (0, 0, 1), 1.0)
-
-    def test_set_writes_through_the_patch(self):
-        """Набор с капсулой, знающей блок, пишет НОВЫЙ файл в единицах Havok."""
-        from morphbench.colliders import HAVOK_SCALE
-        cs = ColliderSet(self.path, {"B": body("B", cap(p1=(0, 0, 0), p2=(0, 0, 70.0),
-                                                       radius=7.0, block=1))}, {})
-        out = cs.save_as(Path(self.tmp.name) / "fitted.nif")
-        self.assertNotEqual(out, self.path)
-        p1, p2, r = NifPatch(out).read_capsule(1)
-        self.assertAlmostEqual(p2[2], 70.0 / HAVOK_SCALE, places=5)
-        self.assertAlmostEqual(r, 7.0 / HAVOK_SCALE, places=5)
 
     def test_real_file_from_pynifly_walks_consistently(self):
         """Заголовок настоящего NIF, записанного PyNifly, сходится с длиной файла."""
