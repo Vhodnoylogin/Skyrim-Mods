@@ -26,6 +26,7 @@
     GET /api/catalog?root=&all=0|1&rescan=0|1   bench.catalog(...)
     GET /api/payload?index=|name=&root=    open_entry, затем WebPage(bench).payload()
     GET /api/root?root=<папка>             сделать папку корнем сервера; без root - какой сейчас
+    GET /api/shutdown                      остановить сервер: ответ уходит, цикл завершается
 
 Ошибки в /api/* - JSON {"error": ...} с кодом: 400 - запрос не разобран или корень
 не задан, 404 - нет записи или папки, 403 - под MO2 папка вне Data игры. На странице
@@ -52,10 +53,20 @@ _TRUE = ("1", "true", "yes", "on", "да")
 #: Подпись в заголовке Server: по ней `ServerLink` отличает свой сервер от чужой программы
 #: на том же порту.
 SERVER_NAME = "morphbench/1"
+#: Адреса «слушать на всех интерфейсах»: набирать такой адрес нельзя - Windows отвечает
+#: WSAEADDRNOTAVAIL, - поэтому к серверу на нём обращаются по loopback.
+_WILDCARD = ("0.0.0.0", "", "::", "*")
 
 
-class RequestError(Exception):
-    """Запрос, который нельзя исполнить: код ответа и текст, понятный человеку."""
+def dial_host(host) -> str:
+    """Адрес, по которому к серверу обращаются, если он слушает на `host`."""
+    host = str(host or "").strip()
+    return "127.0.0.1" if host in _WILDCARD else host
+
+
+class RequestError(ValueError):
+    """Запрос, который нельзя исполнить: код ответа и текст, понятный человеку.
+    Это отказ, а не сбой, - потому ValueError: командная строка печатает его одной строкой."""
 
     def __init__(self, status: int, message: str):
         super().__init__(message)
@@ -115,6 +126,13 @@ class Query:
         return self.get("name")
 
 
+class _Server(ThreadingHTTPServer):
+    """Второй сервер на том же порту обязан упасть, а не молча сесть рядом: SO_REUSEADDR,
+    который http.server включает по умолчанию, на Windows разрешает такой второй bind."""
+
+    allow_reuse_address = False
+
+
 class WebServer:
     """Сервер страницы поверх фасада.
 
@@ -137,7 +155,7 @@ class WebServer:
             root = bench.environment()["dataRoot"]
         if root is not None:
             self.set_root(root)
-        self.httpd = ThreadingHTTPServer(
+        self.httpd = _Server(
             (self.host, int(self.cfg["servePort"] if port is None else port)),
             partial(_Handler, self))
         self.httpd.daemon_threads = True
@@ -146,7 +164,7 @@ class WebServer:
 
     @property
     def url(self) -> str:
-        return "http://%s:%d/" % (self.host, self.port)
+        return "http://%s:%d/" % (dial_host(self.host), self.port)
 
     def set_root(self, root) -> dict:
         """Сделать папку корнем сервера. Фасад проверяет её и делает первый обход -
@@ -200,9 +218,10 @@ class WebServer:
         return root
 
     def api_environment(self) -> dict:
-        with self.lock:
-            return dict(self.bench.environment(),
-                        root=None if self.root is None else str(self.root))
+        """Без замка: окружение читается из реестра, а не из фасада, и опознание сервера
+        не должно ждать, пока под замком идёт обход большой папки."""
+        return dict(self.bench.environment(),
+                    root=None if self.root is None else str(self.root))
 
     def api_catalog(self, query: Query) -> list[dict]:
         with self.lock:
@@ -227,6 +246,14 @@ class WebServer:
             return {"root": None if self.root is None else str(self.root),
                     "meshes": None if self.root is None else len(
                         self.bench.catalog(str(self.root), self.with_morphs))}
+
+    def api_shutdown(self) -> dict:
+        """Остановить сервер по просьбе клиента - окна запуска или `serve --stop`.
+
+        Ответ должен уйти раньше, чем цикл обслуживания остановится, а `shutdown()` ждёт
+        этот цикл и из потока запроса зваться не может, - поэтому отдельный поток."""
+        threading.Thread(target=self.httpd.shutdown, daemon=True).start()
+        return {"stopping": True, "url": self.url}
 
     def page(self, query: Query) -> tuple[str, int]:
         """Страница по запросу: список мешей под корнем, открытие названного тела, и всё,
@@ -273,7 +300,7 @@ class ServerLink:
     """
 
     def __init__(self, host: str, port: int, timeout: float = 2.0):
-        self.host = str(host)
+        self.host = dial_host(host)
         self.port = int(port)
         self.timeout = float(timeout)
         # Без прокси: адрес местный, а переменные окружения могут завернуть его наружу.
@@ -290,7 +317,8 @@ class ServerLink:
             return json.loads(r.read().decode("utf-8"))
 
     def probe(self) -> str:
-        """`free` - порт свободен, `ours` - там наш сервер, `busy` - чужая программа."""
+        """`free` - порт свободен, `ours` - там наш сервер, `busy` - чужая программа,
+        `slow` - соединение есть, а ответа за отведённое время нет: кто там, неизвестно."""
         try:
             with socket.create_connection((self.host, self.port), timeout=self.timeout):
                 pass
@@ -298,6 +326,10 @@ class ServerLink:
             return "free"
         try:
             self._get("/api/environment")
+        except urllib.error.URLError as e:
+            return "slow" if isinstance(e.reason, (TimeoutError, socket.timeout)) else "busy"
+        except (TimeoutError, socket.timeout):
+            return "slow"
         except Exception:  # noqa: BLE001 - любой не наш ответ означает чужую программу
             return "busy"
         return "ours"
@@ -306,16 +338,43 @@ class ServerLink:
         """Окружение работающего сервера: под MO2 ли он и какой у него корень."""
         return self._get("/api/environment")
 
-    def set_root(self, root) -> dict:
-        """Отдать серверу корень обзора. Отказ сервера - RequestError с его текстом."""
+    def _call(self, path: str) -> dict:
+        """Запрос к серверу; его отказ - RequestError с кодом и текстом сервера."""
         try:
-            return self._get("/api/root?" + urllib.parse.urlencode({"root": str(root)}))
+            return self._get(path)
         except urllib.error.HTTPError as e:
             try:
                 message = json.loads(e.read().decode("utf-8")).get("error") or str(e)
             except Exception:  # noqa: BLE001
                 message = str(e)
             raise RequestError(e.code, message) from None
+
+    def set_root(self, root) -> dict:
+        """Отдать серверу корень обзора. Отказ сервера - RequestError с его текстом."""
+        return self._call("/api/root?" + urllib.parse.urlencode({"root": str(root)}))
+
+    def root(self) -> dict:
+        """Корень сервера и число мешей под ним."""
+        return self._call("/api/root")
+
+    def shutdown(self) -> dict:
+        """Попросить сервер остановиться."""
+        return self._call("/api/shutdown")
+
+    def status(self) -> dict:
+        """Одним словарём: свободен ли порт, наш ли сервер, что он знает о себе.
+        `state` - free, ours или busy; остальное заполнено только для ours."""
+        state = self.probe()
+        out = {"state": state, "url": self.url, "insideMo2": None, "root": None, "meshes": None}
+        if state == "ours":
+            env = self.environment()
+            out["insideMo2"] = env.get("insideMo2")
+            out["dataRoot"] = env.get("dataRoot")
+            try:
+                out.update(self.root())
+            except Exception:  # noqa: BLE001 - корень не обязателен для состояния
+                out["root"] = env.get("root")
+        return out
 
     def open_page(self) -> None:
         webbrowser.open(self.url)
@@ -363,6 +422,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(owner.api_payload(query))
             elif url.path == "/api/root":
                 self._send_json(owner.api_root(query))
+            elif url.path == "/api/shutdown":
+                self._send_json(owner.api_shutdown())
             elif url.path == "/favicon.ico":
                 # Значок у страницы встроенный; браузеры всё равно спрашивают - молча пусто.
                 self.send_response(204)

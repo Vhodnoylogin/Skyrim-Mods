@@ -26,12 +26,13 @@
     python mb.py env                                   под MO2 ли мы и какой корень обзора
     python mb.py catalog [папка] [--all] [--find X]    обзор мешей с подобранными морфами
     python mb.py serve   [--root папка] [--port N] [--nif X]   страница со списком мешей
+    python mb.py serve   --status | --stop             жив ли сервер; остановить его
 
 `serve` без ключей просто поднимает сервер: корень обзора - Data игры под MO2, иначе его
 называют на странице. Если сервер на этом адресе уже поднят, второй не поднимается:
 ему отдаётся корень (из-под MO2 - Data игры, которую видит этот процесс) и открывается
-страница. Так работает точка входа для MO2 - `morphbench.exe` рядом, он лишь зовёт
-`serve` из-под usvfs.
+страница. Окно `morphbench.exe` рядом делает то же кнопками - поднять, остановить,
+состояние, папка обзора, страница - и из-под MO2 видит Data со всеми модами.
 
 У render, sheet и web меш можно взять из обзора вместо пути: `--entry <номер|имя> [--root папка]`.
 Скелет (`skeleton.nif` в папке меша) подбирается сам, иначе - ключ `--skeleton` у любой
@@ -50,6 +51,8 @@ from pathlib import Path
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import errno                                  # noqa: E402
 
 from morphbench import MorphBench            # noqa: E402
 from presenters import ppb, text             # noqa: E402
@@ -355,14 +358,27 @@ def cmd_serve(args) -> int:
     cfg = bench.cfg
     link = ServerLink(args.host or cfg["serveHost"],
                       cfg["servePort"] if args.port is None else args.port)
+    if args.status:
+        return _serve_status(bench, link, args)
+    if args.stop:
+        return _serve_stop(link, args)
     state = link.probe()
     if state == "busy":
         raise ValueError("порт %d занят другой программой; назовите другой ключом --port"
                          % link.port)
+    if state == "slow":
+        raise ValueError("на %s кто-то есть, но за %.0f с не ответил: если это наш сервер "
+                         "за обходом большой папки - повторите позже" % (link.url, link.timeout))
     if state == "ours":
         return _hand_over(bench, link, args)
-    server = WebServer(bench, root=args.root, host=args.host, port=args.port,
-                       with_morphs=not args.all)
+    try:
+        server = WebServer(bench, root=args.root, host=args.host, port=args.port,
+                           with_morphs=not args.all)
+    except OSError as e:
+        # Порт заняли между опросом и подъёмом: отказ словами, как и для чужой программы.
+        if getattr(e, "winerror", None) == 10048 or e.errno == errno.EADDRINUSE:
+            raise ValueError("порт %d занят: %s" % (link.port, e)) from None
+        raise
     if args.nif:
         bench.open(args.nif, args.tri, getattr(args, "skeleton", None))
     _out(args, {"started": True, "url": server.url,
@@ -372,6 +388,39 @@ def cmd_serve(args) -> int:
                                         server.url))
     sys.stdout.flush()                      # адрес виден сразу, даже если вывод в трубу
     server.run(open_browser=not args.no_browser)
+    return 0
+
+
+_STATES = {"free": "не поднят", "ours": "поднят", "busy": "порт занят другой программой",
+           "slow": "кто-то есть, но не отвечает"}
+
+
+def _serve_status(bench: MorphBench, link, args) -> int:
+    """Жив ли сервер на адресе из настроек - и что этот процесс знает о своём окружении."""
+    status = link.status()
+    here = bench.environment()
+    status["hereInsideMo2"] = here["insideMo2"]
+    status["hereDataRoot"] = here["dataRoot"]
+    if args.json:
+        _out(args, status)
+        return 0
+    lines = ["сервер: %s  %s" % (_STATES[status["state"]], status["url"])]
+    if status["state"] == "ours":
+        lines.append("под MO2: %s;  корень: %s%s" % (
+            "да" if status["insideMo2"] else "нет", status["root"] or "не задан",
+            "" if status["meshes"] is None else " (%d мешей)" % status["meshes"]))
+    lines.append("этот процесс под MO2: %s;  Data игры: %s" % (
+        "да" if here["insideMo2"] else "нет", here["dataRoot"] or "нет"))
+    _out(args, "\n".join(lines))
+    return 0
+
+
+def _serve_stop(link, args) -> int:
+    state = link.probe()
+    if state != "ours":
+        raise ValueError("на %s %s - останавливать нечего" % (link.url, _STATES[state]))
+    got = link.shutdown()
+    _out(args, got if args.json else "остановлен: %s" % got["url"])
     return 0
 
 
@@ -522,6 +571,8 @@ def main(argv=None) -> int:
     p.add_argument("--all", action="store_true", help="и меши без файла морфов")
     p.add_argument("--no-browser", dest="no_browser", action="store_true",
                    help="не открывать браузер самому")
+    p.add_argument("--status", action="store_true", help="жив ли сервер на этом адресе")
+    p.add_argument("--stop", action="store_true", help="остановить поднятый сервер")
     p.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     p.set_defaults(func=cmd_serve)
 

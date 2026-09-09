@@ -101,6 +101,63 @@ class TestEnvAndCatalog(unittest.TestCase):
             self.assertEqual([r["name"] for r in rows], WITH_MORPHS)
 
 
+class TestServeStatusAndStop(unittest.TestCase):
+    """`serve --status` и `serve --stop` - те же вызовы, что делает окно запуска."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.cfg = common.config(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _free_port(self) -> int:
+        import socket
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            return s.getsockname()[1]
+
+    def test_status_of_a_free_port_and_stop_refusal(self):
+        port = self._free_port()
+        data = json.loads(run(["serve", "--status", "--port", str(port), "--json"], self.cfg))
+        self.assertEqual(data["state"], "free")
+        self.assertTrue(data["url"].endswith(":%d/" % port))
+        self.assertIn("hereInsideMo2", data)
+        with mock.patch.object(mb, "MorphBench", lambda *a, **k: MorphBench(self.cfg)):
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()) as err:
+                code = mb.main(["serve", "--stop", "--port", str(port)])
+        self.assertEqual(code, 2)
+        self.assertIn("не поднят", err.getvalue())
+
+    def test_status_and_stop_of_a_running_server(self):
+        from presenters.serve import WebServer
+        from test_serve import quiet
+        bench = MorphBench(self.cfg)
+        with quiet():
+            server = WebServer(bench, host="127.0.0.1", port=0).start()
+            try:
+                data = json.loads(run(["serve", "--status", "--port", str(server.port), "--json"],
+                                      self.cfg))
+                self.assertEqual((data["state"], data["url"]), ("ours", server.url))
+                text_out = run(["serve", "--status", "--port", str(server.port)], self.cfg)
+                self.assertIn("поднят", text_out)
+                # Отказ поднятого сервера - одной строкой и кодом 2, а не трассировкой.
+                with mock.patch.object(mb, "MorphBench", lambda *a, **k: MorphBench(self.cfg)):
+                    with contextlib.redirect_stdout(io.StringIO()), \
+                            contextlib.redirect_stderr(io.StringIO()) as err:
+                        code = mb.main(["serve", "--no-browser", "--port", str(server.port),
+                                        "--root", str(Path(self.tmp.name) / "nowhere")])
+                self.assertEqual(code, 2)
+                self.assertIn("нет папки", err.getvalue())
+                stopped = json.loads(run(["serve", "--stop", "--port", str(server.port), "--json"],
+                                         self.cfg))
+                self.assertEqual(stopped, {"stopping": True, "url": server.url})
+                server._thread.join(5.0)
+                self.assertFalse(server._thread.is_alive())
+            finally:
+                server.stop()
+
+
 class TestRender(unittest.TestCase):
     """render с --zoom-at и --light-*: ключи доезжают до состояния показа, кадр на диске."""
 
