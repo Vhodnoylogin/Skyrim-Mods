@@ -279,6 +279,31 @@ class TestNifPatch(unittest.TestCase):
 
 
 # ---- слой PPB -----------------------------------------------------------------------------
+class TestCoveredBones(unittest.TestCase):
+    """Чью кожу обязано накрывать тело: свою и всех потомков без собственных тел."""
+
+    def rig_tree(self):
+        # Стопа с телом; под ней два пальца без тел, под пальцем - ноготь без тела.
+        # Рядом голень с телом: она НЕ достаётся стопе, у неё тело своё.
+        return ColliderSet(
+            Path("memory.nif"),
+            {"Foot": body("Foot", cap()), "Calf": body("Calf", cap())},
+            {},
+            parents={"Foot": "Calf", "Toe1": "Foot", "Toe2": "Foot",
+                     "Nail": "Toe1", "Calf": "Root"})
+
+    def test_takes_children_without_bodies(self):
+        got = set(self.rig_tree().covered_bones("Foot"))
+        self.assertEqual(got, {"Foot", "Toe1", "Toe2", "Nail"})
+
+    def test_stops_at_a_bone_that_has_its_own_body(self):
+        """Голень не отдаёт свою кожу стопе и наоборот: у обеих есть тело."""
+        self.assertEqual(self.rig_tree().covered_bones("Calf"), ["Calf"])
+
+    def test_lonely_bone_covers_only_itself(self):
+        self.assertEqual(rig(body("B", cap())).covered_bones("B"), ["B"])
+
+
 class TestPPB(unittest.TestCase):
     def test_slot_key_strips_side_and_prefix(self):
         self.assertEqual(ppb.slot_key("NPC L Thigh [LThg]"), "thigh")
