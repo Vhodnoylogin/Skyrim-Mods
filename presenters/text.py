@@ -31,6 +31,10 @@ def _fmt(value) -> str:
         return "%.2f" % value
     if isinstance(value, dict) and "min" in value and "max" in value:
         return " ".join("%g..%g" % (a, b) for a, b in zip(value["min"], value["max"]))
+    if isinstance(value, dict):
+        # Набор ползунков {имя: величина} - «A=1, B=0.5».
+        return ", ".join("%s=%s" % (k, "%g" % v if isinstance(v, (int, float)) else _fmt(v))
+                         for k, v in value.items())
     if isinstance(value, list):
         return ", ".join(str(v) for v in value)
     return str(value)
@@ -91,6 +95,31 @@ def assignments(rows: list[dict], engine: str) -> list[str]:
     if bare:
         out.append("без кожи, не пишутся: %s" % ", ".join(bare))
     return out
+
+def strain_set(rows: list[dict]) -> str:
+    """Растяжение при наборе ползунков: те же столбцы, что у strain, вместо морфа - набор."""
+    return table(rows, [("shape", "часть"), ("sliders", "набор"), ("maxStrain", "макс"),
+                        ("p99Strain", "99%"), ("overThreshold", "рёбер сверх"),
+                        ("worstBounds", "где именно X / Y / Z")],
+                 "набор не двигает ни одной части меша")
+
+
+def strain_pairs(rows: list[dict]) -> str:
+    """Перебор пар: вместе, каждый поодиночке, прибавка пары над худшим из них."""
+    return table(rows, [("a", "ползунок"), ("b", "и ползунок"), ("maxStrain", "вместе"),
+                        ("maxA", "первый один"), ("maxB", "второй один"), ("gain", "прибавка"),
+                        ("overThreshold", "рёбер сверх"), ("shape", "где")],
+                 "пар нет: непустых ползунков меньше двух")
+
+
+def budget(rows: list[dict]) -> str:
+    """Бюджет амплитуд: предел каждого ползунка; без предела - в пределах не рвёт."""
+    if not rows:
+        return "непустых ползунков нет"
+    shown = [dict(r, limit="в пределах не рвёт" if r["limit"] is None else "%.3f" % r["limit"])
+             for r in rows]
+    return table(shown, [("morph", "ползунок"), ("limit", "предел"),
+                         ("maxAt", "макс на %g" % rows[0]["high"]), ("shape", "где рвётся")])
 
 
 def bounds(rows: list[dict]) -> str:
