@@ -48,6 +48,21 @@ def summary(data: dict) -> str:
     return "\n".join(lines)
 
 
+def bounds(rows: list[dict]) -> str:
+    """Шары охвата: по строке на часть - в файле, куда тянется, перебор, нужный."""
+    if not rows:
+        return "частей нет"
+    out = ["%-16s %8s %8s %8s   %-22s %8s" % ("часть", "в файле", "тянется", "перебор", "чем", "нужен")]
+    for r in rows:
+        if r["file"] is None:
+            out.append("%-16s %8s %8s %8s   %-22s %8.1f" % (r["shape"], "-", "-", "-", "-", r["needed"]["radius"]))
+            continue
+        out.append("%-16s %8.1f %8.1f %+7.0f%%   %-22s %8.1f%s" % (
+            r["shape"], r["file"]["radius"], r["reach"], 100.0 * r["excess"],
+            r["state"][:22], r["needed"]["radius"], "" if r["ok"] else "  <- расширить"))
+    return "\n".join(out)
+
+
 def _bone_label(name: str) -> str:
     """Короткое имя кости: «NPC L Thigh [LThg]» -> «L Thigh»."""
     core = name.split("[")[0].strip()

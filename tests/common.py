@@ -97,7 +97,7 @@ def load_pynifly(cfg: Config):
         raise unittest.SkipTest("pyn.pynifly из PyNifly не загрузился: %s" % e)
 
 
-def write_nif(pynifly, path, shapes: dict) -> Path:
+def write_nif(pynifly, path, shapes: dict, game: str = "SKYRIM") -> Path:
     """Крошечный NIF штатным PyNifly.
 
     `shapes` — имя части -> словарь с verts, tris, uvs, normals и bones
@@ -107,7 +107,7 @@ def write_nif(pynifly, path, shapes: dict) -> Path:
     path = Path(path)
     try:
         nif = pynifly.NifFile()
-        nif.initialize("SKYRIM", str(path))
+        nif.initialize(game, str(path))          # SKYRIM - NiTriShape, SKYRIMSE - BSTriShape
         for name, spec in shapes.items():
             sh = nif.createShapeFromData(
                 name,

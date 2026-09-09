@@ -18,6 +18,7 @@
                          [--focus-bone Finger | --focus-morph CLAWPawSize | --focus-shape head]
                          [--zoom 2 | --zoom-at=2,0.4,-0.3] [--pan=5,-3] [--size 900x900]
                          [--light camera|world] [--light-dir=x,y,z] [--light-power=a,d,f]
+    python mb.py bounds  <меш.nif> [--shape S] [--write новый.nif]   шары охвата: в файле, нужный, перебор
     python mb.py colliders [меш.nif] --skeleton <skeleton.nif> [--find Thigh] [--clearance]
     python mb.py fit       <меш.nif> --skeleton <skeleton.nif> [--find Thigh] [--slider X=1]
                            [--only body] [--save новый.nif] [--ppb]
@@ -248,6 +249,23 @@ def _apply_view(bench: MorphBench, args) -> None:
             raise ValueError("--colliders без скелета: рядом с мешем нет %s, добавьте "
                              "--skeleton <skeleton.nif>" % bench.cfg["skeletonFile"])
         bench.show_colliders(True, bool(opt("bumper")))
+
+
+def cmd_bounds(args) -> int:
+    """Шары охвата частей: в файле, куда тянется геометрия, какой нужен; --write кладёт
+    исправленные в новый файл."""
+    bench = _bench(args)
+    if args.write:
+        result = bench.bounds_write(args.write, args.shape, args.margin)
+        if args.json:
+            _out(args, result)
+        else:
+            _out(args, text.bounds(result["rows"]) + "\nзаписан: %s (%d частей)"
+                 % (result["saved"], len(result["shapes"])))
+        return 0
+    rows = bench.bounds(args.shape, args.margin)
+    _out(args, rows if args.json else text.bounds(rows))
+    return 0
 
 
 def cmd_colliders(args) -> int:
@@ -488,6 +506,11 @@ def main(argv=None) -> int:
     p = add("binding", cmd_binding, help="к каким костям привязано то, что двигает морф")
     p.add_argument("--shape", default=None, help="часть меша; по умолчанию baseShape из настроек")
     p.add_argument("--morph", required=True)
+    p = add("bounds", cmd_bounds, help="шары охвата частей: в файле, нужный, перебор")
+    p.add_argument("--shape", default=None, help="одна часть; по умолчанию все")
+    p.add_argument("--margin", type=float, default=None,
+                   help="запас сверх нужного радиуса в долях; по умолчанию boundsMargin")
+    p.add_argument("--write", default=None, help="записать исправленные шары в НОВЫЙ файл")
     p = add("colliders", cmd_colliders, nif_required=False,
             help="капсулы столкновений скелета")
     p.add_argument("--find", default=None, help="подстрока имени кости")
