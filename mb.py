@@ -19,9 +19,13 @@
                          [--zoom 2 | --zoom-at=2,0.4,-0.3] [--pan=5,-3] [--size 900x900]
                          [--light camera|world] [--light-dir=x,y,z] [--light-power=a,d,f]
     python mb.py bounds  <меш.nif> [--shape S] [--write новый.nif]   шары охвата: в файле, нужный, перебор
+    python mb.py chains  <меш.nif> [--skeleton S.nif] [--engine smp|cbpc] [--assign tail=smp,ear=cbpc]
+                                                       цепочки костей: кожа по звеньям, обрывы, кому отдана
+    python mb.py physics <меш.nif> [--skeleton S.nif] --engine smp|cbpc [--assign ...] [--out файл]
+                                                       настройки качающей физики одного движка его форматом
     python mb.py colliders [меш.nif] --skeleton <skeleton.nif> [--find Thigh] [--clearance]
     python mb.py fit       <меш.nif> --skeleton <skeleton.nif> [--find Thigh] [--slider X=1]
-                           [--only body] [--save новый.nif] [--ppb]
+                           [--only body] [--bundle N --split axis|kmeans] [--save новый.nif] [--ppb]
     python mb.py sheet   <меш.nif> --out папка [--views front,side,below] [--prefix view]
     python mb.py web     <меш.nif> --out страница.html  (те же ключи, что у render)
     python mb.py env                                   под MO2 ли мы и какой корень обзора
@@ -251,6 +255,72 @@ def _apply_view(bench: MorphBench, args) -> None:
         bench.show_colliders(True, bool(opt("bumper")))
 
 
+def _assign(bench: MorphBench, args) -> None:
+    """`--assign tail=smp,ear=cbpc`: кому отдана цепочка на этот запуск, поверх настроек."""
+    raw = getattr(args, "assign", None)
+    if not raw:
+        return
+    pairs = {}
+    for item in str(raw).split(","):
+        needle, sep, engine = item.partition("=")
+        if not sep or not needle.strip():
+            raise ValueError("--assign: ожидалось <подстрока ствола>=smp|cbpc через запятую, а не %r" % item)
+        pairs[needle.strip()] = engine.strip()
+    bench.assign_chains(pairs)
+
+
+def cmd_chains(args) -> int:
+    """Цепочки костей для качающейся физики: вершины по звеньям, обрывы, назначение."""
+    bench = _bench(args)
+    _assign(bench, args)
+    if getattr(args, "only", None):
+        bench.only([s.strip() for s in args.only.split(",") if s.strip()])
+    rows = bench.chains(args.engine, bench.visible_shapes() if args.only else None)
+    _out(args, rows if args.json else text.chains(rows))
+    return 0
+
+
+def cmd_physics(args) -> int:
+    """Настройки качающей физики одного движка - SMP или CBPC - текстом его формата.
+
+    Цепочки, отданные другому движку, не пишутся: SMP и CBPC - разные движки, одну кость
+    обоим отдавать нельзя. Шапка текста перечисляет, какая цепочка кому отдана и какие
+    не отданы никому. Капсулы по звеньям (их читает CBPC) считает фасад; текст складывает
+    слой показа `presenters\\smp.py` либо `presenters\\cbpc.py`.
+    """
+    from presenters import cbpc, smp
+    bench = _bench(args)
+    if not bench.has_skeleton():
+        raise ValueError("назовите скелет: --skeleton <skeleton.nif>")
+    _assign(bench, args)
+    _apply_view(bench, args)
+    layer = smp if args.engine == "smp" else cbpc
+    shapes = bench.visible_shapes()                  # кожа - то, что видно, как у fit
+    chains = bench.chains(shapes=shapes)
+    rows = bench.chain_capsules(args.engine, args.percentile, shapes=shapes)
+    summary = bench.summary()
+    title = "%s + %s" % (Path(summary["nif"]).name, Path(summary["skeleton"]).name)
+    body = layer.text(rows, chains, bench.cfg, title)
+    written = {r["chain"] for r in layer.selected(rows)}
+    result = {"engine": args.engine,
+              "chains": [{"chain": c["chain"], "engine": c["engine"], "fit": c["fit"],
+                          "break": c["break"], "vertices": c["vertices"],
+                          "written": c["chain"] in written} for c in chains],
+              "text": body}
+    if args.out:
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(body, encoding="utf-8")
+        result["saved"] = str(out.resolve())
+    if args.json:
+        _out(args, result)
+    elif args.out:
+        print("записан: %s" % result["saved"])
+    else:
+        print(body, end="")
+    return 0
+
+
 def cmd_bounds(args) -> int:
     """Шары охвата частей: в файле, куда тянется геометрия, какой нужен; --write кладёт
     исправленные в новый файл."""
@@ -290,7 +360,8 @@ def cmd_fit(args) -> int:
     if not bench.has_skeleton():
         raise ValueError("назовите скелет: --skeleton <skeleton.nif>")
     _apply_view(bench, args)
-    rows = bench.collider_fit(args.find, args.percentile)
+    rows = bench.collider_fit(args.find, args.percentile, bundle=args.bundle or 1,
+                              split=args.split)
     result = {"fitted": rows}
     if args.save:
         result["saved"] = bench.collider_save(args.save)
@@ -506,6 +577,23 @@ def main(argv=None) -> int:
     p = add("binding", cmd_binding, help="к каким костям привязано то, что двигает морф")
     p.add_argument("--shape", default=None, help="часть меша; по умолчанию baseShape из настроек")
     p.add_argument("--morph", required=True)
+    p = add("chains", cmd_chains, help="цепочки костей для качающейся физики: кожа по звеньям")
+    p.add_argument("--engine", choices=("smp", "cbpc"), default=None,
+                   help="только цепочки, отданные этому движку (chainEngines в настройках)")
+    p.add_argument("--only", default=None, help="какие части меша считать")
+    p.add_argument("--assign", default=None,
+                   help="кому отдана цепочка на этот запуск, поверх настроек: tail=smp,ear=cbpc")
+    p = add("physics", cmd_physics,
+            help="настройки качающей физики одного движка: smp (XML) или cbpc (строки трёх файлов)")
+    p.add_argument("--engine", choices=("smp", "cbpc"), required=True,
+                   help="какой движок: цепочки другого в вывод не попадают")
+    p.add_argument("--assign", default=None,
+                   help="кому отдана цепочка на этот запуск, поверх настроек: tail=smp,ear=cbpc")
+    p.add_argument("--out", default=None, help="записать текст в файл; без ключа - печать")
+    p.add_argument("--percentile", type=float, default=None,
+                   help="доля точек внутри радиуса капсулы; по умолчанию из настроек")
+    p.add_argument("--slider", action="append", default=[])
+    p.add_argument("--only", default=None, help="какие части меша считать кожей")
     p = add("bounds", cmd_bounds, help="шары охвата частей: в файле, нужный, перебор")
     p.add_argument("--shape", default=None, help="одна часть; по умолчанию все")
     p.add_argument("--margin", type=float, default=None,
@@ -528,6 +616,10 @@ def main(argv=None) -> int:
     p.add_argument("--find", default=None, help="подстрока имени кости")
     p.add_argument("--percentile", type=float, default=None,
                    help="доля точек внутри радиуса; по умолчанию из настроек")
+    p.add_argument("--bundle", type=int, default=None,
+                   help="связка из N капсул вместо одной: облако режется на куски")
+    p.add_argument("--split", choices=("axis", "kmeans"), default=None,
+                   help="как резать: ломтики вдоль оси кости или сгустки; по умолчанию bundleSplit")
     p.add_argument("--save", default=None, help="записать новый файл скелета")
     p.add_argument("--ppb", action="store_true",
                    help="выдать строки настроек Precision Physic Bodies")

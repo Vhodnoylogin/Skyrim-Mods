@@ -48,6 +48,51 @@ def summary(data: dict) -> str:
     return "\n".join(lines)
 
 
+def chains(rows: list[dict]) -> str:
+    """Цепочки для качающейся физики: по строке на звено, итог по цепочке."""
+    if not rows:
+        return "цепочек нет: ни у одной кости нет номера в конце имени"
+    out = []
+    for r in rows:
+        verdict = "годится" if r["fit"] else ("обрыв на %s" % _bone_label(r["break"]) if r["break"]
+                                               else "одно звено")
+        out.append("%-24s %-6s %5d вершин   %s" % (
+            r["chain"], (r["engine"] or "-"), r["vertices"], verdict))
+        for l in r["links"]:
+            parts = ", ".join("%s %d" % (k, v) for k, v in l["shapes"].items()) or "кожи нет"
+            out.append("    %-28s %5d   %s" % (_bone_label(l["bone"]), l["vertices"], parts))
+    return "\n".join(out)
+
+
+def assignments(rows: list[dict], engine: str) -> list[str]:
+    """Кому отдана каждая цепочка - строками для шапки настроек одного движка.
+
+    С кожей - по строке на цепочку: здесь, другому движку или никому; цепочки без кожи
+    складываются в одну строку, им всё равно, кому они отданы: писать по ним нечего.
+    """
+    engine = str(engine).lower()
+    out, bare = [], []
+    for r in rows:
+        if not r["vertices"]:
+            bare.append(r["chain"])
+            continue
+        if r["engine"] == engine:
+            if r["fit"]:
+                state = "%s: здесь, %d вершин" % (engine, r["vertices"])
+            elif r["break"]:
+                state = "%s: обрыв на %s, не пишется" % (engine, _bone_label(r["break"]))
+            else:
+                state = "%s: одно звено, не пишется" % engine
+        elif r["engine"]:
+            state = "%s: другому движку, здесь нет" % r["engine"]
+        else:
+            state = "никому не отдана"
+        out.append("%s -> %s" % (r["chain"], state))
+    if bare:
+        out.append("без кожи, не пишутся: %s" % ", ".join(bare))
+    return out
+
+
 def bounds(rows: list[dict]) -> str:
     """Шары охвата: по строке на часть - в файле, куда тянется, перебор, нужный."""
     if not rows:
@@ -105,7 +150,13 @@ def fitted(rows: list[dict]) -> str:
             lines.append("%-18s точек %-6d не села" % (_bone_label(row["bone"]), row["points"]))
             continue
         was, now = row["was"], row["now"]
-        lines.append("%-18s точек %-6d  длина %5.1f -> %5.1f   радиус %5.1f -> %5.1f"
+        count = int(row.get("count", 1))
+        tail = ""
+        if count > 1:
+            caps = row.get("capsules") or []
+            tail = "   связка из %d: радиусы %s" % (
+                count, " ".join("%.1f" % c["radius"] for c in caps))
+        lines.append("%-18s точек %-6d  длина %5.1f -> %5.1f   радиус %5.1f -> %5.1f%s"
                      % (_bone_label(row["bone"]), row["points"],
-                        was["length"], now["length"], was["radius"], now["radius"]))
+                        was["length"], now["length"], was["radius"], now["radius"], tail))
     return "\n".join(lines)
