@@ -397,6 +397,24 @@ class TestFacade(unittest.TestCase):
         b.only(["body"])
         self.assertEqual(b.skin_points("B").shape[0], 16)
 
+    def test_capsules_follow_the_visible_parts(self):
+        """Скрыл часть - пропали капсулы костей, чьи вершины держала только она."""
+        skin = grid("body", 4, 4, bones={"A": bone("A", range(16))})
+        head = grid("head", 4, 4, z=5.0, bones={"H": bone("H", range(16))})
+        b = bench(self.tmp.name, model(skin, head))
+        b.rig = rig(body("A", cap()), body("H", cap()), body("Nobody", cap()))
+        self.assertEqual(b.visible_collider_bones(), ["A", "H"])   # Nobody никого не держит
+        b.only(["body"])
+        self.assertEqual(b.visible_collider_bones(), ["A"])
+        one = b.collider_mesh()[0].shape[0]
+        b.show_all()
+        self.assertEqual(b.collider_mesh()[0].shape[0], 2 * one)
+        self.assertEqual([m["bone"] for m in b.collider_meshes()], ["A", "H", "Nobody"])
+        b.only([])
+        self.assertEqual(b.collider_mesh()[1].shape[0], 0)
+        b.cfg._values["collidersFollowParts"] = False        # выключенное правило - все кости
+        self.assertEqual(b.visible_collider_bones(), ["A", "H", "Nobody"])
+
     def test_fit_without_apply_changes_nothing(self):
         rows = self.bench.collider_fit(apply=False)
         self.assertTrue(rows and rows[0]["fitted"])
