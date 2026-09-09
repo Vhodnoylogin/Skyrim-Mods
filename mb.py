@@ -10,6 +10,9 @@
     python mb.py empty   <меш.nif>
     python mb.py missing <меш.nif> CLAWNeck CLAWEars ...
     python mb.py strain  <меш.nif> [--morph Paw] [--threshold 0.25] [--amount 1.0]
+    python mb.py strain  <меш.nif> --slider A=1 --slider B=1     растяжение при НАБОРЕ ползунков
+    python mb.py strain  <меш.nif> --pairs [--top 10] [--by gain]  перебор пар: какие два рвут вместе
+    python mb.py budget  <меш.nif> [--threshold 0.25]            на какой величине каждый ползунок рвёт
     python mb.py layers  <меш.nif> --morph CLAWBelly [--base body] [--adjacent]
     python mb.py binding <меш.nif> --shape body --morph CLAWPawSize
     python mb.py focus   <меш.nif> [--bone Finger | --morph CLAWPawSize | --shape head]
@@ -148,11 +151,41 @@ def cmd_missing(args) -> int:
     return 0
 
 
+def _sliders(bench: MorphBench, pairs) -> None:
+    """Ключи --slider ИМЯ=ЧИСЛО - в set_slider фасада."""
+    for pair in pairs:
+        name, _, value = pair.partition("=")
+        try:
+            amount = float(value)
+        except ValueError:
+            raise ValueError("--slider: ожидалось ИМЯ=ЧИСЛО, а не %r" % pair) from None
+        bench.set_slider(name.strip(), amount)
+
+
 def cmd_strain(args) -> int:
-    _out(args, _bench(args).strain(args.amount, args.threshold, args.morph),
+    """Растяжение по одному морфу (как было), при наборе ползунков (--slider) или
+    перебором пар (--pairs)."""
+    bench = _bench(args)
+    if args.pairs:
+        rows = bench.strain_pairs(args.amount, args.threshold, args.top, args.by)
+        _out(args, rows if args.json else text.strain_pairs(rows))
+        return 0
+    if args.slider:
+        _sliders(bench, args.slider)
+        rows = bench.strain_set(None, args.threshold)
+        _out(args, rows if args.json else text.strain_set(rows))
+        return 0
+    _out(args, bench.strain(args.amount, args.threshold, args.morph),
          [("shape", "часть"), ("morph", "морф"), ("maxStrain", "макс"),
           ("p99Strain", "99%"), ("overThreshold", "рёбер сверх"),
           ("worstBounds", "где именно X / Y / Z")])
+    return 0
+
+
+def cmd_budget(args) -> int:
+    """Бюджет амплитуд: на какой величине каждый ползунок переходит порог растяжения."""
+    rows = _bench(args).budget(args.threshold)
+    _out(args, rows if args.json else text.budget(rows))
     return 0
 
 
@@ -214,9 +247,7 @@ def _apply_view(bench: MorphBench, args) -> None:
     """Ключи показа - в вызовы фасада, в том порядке, в каком они друг от друга зависят.
     Ключа может не быть у команды вовсе (у `fit` нет ракурса): тогда он не задан."""
     opt = lambda name, default=None: getattr(args, name, default)  # noqa: E731
-    for pair in opt("slider") or []:
-        name, _, value = pair.partition("=")
-        bench.set_slider(name.strip(), float(value))
+    _sliders(bench, opt("slider") or [])
     if opt("only"):
         bench.only([s.strip() for s in args.only.split(",") if s.strip()])
     if opt("colour", "shade") != "shade" or opt("morph"):
@@ -567,6 +598,20 @@ def main(argv=None) -> int:
     p = add("strain", cmd_strain, help="где морф рвёт поверхность")
     p.add_argument("--morph", default=None)
     p.add_argument("--amount", type=float, default=1.0)
+    p.add_argument("--threshold", type=float, default=None,
+                   help="порог растяжения; по умолчанию strainThreshold из настроек")
+    p.add_argument("--slider", action="append", default=[],
+                   help="значение ползунка ИМЯ=ЧИСЛО, ключ повторяем: растяжение при НАБОРЕ "
+                        "(--morph и --amount при этом не действуют)")
+    p.add_argument("--pairs", action="store_true",
+                   help="перебор пар ползунков при --amount: какие два вместе рвут сильнее, "
+                        "чем каждый поодиночке")
+    p.add_argument("--top", type=int, default=10, help="сколько худших пар показать; 0 - все")
+    p.add_argument("--by", choices=["max", "gain"], default="max",
+                   help="порядок пар: max - по растяжению вместе, gain - по прибавке пары "
+                        "над худшим из двух одиночных")
+    p = add("budget", cmd_budget,
+            help="бюджет амплитуд: на какой величине каждый ползунок переходит порог")
     p.add_argument("--threshold", type=float, default=None,
                    help="порог растяжения; по умолчанию strainThreshold из настроек")
     p = add("layers", cmd_layers, help="следуют ли оболочки за кожей")
