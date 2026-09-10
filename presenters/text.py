@@ -58,8 +58,17 @@ def chains(rows: list[dict]) -> str:
         return "цепочек нет: ни у одной кости нет номера в конце имени"
     out = []
     for r in rows:
-        verdict = "годится" if r["fit"] else ("обрыв на %s" % _bone_label(r["break"]) if r["break"]
-                                               else "одно звено")
+        if r["fit"]:
+            notes = []
+            if r.get("anchors"):
+                notes.append("опора %s" % ", ".join(_bone_label(b) for b in r["anchors"]))
+            if r.get("gaps"):
+                notes.append("шарнир без кожи %s" % ", ".join(_bone_label(b) for b in r["gaps"]))
+            if r.get("tail"):
+                notes.append("хвост без кожи %s" % ", ".join(_bone_label(b) for b in r["tail"]))
+            verdict = "годится" + ((" (" + "; ".join(notes) + ")") if notes else "")
+        else:
+            verdict = "кожи нет ни на одном звене" if r["break"] else "одно звено"
         out.append("%-24s %-6s %5d вершин   %s" % (
             r["chain"], (r["engine"] or "-"), r["vertices"], verdict))
         for l in r["links"]:
@@ -84,7 +93,7 @@ def assignments(rows: list[dict], engine: str) -> list[str]:
             if r["fit"]:
                 state = "%s: здесь, %d вершин" % (engine, r["vertices"])
             elif r["break"]:
-                state = "%s: обрыв на %s, не пишется" % (engine, _bone_label(r["break"]))
+                state = "%s: кожи нет ни на одном звене, не пишется" % engine
             else:
                 state = "%s: одно звено, не пишется" % engine
         elif r["engine"]:

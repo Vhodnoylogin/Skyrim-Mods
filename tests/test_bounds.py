@@ -82,6 +82,38 @@ class TestReach(unittest.TestCase):
         single, single_far = r.farthest(file_sphere, single=True)
         self.assertEqual(single, "Up=1")
 
+    def test_corner_of_two_sliders_is_covered(self):
+        """Два ползунка вместе уводят дальше любого одного и дальше «худшего набора»
+        по направлению: полоска 7x3, Up, Forward и встречный Back. Радиус нужного шара
+        обязан накрыть угол Up=1, Forward=1, и reach_exact называет этот угол."""
+        rest = grid("body", 7, 3).verts
+        n = rest.shape[0]
+        d = {"Up": np.tile([0, 0, 8.0], (n, 1)).astype(np.float32),
+             "Forward": np.tile([0, 8.0, 0], (n, 1)).astype(np.float32),
+             "Back": np.tile([0, -3.0, -3.0], (n, 1)).astype(np.float32)}
+        r = Reach(rest, d)
+        s = r.needed()
+        corner = rest + d["Up"] + d["Forward"]
+        self.assertLessEqual(float(np.linalg.norm(corner - s.centre, axis=1).max()), s.radius + 1e-3)
+        far, state, over = r.reach_exact(s.centre)
+        self.assertAlmostEqual(far, s.radius, places=3)
+        self.assertEqual(over, 0)
+        self.assertEqual(set(state.split(",")), {"Up=1", "Forward=1"})
+        # Перебор всех углов вручную - тот же ответ.
+        best = 0.0
+        for mask in range(8):
+            pts = rest + sum(list(d.values())[j] for j in range(3) if (mask >> j) & 1)
+            best = max(best, float(np.linalg.norm(pts - s.centre, axis=1).max()))
+        self.assertAlmostEqual(best, far, places=3)
+
+    def test_corner_cap_falls_back_and_reports(self):
+        rest = grid("body", 2, 2).verts
+        d = {"m%d" % i: np.full((4, 3), 0.5, np.float32) for i in range(6)}
+        far, state, over = Reach(rest, d).reach_exact([0.5, 0.5, 0.0], cap=3)
+        self.assertEqual(over, 4)
+        self.assertEqual(state, "worst")
+        self.assertGreater(far, 0.0)
+
     def test_without_morphs_only_rest(self):
         r = Reach(self.rest, {})
         self.assertEqual(list(r.states([0, 0, 0])), ["rest"])
@@ -217,6 +249,32 @@ class TestBoundsPatch(unittest.TestCase):
         self.assertAlmostEqual(radius, float(shape.properties.boundingSphereRadius), places=5)
         for a, b in zip(centre, shape.properties.boundingSphereCenter):
             self.assertAlmostEqual(a, float(b), places=5)
+
+    def test_write_never_shrinks_and_refuses_the_source(self):
+        cfg = common.config(self.tmp.name)
+        pynifly = common.load_pynifly(cfg)
+        nif_path = common.write_nif(pynifly, Path(self.tmp.name) / "wide.nif", {"body": {
+            "verts": [(0, 0, 0), (2, 0, 0), (0, 2, 0), (1, 1, 0)], "tris": [(0, 1, 2), (1, 3, 2)],
+            "uvs": [(0, 0), (1, 0), (0, 1), (1, 1)], "normals": [(0, 0, 1)] * 4}}, game="SKYRIMSE")
+        from morphbench import MorphBench
+        b = MorphBench(cfg)
+        b.open(nif_path, tri="", skeleton="")
+        with self.assertRaises(ValueError):                       # без морфов писать нечего
+            b.bounds_write(Path(self.tmp.name) / "x.nif")
+        b.morph_set = morph_set(morph("Up", "body", [3], [(0, 0, 30)]))
+        with self.assertRaises(ValueError):                       # поверх исходника нельзя
+            b.bounds_write(nif_path)
+        # Намеренно широкий шар - в самом файле, как его оставил бы человек под SMP.
+        patch = NifPatch(nif_path)
+        patch.write_bounds(b.model.shape("body").block, (1, 1, 15), 50.0)
+        wide = patch.save(Path(self.tmp.name) / "wide2.nif")
+        b.open(wide, tri="", skeleton="")
+        b.morph_set = morph_set(morph("Up", "body", [3], [(0, 0, 30)]))
+        self.assertAlmostEqual(b.model.shape("body").bound.radius, 50.0, places=4)
+        out = b.bounds_write(Path(self.tmp.name) / "kept.nif")
+        self.assertEqual((out["shapes"], out["kept"]), ([], ["body"]))
+        out = b.bounds_write(Path(self.tmp.name) / "shrunk.nif", shrink=True)
+        self.assertEqual(out["shapes"], ["body"])
 
     def test_bounds_write_makes_a_new_file_that_pynifly_reads_back(self):
         """Запись через фасад: новый файл, старый цел, PyNifly читает новый шар."""
