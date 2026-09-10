@@ -12,6 +12,8 @@ import io
 import json
 import tempfile
 import unittest
+
+import numpy as np
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from unittest import mock
@@ -292,8 +294,6 @@ class TestCommandLine(Fixture):
         self.assertIn("скелет", err)
 
 
-if __name__ == "__main__":
-    main()
 
 class TestCheck(unittest.TestCase):
     """Проверка готового файла: движок молчит об ошибках, а мы находим опечатку."""
@@ -370,7 +370,11 @@ MBTail.stiffness 0.03
         with tempfile.TemporaryDirectory() as tmp:
             b = bench(tmp, model(grid("body", 2, 2, bones={"A": bone("A", range(4))})))
             self.assertEqual(b.skeleton_bones(), ["A"])
-            b.rig = _rig() if "_rig" in globals() else b.rig
-            if b.rig is not None:
-                self.assertTrue(set(b.skeleton_bones()) >= set(b.rig.matrices))
+            from test_colliders import rig, body, cap
+            b.rig = rig(body("Z", cap()))
+            b.rig.matrices = {"Z": np.eye(4, dtype=np.float32), "Y": np.eye(4, dtype=np.float32)}
+            self.assertEqual(b.skeleton_bones(), ["Y", "Z"])
 
+
+if __name__ == "__main__":
+    main()

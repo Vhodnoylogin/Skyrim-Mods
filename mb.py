@@ -381,12 +381,13 @@ def cmd_bounds(args) -> int:
     исправленные в новый файл."""
     bench = _bench(args)
     if args.write:
-        result = bench.bounds_write(args.write, args.shape, args.margin)
+        result = bench.bounds_write(args.write, args.shape, args.margin, shrink=args.shrink)
         if args.json:
             _out(args, result)
         else:
-            _out(args, text.bounds(result["rows"]) + "\nзаписан: %s (%d частей)"
-                 % (result["saved"], len(result["shapes"])))
+            _out(args, text.bounds(result["rows"]) + "\nзаписан: %s (%d частей расширено%s)"
+                 % (result["saved"], len(result["shapes"]),
+                    ", %d оставлено как есть" % len(result["kept"]) if result["kept"] else ""))
         return 0
     rows = bench.bounds(args.shape, args.margin)
     _out(args, rows if args.json else text.bounds(rows))
@@ -671,6 +672,8 @@ def main(argv=None) -> int:
     p.add_argument("--margin", type=float, default=None,
                    help="запас сверх нужного радиуса в долях; по умолчанию boundsMargin")
     p.add_argument("--write", default=None, help="записать исправленные шары в НОВЫЙ файл")
+    p.add_argument("--shrink", action="store_true",
+                   help="при записи и сжимать шары до нужного; без ключа шар только расширяется")
     p = add("colliders", cmd_colliders, nif_required=False,
             help="капсулы столкновений скелета")
     p.add_argument("--find", default=None, help="подстрока имени кости")

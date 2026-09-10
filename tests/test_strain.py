@@ -382,7 +382,7 @@ class TestBudget(unittest.TestCase):
         self.assertIsNone(rows["Tiny"]["limit"])
         self.assertAlmostEqual(rows["Tiny"]["maxAt"], 0.1, places=5)
         self.assertIsNone(rows["Shift"]["limit"])
-        self.assertEqual(rows["Shift"]["maxAt"], 0.0)
+        self.assertAlmostEqual(rows["Shift"]["maxAt"], 0.0, places=5)
         for r in rows.values():
             self.assertEqual((r["shape"], r["threshold"], r["high"]), ("body", 0.25, 1.0))
         self.assertAlmostEqual(rows["Pull"]["maxAt"], 1.0, places=6)

@@ -138,7 +138,10 @@ def text(rows: list[dict], chains: list[dict], cfg, title: str | None = None) ->
     return "\n".join(out) + "\n"
 
 # ---- проверка готового файла ------------------------------------------------------------------
-_KNOWN_SECTIONS = {"extraoptions", "playernodes", "affectednodes", "collidernodes", "configmap"}
+_KNOWN_SECTIONS = {"options", "settings", "extraoptions", "playernodes", "affectednodes",
+                   "collidernodes", "configmap"}
+_HEADER = re.compile(r"^\[(?P<name>.+)\]\s*(?::\s*[\d.]+)?$")
+_NODE_LINE = re.compile(r"^(?P<name>.*?)\s*(?:\((?P<refs>[^)]*)\))?\s*$")
 
 
 def _numbers(chunk: str) -> bool:
@@ -164,17 +167,23 @@ def check(text_in: str, bones) -> list[dict]:
         line = raw.split("#", 1)[0].strip()
         if not line or line in ("<", ">"):
             continue
-        if line.startswith("[") and line.endswith("]"):
-            section = line[1:-1].strip()
+        head = _HEADER.match(line)
+        if head:
+            section = head.group("name").strip()        # «[Кость] : 0.5» - с весом
             if section.lower() not in _KNOWN_SECTIONS and section not in known:
                 out.append({"kind": "bone", "name": section, "where": "строка %d, [%s]" % (no, section),
                             "problem": "такой кости нет в скелете"})
             continue
         low = (section or "").lower()
-        if low in ("affectednodes", "collidernodes"):
-            if line not in known:
-                out.append({"kind": "bone", "name": line, "where": "строка %d, [%s]" % (no, section),
-                            "problem": "такой кости нет в скелете"})
+        if low == "playernodes":
+            known.add(line)                              # узлы игрока - не кости скелета
+        elif low in ("affectednodes", "collidernodes"):
+            m = _NODE_LINE.match(line)
+            names = [m.group("name")] + [r.strip().lstrip("@") for r in (m.group("refs") or "").split(",") if r.strip()]
+            for name in names:
+                if name and name not in known:
+                    out.append({"kind": "bone", "name": name, "where": "строка %d, [%s]" % (no, section),
+                                "problem": "такой кости нет в скелете"})
         elif low == "configmap":
             if "=" not in line:
                 continue                    # строки групп CBPConfig в общем тексте
@@ -183,6 +192,8 @@ def check(text_in: str, bones) -> list[dict]:
                 out.append({"kind": "bone", "name": bone, "where": "строка %d, [ConfigMap]" % no,
                             "problem": "такой кости нет в скелете"})
         elif section and low not in _KNOWN_SECTIONS:
+            if "=" in line and "," not in line:
+                continue                    # строка настроек, а не фигура
             halves = [h.strip() for h in line.split("|")]
             for half in halves:
                 pieces = [p.strip() for p in half.split("&")]

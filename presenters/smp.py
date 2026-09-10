@@ -106,28 +106,43 @@ def shape_lines(part: str, cfg) -> list[str]:
 
 
 def chain_lines(row: dict, cfg) -> list[str]:
-    """Одна цепочка: опора, звенья с телами, шарниры от звена к родителю."""
-    links = [l["bone"] for l in row["links"]]
-    static = max(0, int(cfg["smpStaticLinks"]))
-    anchor = row.get("parent")
-    if static == 0 and not anchor:
-        static = 1                       # дерева костей нет - опора первое звено
-    out = ["%s<!-- %s: опора %s, звеньев %d -->" % (
-        _TAB, row["chain"], anchor if (static == 0) else ", ".join(links[:static]), len(links))]
-    if static == 0:
-        out += _static_bone(anchor)
+    """Одна цепочка: опора, звенья с телами, шарниры от звена к его родителю в цепочке.
+
+    Опора - ведущие звенья без кожи (`anchors`), их ведёт анимация; нет таких - первые
+    `smpStaticLinks` звеньев, а при нуле - кость снаружи цепочки (`parent`). Хвост без кожи
+    (`tail`) не пишется: качать невидимое незачем. Родитель звена берётся из самого звена:
+    при ветвлении обе ветви крепятся к одной кости, а не к соседке по списку.
+    """
+    tail = set(row.get("tail") or [])
+    links = [l for l in row["links"] if l["bone"] not in tail]
+    anchors = list(row.get("anchors") or [])
+    outside = row.get("parent")
+    static_names: list[str] = anchors[:]
+    if not static_names:
+        static = max(0, int(cfg["smpStaticLinks"]))
+        if static == 0 and not outside:
+            static = 1                       # дерева костей нет - опора первое звено
+        static_names = [l["bone"] for l in links[:static]]
+        if not static_names and outside:
+            static_names = [outside]
+    static_set = set(static_names)
+    out = ["%s<!-- %s: опора %s, звеньев %d%s -->" % (
+        _TAB, row["chain"], ", ".join(static_names), len(links),
+        (", без кожи отброшено: %s" % ", ".join(sorted(tail))) if tail else "")]
+    for name in static_names:
+        out += _static_bone(name)
     mass = float(cfg["smpMass"])
     taper = float(cfg["smpMassTaper"])
-    for i, name in enumerate(links):
-        if i < static:
-            out += _static_bone(name)
+    for l in links:
+        if l["bone"] in static_set:
             continue
-        out += bone_lines(name, mass, cfg)
+        out += bone_lines(l["bone"], mass, cfg)
         mass *= taper
-    for i, name in enumerate(links):
-        if i < static:
+    for l in links:
+        if l["bone"] in static_set:
             continue
-        out += constraint_lines(name, links[i - 1] if i > 0 else anchor, cfg)
+        parent = l.get("parent") or outside or static_names[0]
+        out += constraint_lines(l["bone"], parent, cfg)
     return out
 
 
