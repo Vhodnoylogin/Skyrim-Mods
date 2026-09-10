@@ -294,3 +294,83 @@ class TestCommandLine(Fixture):
 
 if __name__ == "__main__":
     main()
+
+class TestCheck(unittest.TestCase):
+    """Проверка готового файла: движок молчит об ошибках, а мы находим опечатку."""
+
+    BONES = ["NPC Head [Head]", "Ear01", "Ear02", "TailBone01", "TailBone02"]
+
+    def test_smp_finds_unknown_bone_shape_and_constraint(self):
+        from presenters import smp
+        xml = """<?xml version="1.0"?><system>
+        <bone name="NPC Head [Head]"/><bone name="Ear01"/><bone name="Ear0З"/>
+        <generic-constraint bodyA="Ear01" bodyB="NPC Head [Head]"/>
+        <generic-constraint bodyA="Ear02" bodyB="Ear01"/>
+        <generic-constraint bodyA="Nowhere" bodyB="Ear01"/>
+        <per-vertex-shape name="head"/><per-vertex-shape name="hed"/>
+        <collision a="head" b="Ear01"/><collision a="ghost" b="Ear01"/>
+        </system>"""
+        rows = smp.check(xml, self.BONES, ["head", "body"])
+        kinds = sorted((r["kind"], r["name"]) for r in rows)
+        self.assertEqual(kinds, [("bone", "Ear0З"), ("collision", "ghost"),
+                                 ("constraint", "Ear02"), ("constraint", "Nowhere"), ("shape", "hed")])
+        by = {r["name"]: r for r in rows}
+        self.assertIn("не объявленную", by["Ear02"]["problem"])      # есть в скелете, нет в файле
+        self.assertIn("ни в файле, ни в скелете", by["Nowhere"]["problem"])
+        self.assertEqual(smp.check(xml.replace('name="Ear0З"', 'name="Ear02"')
+                                   .replace('name="hed"', 'name="body"')
+                                   .replace('a="ghost"', 'a="body"')
+                                   .replace('bodyA="Nowhere"', 'bodyA="Ear02"'), self.BONES, ["head", "body"]), [])
+
+    def test_smp_without_shapes_checks_only_bones(self):
+        from presenters import smp
+        xml = '<system><bone name="Ear01"/><per-vertex-shape name="whatever"/></system>'
+        self.assertEqual(smp.check(xml, self.BONES), [])
+
+    def test_smp_broken_xml_is_one_finding(self):
+        from presenters import smp
+        rows = smp.check("<system><bone name='x'>", self.BONES)
+        self.assertEqual([r["kind"] for r in rows], ["xml"])
+
+    def test_cbpc_finds_unknown_nodes_and_bad_shapes(self):
+        from presenters import cbpc
+        text = """[ExtraOptions]
+BellyBulge=3.0
+[AffectedNodes]
+TailBone01
+TailBone09
+[ColliderNodes]
+NPC Head [Head]
+[ConfigMap]
+<
+TailBone01=MBTail
+TailBone02=MBTail
+TailBone07=MBTail
+>
+MBTail.stiffness 0.03
+[NPC Head [Head]]
+0.0,3.0,2.0,7.0 | 0.0,3.0,2.0,7.0
+1,2,3,4 & 5,6,7,8 | 1,2,3,4 & 5,6,7,8
+1,2,3 | 1,2,3
+[Nobody]
+0,0,0,1
+"""
+        rows = cbpc.check(text, self.BONES)
+        names = sorted((r["kind"], r["name"]) for r in rows)
+        self.assertEqual(names, [("bone", "Nobody"), ("bone", "TailBone07"), ("bone", "TailBone09"),
+                                 ("shape", "NPC Head [Head]")])
+        self.assertIn("1,2,3 | 1,2,3", [r["problem"] for r in rows if r["kind"] == "shape"][0])
+        clean = text.replace("TailBone09", "TailBone02").replace("TailBone07", "TailBone02") \
+                    .replace("1,2,3 | 1,2,3\n", "").replace("[Nobody]\n0,0,0,1\n", "")
+        self.assertEqual(cbpc.check(clean, self.BONES), [])
+
+    def test_facade_skeleton_bones(self):
+        import tempfile
+        from common import bench, bone, grid, model
+        with tempfile.TemporaryDirectory() as tmp:
+            b = bench(tmp, model(grid("body", 2, 2, bones={"A": bone("A", range(4))})))
+            self.assertEqual(b.skeleton_bones(), ["A"])
+            b.rig = _rig() if "_rig" in globals() else b.rig
+            if b.rig is not None:
+                self.assertTrue(set(b.skeleton_bones()) >= set(b.rig.matrices))
+

@@ -166,3 +166,52 @@ def text(rows: list[dict], chains: list[dict], cfg, title: str | None = None) ->
         out += shape_lines(part, cfg)
     out.append("</system>")
     return "\n".join(out) + "\n"
+
+# ---- проверка готового файла ------------------------------------------------------------------
+def check(xml_text: str, bones, shapes=None) -> list[dict]:
+    """Ссылается ли XML SMP на то, что есть: кости - в скелете, части - в меше.
+
+    SMP молча пропускает файл с ошибкой: ни строки в журнале, просто ничего не качается.
+    Здесь ловится то, что окупается первой же опечаткой: неизвестная кость в `<bone>`,
+    шарнир на необъявленную кость, часть меша, которой нет, `<collision>` между
+    неназванными формами, и битый XML. По находке на строку: род, имя, где, в чём дело.
+    """
+    import xml.etree.ElementTree as ET
+    known_bones = set(bones)
+    known_shapes = None if shapes is None else set(shapes)
+    out: list[dict] = []
+
+    def hit(kind, name, where, problem):
+        out.append({"kind": kind, "name": name, "where": where, "problem": problem})
+
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError as e:
+        return [{"kind": "xml", "name": "", "where": "", "problem": "XML не разбирается: %s" % e}]
+    declared = set()
+    for el in root.iter("bone"):
+        name = el.get("name") or ""
+        declared.add(name)
+        if name not in known_bones:
+            hit("bone", name, "<bone>", "такой кости нет в скелете")
+    declared_shapes = set()
+    for tag in ("per-vertex-shape", "per-triangle-shape"):
+        for el in root.iter(tag):
+            name = el.get("name") or ""
+            declared_shapes.add(name)
+            if known_shapes is not None and name not in known_shapes:
+                hit("shape", name, "<%s>" % tag, "такой части нет в меше")
+    for el in root.iter("generic-constraint"):
+        for attr in ("bodyA", "bodyB"):
+            name = el.get(attr) or ""
+            if name not in declared:
+                hit("constraint", name, "<generic-constraint %s>" % attr,
+                    "шарнир на кость, не объявленную <bone>" if name in known_bones
+                    else "шарнир на кость, которой нет ни в файле, ни в скелете")
+    names = declared | declared_shapes
+    for el in root.iter("collision"):
+        for attr in ("a", "b"):
+            name = el.get(attr) or ""
+            if name and name not in names:
+                hit("collision", name, "<collision %s>" % attr, "столкновение с неназванной формой")
+    return out

@@ -136,3 +136,58 @@ def text(rows: list[dict], chains: list[dict], cfg, title: str | None = None) ->
             if l["capsule"] is not None:
                 out += ["", "[%s]" % l["bone"], capsule_line(l["capsule"])]
     return "\n".join(out) + "\n"
+
+# ---- проверка готового файла ------------------------------------------------------------------
+_KNOWN_SECTIONS = {"extraoptions", "playernodes", "affectednodes", "collidernodes", "configmap"}
+
+
+def _numbers(chunk: str) -> bool:
+    try:
+        [float(x) for x in chunk.split(",")]
+        return True
+    except ValueError:
+        return False
+
+
+def check(text_in: str, bones) -> list[dict]:
+    """Ссылается ли файл CBPC на кости, которые есть в скелете, и разбираются ли фигуры.
+
+    Смотрятся все три файла одним разбором: узлы в `[AffectedNodes]` и `[ColliderNodes]`,
+    заголовки `[Кость]` со сферами и капсулами, строки `Кость=Группа` в `[ConfigMap]`
+    (скобки `<` `>` пропускаются). Сфера - четыре числа на половину, капсула - два раза
+    по четыре через `&`, половины через `|`. По находке на строку: род, имя, где, в чём дело.
+    """
+    known = set(bones)
+    out: list[dict] = []
+    section = None
+    for no, raw in enumerate(text_in.splitlines(), 1):
+        line = raw.split("#", 1)[0].strip()
+        if not line or line in ("<", ">"):
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            section = line[1:-1].strip()
+            if section.lower() not in _KNOWN_SECTIONS and section not in known:
+                out.append({"kind": "bone", "name": section, "where": "строка %d, [%s]" % (no, section),
+                            "problem": "такой кости нет в скелете"})
+            continue
+        low = (section or "").lower()
+        if low in ("affectednodes", "collidernodes"):
+            if line not in known:
+                out.append({"kind": "bone", "name": line, "where": "строка %d, [%s]" % (no, section),
+                            "problem": "такой кости нет в скелете"})
+        elif low == "configmap":
+            if "=" not in line:
+                continue                    # строки групп CBPConfig в общем тексте
+            bone = line.split("=", 1)[0].strip()
+            if bone not in known:
+                out.append({"kind": "bone", "name": bone, "where": "строка %d, [ConfigMap]" % no,
+                            "problem": "такой кости нет в скелете"})
+        elif section and low not in _KNOWN_SECTIONS:
+            halves = [h.strip() for h in line.split("|")]
+            for half in halves:
+                pieces = [p.strip() for p in half.split("&")]
+                if len(pieces) not in (1, 2) or not all(_numbers(p) and p.count(",") == 3 for p in pieces):
+                    out.append({"kind": "shape", "name": section, "where": "строка %d" % no,
+                                "problem": "не сфера (x,y,z,r) и не капсула (x,y,z,r & x,y,z,r): %r" % line})
+                    break
+    return out
