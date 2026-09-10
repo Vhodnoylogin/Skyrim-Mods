@@ -1,0 +1,174 @@
+{
+  "_": [
+    "Сборка мода целиком: что из чего получается и в каком порядке.",
+    "",
+    "Пайплайн описан ДАННЫМИ, а не порядком команд в чьей-то голове. Пока порядок",
+    "держался памятью, слово «мод пересобирается из рецептов» было обещанием: рецепты",
+    "лежали в репозитории, а как их запустить - нигде.",
+    "",
+    "ВНИМАНИЕ: этот список восстановлен по докстрокам сборщиков и по следам в meta.ini,",
+    "а не записан во время сборки 0.5.0.0. Проверяется он сверкой контрольных сумм:",
+    "build-all.py собирает в отдельную папку и сравнивает с тем, что лежит в моде.",
+    "Пока сверка не сошлась, воспроизводимость - предположение."
+  ],
+  "mod": "CLAW - Anatomy",
+  "version": "0.5.0.0",
+  "sources": {
+    "_": [
+      "Вход закреплён контрольной суммой. Мод стоит на чужих ассетах, и без этого",
+      "версия не значит ничего: донор обновится, пересборка даст другой файл,",
+      "и никто не заметит. Сумма расходится - сборка обязана сказать об этом вслух."
+    ],
+    "elegantMale": {
+      "mod": "Elegant Werewolf Replacer with Player Only and Randomized Options",
+      "nexus": 93336,
+      "path": "meshes/actors/werewolfbeast/character assets/malebodywerewolf_1.nif",
+      "crc": "300435BB",
+      "bytes": 8877163,
+      "_": "Геометрия тела. Пара по весу у Elegant только одна - _0 у самца нет."
+    },
+    "elegantFemale": {
+      "mod": "Elegant Werewolf Replacer with Player Only and Randomized Options",
+      "nexus": 93336,
+      "path": "meshes/actors/werewolfbeast/character assets/femalebodywerewolf_1.nif",
+      "crc": "01E04C78",
+      "bytes": 8788595,
+      "_": "У Elegant _0 и _1 побайтово одинаковы, поэтому вес самкам там не давал ничего."
+    },
+    "xp32Skeleton": {
+      "mod": "XP32 Maximum Skeleton Special Extended",
+      "nexus": 1988,
+      "path": "meshes/actors/werewolfbeast/character assets/skeleton.nif",
+      "crc": "1221F7AC",
+      "bytes": 51942,
+      "_": "Даёт кости для анатомии и служит донором для нашего скелета с капсулами."
+    }
+  },
+  "steps": [
+    {
+      "name": "тело самца: морфы и анатомия ОДНИМ проходом",
+      "runner": "blender",
+      "script": "build-genitals.py",
+      "args": [
+        "@elegantMale",
+        "@xp32Skeleton",
+        "@out:malebodywerewolf.nif",
+        "@recipe:genitals.json",
+        "--body-morphs",
+        "@recipe:full-body.json",
+        "--donor",
+        "@elegantFemale"
+      ],
+      "_": [
+        "Рецепт морфов тела подключается тем же проходом НАРОЧНО: файл морфов пишется",
+        "один на весь меш, и два раздельных прогона затирали его друг другу.",
+        "Экспорт идёт в имя БЕЗ суффикса веса, и только потом файл переименовывается.",
+        "Причина: PyNifly выводит имя файла морфов из имени экспортируемого меша, и метка",
+        "BODYTRI внутри тела указывает именно на него. Собери сразу в malebodywerewolf_1.nif -",
+        "и метка укажет на malebodywerewolf_1.tri, а мод возит malebodywerewolf.tri.",
+        "Переименовать сам .tri нельзя - на него ссылаются; а переименовать .nif можно,",
+        "метку это не трогает. Обе половины веса поэтому ссылаются на один файл морфов,",
+        "как того и требует движок.",
+        "",
+        "--donor обязателен: ползунок CLAWTorsoBackWide у самца считается режимом toShape",
+        "со знаком -1, то есть по РАЗНИЦЕ с телом другого пола. Тела полов топологически",
+        "одинаковы - совпадает и число вершин, и их порядок, - поэтому разница между ними",
+        "готовое поле сдвига. Без донора этот ползунок просто не рождается: пересборка",
+        "давала 27 ползунков вместо 28, и поймала это сверка 10.09."
+      ]
+    },
+    {
+      "name": "самец: полная половина по весу",
+      "runner": "move",
+      "from": "@out:malebodywerewolf.nif",
+      "to": "@out:malebodywerewolf_1.nif"
+    },
+    {
+      "name": "самец: худая половина",
+      "runner": "copy",
+      "from": "@out:malebodywerewolf_1.nif",
+      "to": "@out:malebodywerewolf_0.nif",
+      "_": [
+        "У самца половины сейчас одинаковы: ползунок веса ему не даёт ничего.",
+        "Понадобится настоящая худая - делается ключом --slim, как у самки."
+      ]
+    },
+    {
+      "name": "самка: худая половина",
+      "runner": "blender",
+      "script": "build-female.py",
+      "args": [
+        "@out:malebodywerewolf_1.nif",
+        "@elegantFemale",
+        "@out:femalebodywerewolf.nif",
+        "@recipe:full-body.json",
+        "@recipe:female.json",
+        "--slim",
+        "0.90"
+      ],
+      "_": "Убавление обхвата на 10 процентов: у людей вес даёт 1..7, у зверя взято вчетверо больше."
+    },
+    {
+      "name": "самка: худая половина, переименование",
+      "runner": "move",
+      "from": "@out:femalebodywerewolf.nif",
+      "to": "@out:femalebodywerewolf_0.nif"
+    },
+    {
+      "name": "самка: полная половина",
+      "runner": "blender",
+      "script": "build-female.py",
+      "args": [
+        "@out:malebodywerewolf_1.nif",
+        "@elegantFemale",
+        "@out:femalebodywerewolf.nif",
+        "@recipe:full-body.json",
+        "@recipe:female.json"
+      ],
+      "_": [
+        "Идёт ПОСЛЕ худой: обе пишут один femalebodywerewolf.tri, и остаться должен",
+        "файл от полной половины."
+      ]
+    },
+    {
+      "name": "самка: полная половина, переименование",
+      "runner": "move",
+      "from": "@out:femalebodywerewolf.nif",
+      "to": "@out:femalebodywerewolf_1.nif"
+    },
+    {
+      "name": "скелет: капсулы столкновений по телу",
+      "runner": "python",
+      "script": "build-skeleton.py",
+      "args": [
+        "--recipe",
+        "@recipe:skeleton.json",
+        "--out",
+        "@out:skeleton.nif"
+      ],
+      "_": "Считает не Blender, а верстак dev/morphbench через свою командную строку."
+    }
+  ],
+  "installUnder": "Meshes/Actors/WerewolfBeast/Character Assets",
+  "outputs": [
+    "malebodywerewolf_1.nif",
+    "malebodywerewolf_0.nif",
+    "malebodywerewolf.tri",
+    "femalebodywerewolf_1.nif",
+    "femalebodywerewolf_0.nif",
+    "femalebodywerewolf.tri",
+    "skeleton.nif"
+  ],
+  "_outputs": [
+    "Что должно получиться. Сверяется С СОДЕРЖИМЫМ того, что лежит в моде,",
+    "а не с контрольной суммой: экспорт NIF не побайтово повторяем - проверено",
+    "10.09, геометрия совпала до последней вершины при другой сумме файла."
+  ],
+  "outputUnder": "meshes/actors/werewolfbeast/character assets",
+  "_outputUnder": [
+    "Собирать НАДО в дерево, содержащее папку meshes. Метка BODYTRI - ссылка тела на",
+    "свой файл морфов - пишется обрезкой пути экспорта по слову meshes. Собери в плоскую",
+    "папку, и в мод уедет абсолютный путь со сборочной машины: у игрока морфы не найдутся.",
+    "Проверено 10.09: так и вышло при первой пересборке."
+  ]
+}
