@@ -1,15 +1,17 @@
 {
   "_": [
-    "Сборка мода целиком: что из чего получается и в каком порядке.",
+    "Сборка семейства CLAW: что из чего получается и в каком порядке.",
     "",
-    "Пайплайн описан ДАННЫМИ, а не порядком команд в чьей-то голове. Пока порядок",
-    "держался памятью, слово «мод пересобирается из рецептов» было обещанием: рецепты",
-    "лежали в репозитории, а как их запустить - нигде.",
+    "Пайплайн описан ДАННЫМИ, а не порядком команд в чьей-то голове. Проверяется он",
+    "сверкой: build-all.py собирает в отдельную папку и сравнивает получившееся",
+    "с тем, что лежит в модах, по содержимому - экспорт NIF не повторяется побайтово.",
     "",
-    "ВНИМАНИЕ: этот список восстановлен по докстрокам сборщиков и по следам в meta.ini,",
-    "а не записан во время сборки 0.5.0.0. Проверяется он сверкой контрольных сумм:",
-    "build-all.py собирает в отдельную папку и сравнивает с тем, что лежит в моде.",
-    "Пока сверка не сошлась, воспроизводимость - предположение."
+    "Собирается ДВА набора ползунков на одной и той же геометрии:",
+    "  base  - без взрослых ползунков; поднять анатомию изнутри игры нечем",
+    "  adult - со взрослыми; надстройка кладёт свой файл морфов поверх базового",
+    "Геометрия у них одна и та же, и сверка это доказывает: меши обоих наборов",
+    "сравниваются между собой. Дублировать тридцать четыре мегабайта мешей ради",
+    "восьмисот вершин незачем, да и форму в чужой меш всё равно не добавить."
   ],
   "mod": "CLAW - Anatomy",
   "version": "0.5.0.0",
@@ -46,13 +48,13 @@
   },
   "steps": [
     {
-      "name": "тело самца: морфы и анатомия ОДНИМ проходом",
+      "name": "взрослый набор: тело самца",
       "runner": "blender",
       "script": "build-genitals.py",
       "args": [
         "@elegantMale",
         "@xp32Skeleton",
-        "@out:malebodywerewolf.nif",
+        "@out:adult/malebodywerewolf.nif",
         "@recipe:genitals.json",
         "--body-morphs",
         "@recipe:full-body.json",
@@ -60,81 +62,115 @@
         "@elegantFemale"
       ],
       "_": [
-        "Рецепт морфов тела подключается тем же проходом НАРОЧНО: файл морфов пишется",
-        "один на весь меш, и два раздельных прогона затирали его друг другу.",
-        "Экспорт идёт в имя БЕЗ суффикса веса, и только потом файл переименовывается.",
-        "Причина: PyNifly выводит имя файла морфов из имени экспортируемого меша, и метка",
-        "BODYTRI внутри тела указывает именно на него. Собери сразу в malebodywerewolf_1.nif -",
-        "и метка укажет на malebodywerewolf_1.tri, а мод возит malebodywerewolf.tri.",
-        "Переименовать сам .tri нельзя - на него ссылаются; а переименовать .nif можно,",
-        "метку это не трогает. Обе половины веса поэтому ссылаются на один файл морфов,",
-        "как того и требует движок.",
-        "",
-        "--donor обязателен: ползунок CLAWTorsoBackWide у самца считается режимом toShape",
-        "со знаком -1, то есть по РАЗНИЦЕ с телом другого пола. Тела полов топологически",
-        "одинаковы - совпадает и число вершин, и их порядок, - поэтому разница между ними",
-        "готовое поле сдвига. Без донора этот ползунок просто не рождается: пересборка",
-        "давала 27 ползунков вместо 28, и поймала это сверка 10.09."
+        "Экспорт идёт в имя БЕЗ суффикса веса: PyNifly выводит имя файла морфов из",
+        "имени меша, и метка BODYTRI указывает именно на него. Переименовывается .nif,",
+        "чего метка не касается. --donor нужен ползунку CLAWTorsoBackWide."
       ]
     },
     {
-      "name": "самец: полная половина по весу",
+      "name": "взрослый: самец, полная половина",
       "runner": "move",
-      "from": "@out:malebodywerewolf.nif",
-      "to": "@out:malebodywerewolf_1.nif"
+      "from": "@out:adult/malebodywerewolf.nif",
+      "to": "@out:adult/malebodywerewolf_1.nif"
     },
     {
-      "name": "самец: худая половина",
+      "name": "взрослый: самец, худая половина",
       "runner": "copy",
-      "from": "@out:malebodywerewolf_1.nif",
-      "to": "@out:malebodywerewolf_0.nif",
+      "from": "@out:adult/malebodywerewolf_1.nif",
+      "to": "@out:adult/malebodywerewolf_0.nif",
+      "_": "Половины сейчас одинаковы: ползунок веса самцу ничего не даёт."
+    },
+    {
+      "name": "базовый набор: тело самца без взрослых ползунков",
+      "runner": "blender",
+      "script": "build-genitals.py",
+      "args": [
+        "@elegantMale",
+        "@xp32Skeleton",
+        "@out:base/malebodywerewolf.nif",
+        "@recipe:genitals.json",
+        "--body-morphs",
+        "@recipe:full-body.json",
+        "--donor",
+        "@elegantFemale",
+        "--skip-morph",
+        "CLAWCrotchSheathState",
+        "--skip-morph",
+        "CLAWCrotchSheathLong",
+        "--skip-morph",
+        "CLAWCrotchSheathKnot",
+        "--skip-morph",
+        "CLAWCrotchBallsSize",
+        "--skip-morph",
+        "CLAWCrotchVulva"
+      ],
       "_": [
-        "У самца половины сейчас одинаковы: ползунок веса ему не даёт ничего.",
-        "Понадобится настоящая худая - делается ключом --slim, как у самки."
+        "Нужен только ради файла морфов: меш выходит тот же, и сверка это проверяет.",
+        "Геометрия анатомии в нём есть, но целиком под кожей - в покое снаружи",
+        "27 вершин трубы из 442 и 50 мошонки из 444, и это шов устья, а не деталь."
       ]
     },
     {
-      "name": "самка: худая половина",
+      "name": "взрослый: самка, худая половина",
       "runner": "blender",
       "script": "build-female.py",
       "args": [
-        "@out:malebodywerewolf_1.nif",
+        "@out:adult/malebodywerewolf_1.nif",
         "@elegantFemale",
-        "@out:femalebodywerewolf.nif",
+        "@out:adult/femalebodywerewolf.nif",
         "@recipe:full-body.json",
         "@recipe:female.json",
         "--slim",
         "0.90"
-      ],
-      "_": "Убавление обхвата на 10 процентов: у людей вес даёт 1..7, у зверя взято вчетверо больше."
-    },
-    {
-      "name": "самка: худая половина, переименование",
-      "runner": "move",
-      "from": "@out:femalebodywerewolf.nif",
-      "to": "@out:femalebodywerewolf_0.nif"
-    },
-    {
-      "name": "самка: полная половина",
-      "runner": "blender",
-      "script": "build-female.py",
-      "args": [
-        "@out:malebodywerewolf_1.nif",
-        "@elegantFemale",
-        "@out:femalebodywerewolf.nif",
-        "@recipe:full-body.json",
-        "@recipe:female.json"
-      ],
-      "_": [
-        "Идёт ПОСЛЕ худой: обе пишут один femalebodywerewolf.tri, и остаться должен",
-        "файл от полной половины."
       ]
     },
     {
-      "name": "самка: полная половина, переименование",
+      "name": "взрослый: самка, худая — переименование",
       "runner": "move",
-      "from": "@out:femalebodywerewolf.nif",
-      "to": "@out:femalebodywerewolf_1.nif"
+      "from": "@out:adult/femalebodywerewolf.nif",
+      "to": "@out:adult/femalebodywerewolf_0.nif"
+    },
+    {
+      "name": "взрослый: самка, полная половина",
+      "runner": "blender",
+      "script": "build-female.py",
+      "args": [
+        "@out:adult/malebodywerewolf_1.nif",
+        "@elegantFemale",
+        "@out:adult/femalebodywerewolf.nif",
+        "@recipe:full-body.json",
+        "@recipe:female.json"
+      ],
+      "_": "Идёт ПОСЛЕ худой: обе пишут один .tri, остаться должен файл полной половины."
+    },
+    {
+      "name": "взрослый: самка, полная — переименование",
+      "runner": "move",
+      "from": "@out:adult/femalebodywerewolf.nif",
+      "to": "@out:adult/femalebodywerewolf_1.nif"
+    },
+    {
+      "name": "базовый набор: тело самки без взрослых ползунков",
+      "runner": "blender",
+      "script": "build-female.py",
+      "args": [
+        "@out:adult/malebodywerewolf_1.nif",
+        "@elegantFemale",
+        "@out:base/femalebodywerewolf.nif",
+        "@recipe:full-body.json",
+        "@recipe:female.json",
+        "--skip-morph",
+        "CLAWCrotchSheathState",
+        "--skip-morph",
+        "CLAWCrotchSheathLong",
+        "--skip-morph",
+        "CLAWCrotchSheathKnot",
+        "--skip-morph",
+        "CLAWCrotchBallsSize",
+        "--skip-morph",
+        "CLAWCrotchVulva"
+      ],
+      "_": "Нужен только ради файла морфов; худую половину пересобирать незачем."
     },
     {
       "name": "скелет: капсулы столкновений по телу",
@@ -144,25 +180,9 @@
         "--recipe",
         "@recipe:skeleton.json",
         "--out",
-        "@out:skeleton.nif"
-      ],
-      "_": "Считает не Blender, а верстак dev/morphbench через свою командную строку."
+        "@out:adult/skeleton.nif"
+      ]
     }
-  ],
-  "installUnder": "Meshes/Actors/WerewolfBeast/Character Assets",
-  "outputs": [
-    "malebodywerewolf_1.nif",
-    "malebodywerewolf_0.nif",
-    "malebodywerewolf.tri",
-    "femalebodywerewolf_1.nif",
-    "femalebodywerewolf_0.nif",
-    "femalebodywerewolf.tri",
-    "skeleton.nif"
-  ],
-  "_outputs": [
-    "Что должно получиться. Сверяется С СОДЕРЖИМЫМ того, что лежит в моде,",
-    "а не с контрольной суммой: экспорт NIF не побайтово повторяем - проверено",
-    "10.09, геометрия совпала до последней вершины при другой сумме файла."
   ],
   "outputUnder": "meshes/actors/werewolfbeast/character assets",
   "_outputUnder": [
@@ -170,5 +190,56 @@
     "свой файл морфов - пишется обрезкой пути экспорта по слову meshes. Собери в плоскую",
     "папку, и в мод уедет абсолютный путь со сборочной машины: у игрока морфы не найдутся.",
     "Проверено 10.09: так и вышло при первой пересборке."
+  ],
+  "adultMorphs": [
+    "CLAWCrotchSheathState",
+    "CLAWCrotchSheathLong",
+    "CLAWCrotchSheathKnot",
+    "CLAWCrotchBallsSize",
+    "CLAWCrotchVulva"
+  ],
+  "_adultMorphs": [
+    "Ползунки, которых в базовой версии нет. Список живёт ЗДЕСЬ, а не в сборщиках:",
+    "какие ползунки взрослые - решение выпуска, а не свойство кода. Оба сборщика",
+    "принимают повторяемый ключ --skip-morph и о самом списке ничего не знают."
+  ],
+  "mods": {
+    "base": {
+      "name": "CLAW - Configurable Lycanthrope Anatomy and Weight",
+      "under": "Meshes/Actors/WerewolfBeast/Character Assets",
+      "_": "Базовый мод: вся геометрия, скелет и файл морфов БЕЗ взрослых ползунков.",
+      "files": {
+        "malebodywerewolf_1.nif": "adult/malebodywerewolf_1.nif",
+        "malebodywerewolf_0.nif": "adult/malebodywerewolf_0.nif",
+        "femalebodywerewolf_1.nif": "adult/femalebodywerewolf_1.nif",
+        "femalebodywerewolf_0.nif": "adult/femalebodywerewolf_0.nif",
+        "skeleton.nif": "adult/skeleton.nif",
+        "malebodywerewolf.tri": "base/malebodywerewolf.tri",
+        "femalebodywerewolf.tri": "base/femalebodywerewolf.tri"
+      }
+    },
+    "adult": {
+      "name": "CLAW - Anatomy",
+      "under": "Meshes/Actors/WerewolfBeast/Character Assets",
+      "_": "Взрослая надстройка: ТОЛЬКО файлы морфов, пять мегабайт. Кладётся ниже базового и перекрывает его .tri - геометрия при этом остаётся базовой.",
+      "files": {
+        "malebodywerewolf.tri": "adult/malebodywerewolf.tri",
+        "femalebodywerewolf.tri": "adult/femalebodywerewolf.tri"
+      }
+    }
+  },
+  "sameGeometry": [
+    [
+      "adult/malebodywerewolf_1.nif",
+      "base/malebodywerewolf.nif"
+    ],
+    [
+      "adult/femalebodywerewolf_1.nif",
+      "base/femalebodywerewolf.nif"
+    ]
+  ],
+  "_sameGeometry": [
+    "Пары мешей, которые ОБЯЗАНЫ совпасть между собой. Это доказывает, что пропуск",
+    "ползунков не трогает геометрию: базовый и взрослый наборы стоят на одном теле."
   ]
 }

@@ -23,7 +23,7 @@
 
   blender.exe --background --python build-genitals.py -- \
       <тело.nif> <скелет.nif> <выход.nif> <рецепт-анатомии.json> \
-      [--body-morphs <рецепт-морфов-тела.json>] [папка_показа]
+      [--body-morphs <рецепт-морфов-тела.json>] [--skip-morph <имя>]... [папка_показа]
 
 Рецепт морфов тела подключается тем же проходом нарочно. Файл морфов пишется
 один на весь меш, и два раздельных прогона затирали его друг другу: в моде
@@ -46,10 +46,19 @@ addon_utils.enable("io_scene_nifly", default_set=False, persistent=True)
 
 argv = sys.argv[sys.argv.index("--") + 1:]
 BODYMORPHS = None
+#: Имена ползунков, которые в этой сборке не заводить. Так базовая версия мода
+#: получает ту же геометрию без взрослых ползунков: поднять её изнутри игры нечем.
+#: Ключ общий для обоих сборщиков и повторяемый - какие именно ползунки взрослые,
+#: решает журнал сборки, а не зашитый здесь список.
+SKIP_MORPHS = set()
 DONOR = None
 if '--donor' in argv:
     k = argv.index('--donor')
     DONOR = argv[k + 1]
+    argv = argv[:k] + argv[k + 2:]
+while '--skip-morph' in argv:
+    k = argv.index('--skip-morph')
+    SKIP_MORPHS.add(argv[k + 1])
     argv = argv[:k] + argv[k + 2:]
 if '--body-morphs' in argv:
     k = argv.index('--body-morphs')
@@ -416,6 +425,14 @@ M_BALLS = _role('spread')
 
 
 def add_key(name, coords):
+    # Базовая версия мода паховых ползунков не несёт: геометрия в ней есть, но она
+    # целиком под кожей, и поднять её изнутри игры нечем. Взрослая надстройка кладёт
+    # СВОЙ файл морфов поверх базового, и в нём эти ползунки есть. Геометрия при этом
+    # одна и та же - дублировать тридцать четыре мегабайта мешей ради восьмисот вершин
+    # незачем, да и форму в чужой меш всё равно не добавить.
+    if name in SKIP_MORPHS:
+        print("GEN|ползунок %-18s ПРОПУЩЕН по --skip-morph" % name)
+        return
     sk = gen.shape_key_add(name='>' + name, from_mix=False)
     moved = 0
     for i, co in coords.items():
@@ -477,7 +494,8 @@ add_key(M_BALLS, balls)
 if BODYMORPHS:
     meshes = {o.name: o for o in bpy.data.objects if o.type == 'MESH'}
     _spec = [_it for _it in json.load(open(BODYMORPHS, encoding='utf-8'))
-             if _it.get('sex', 'any') in ('any', 'male')]
+             if _it.get('sex', 'any') in ('any', 'male')
+             and _it.get('morph') not in SKIP_MORPHS]
     # Ползунки «к форме другого тела» требуют донора и считаются отдельно.
     for _it in _spec:
         if _it.get('mode') == 'toShape':

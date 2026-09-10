@@ -41,6 +41,12 @@ if '--slim' in argv:
     k = argv.index('--slim')
     SLIM = float(argv[k + 1])
     argv = argv[:k] + argv[k + 2:]
+#: Ползунки, которые в этой сборке не заводить - см. тот же ключ у build-genitals.
+SKIP_MORPHS = set()
+while '--skip-morph' in argv:
+    _k = argv.index('--skip-morph')
+    SKIP_MORPHS.add(argv[_k + 1])
+    argv = argv[:_k] + argv[_k + 2:]
 MALE, FEMALE, OUT, FULL, FEM = argv[0], argv[1], argv[2], argv[3], argv[4]
 
 
@@ -134,13 +140,17 @@ if SLIM is not None:
 # Общий рецепт держит ползунки обоих полов: у ползунка «к форме другого пола»
 # знак у самца и самки разный, поэтому запись помечена полом и чужая пропускается.
 full = [it for it in json.load(open(FULL, encoding='utf-8'))
-        if it.get('sex', 'any') in ('any', 'female')]
+        if it.get('sex', 'any') in ('any', 'female')
+        and it.get('morph') not in SKIP_MORPHS]
 for it in full:
     if it.get('mode') == 'toShape':
         morphlib.apply_to_shape(it, meshes, {'body': male_co.get('body')}, print)
 morphlib.apply_recipe([it for it in full if it.get('mode') != 'toShape'], meshes, arm)
 
-fem = json.load(open(FEM, encoding='utf-8'))
+fem = [it for it in json.load(open(FEM, encoding='utf-8'))
+       if it.get('morph') not in SKIP_MORPHS]
+if SKIP_MORPHS:
+    print("FEM|пропущены по --skip-morph: %s" % ", ".join(sorted(SKIP_MORPHS)))
 plain = [it for it in fem if it.get('mode') != 'toShape']
 morphlib.apply_recipe(plain, meshes, arm)
 
