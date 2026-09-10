@@ -47,6 +47,17 @@ def resolve(spec: dict, key: str) -> Path:
     return Path(P.mods) / node["mod"] / node["path"]
 
 
+def _supports(bench: Path, flag: str) -> bool:
+    """Понимает ли верстак этот ключ. Спрашиваем его самого, а не гадаем по версии."""
+    try:
+        done = subprocess.run([sys.executable, str(bench), "fit", "--help"],
+                              capture_output=True, text=True, timeout=60,
+                              encoding="utf-8", errors="replace")
+        return flag in (done.stdout or "")
+    except Exception:                                      # noqa: BLE001
+        return False
+
+
 def run(cmd: list[str], dry: bool) -> None:
     print("  " + " ".join('"%s"' % c if " " in c else c for c in cmd))
     if dry:
@@ -86,8 +97,13 @@ def main(argv: list[str]) -> int:
     cmd = [sys.executable, str(bench), "fit", str(body), "--skeleton", str(donor),
            "--percentile", str(spec.get("percentile", 90.0)), "--save", str(tmp)]
     empty = spec.get("collapseEmpty")
-    if empty:
+    if empty and _supports(bench, "--collapse-empty"):
         cmd += ["--collapse-empty", str(empty)]
+    elif empty:
+        # Не роняем сборку из-за необязательного уточнения: тело без кожи останется
+        # ванильным, и это видно в кадре как лишний шар за головой. Ключ заказан
+        # разделом 5а наряда history/REPORT-76-morphbench.
+        print("  ВНИМАНИЕ: верстак не знает --collapse-empty; шея останется ванильной")
     run(cmd, dry)
 
     # Шея - особый случай, и он выражен ключом САМОЙ посадки, а не отдельной командой:
@@ -109,4 +125,5 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.exit(main(sys.argv[1:]))
