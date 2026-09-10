@@ -25,6 +25,7 @@
     python mb.py chains  <меш.nif> [--skeleton S.nif] [--engine smp|cbpc] [--assign tail=smp,ear=cbpc]
                                                        цепочки костей: кожа по звеньям, обрывы, кому отдана
     python mb.py physics <меш.nif> [--skeleton S.nif] --engine smp|cbpc [--assign ...] [--out файл]
+    python mb.py physics <меш.nif> [--skeleton S.nif] --engine smp|cbpc --check <готовый файл>
                                                        настройки качающей физики одного движка его форматом
     python mb.py colliders [меш.nif] --skeleton <skeleton.nif> [--find Thigh] [--clearance]
     python mb.py fit       <меш.nif> --skeleton <skeleton.nif> [--find Thigh] [--slider X=1]
@@ -311,6 +312,27 @@ def cmd_chains(args) -> int:
     return 0
 
 
+def _physics_check(bench: MorphBench, args, layer) -> int:
+    """Готовый файл настроек против скелета и меша: движок молчит об ошибках, а мы нет.
+    Код выхода 3 - находки есть; 0 - файл ссылается только на то, что существует."""
+    path = Path(args.check)
+    if not path.is_file():
+        raise ValueError("нет файла для проверки: %s" % path)
+    content = path.read_text(encoding="utf-8", errors="replace")
+    bones = bench.skeleton_bones()
+    if args.engine == "smp":
+        rows = layer.check(content, bones, bench.model.shape_names() if bench.is_open() else None)
+    else:
+        rows = layer.check(content, bones)
+    if args.json:
+        _out(args, {"file": str(path), "engine": args.engine, "problems": rows, "ok": not rows})
+    else:
+        _out(args, rows, [("kind", "род"), ("name", "имя"), ("where", "где"), ("problem", "в чём дело")],
+             "%s: ссылается только на то, что есть в скелете%s" % (
+                 path.name, " и меше" if args.engine == "smp" and bench.is_open() else ""))
+    return 3 if rows else 0
+
+
 def cmd_physics(args) -> int:
     """Настройки качающей физики одного движка - SMP или CBPC - текстом его формата.
 
@@ -323,6 +345,8 @@ def cmd_physics(args) -> int:
     bench = _bench(args)
     if not bench.has_skeleton():
         raise ValueError("назовите скелет: --skeleton <skeleton.nif>")
+    if args.check:
+        return _physics_check(bench, args, smp if args.engine == "smp" else cbpc)
     _assign(bench, args)
     _apply_view(bench, args)
     layer = smp if args.engine == "smp" else cbpc
@@ -635,6 +659,9 @@ def main(argv=None) -> int:
     p.add_argument("--assign", default=None,
                    help="кому отдана цепочка на этот запуск, поверх настроек: tail=smp,ear=cbpc")
     p.add_argument("--out", default=None, help="записать текст в файл; без ключа - печать")
+    p.add_argument("--check", default=None,
+                   help="проверить готовый файл настроек этого движка: ссылается ли он на кости "
+                        "скелета и части меша; код выхода 3, если есть находки")
     p.add_argument("--percentile", type=float, default=None,
                    help="доля точек внутри радиуса капсулы; по умолчанию из настроек")
     p.add_argument("--slider", action="append", default=[])
