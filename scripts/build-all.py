@@ -190,8 +190,10 @@ class Pipeline:
         файл морфов) обрезкой пути экспорта по слову `meshes`. Без него в мод уезжает
         абсолютный путь со сборочной машины, и у игрока морфы не находятся.
         """
-        sub = self.spec.get("outputUnder", "")
-        return (self.out / sub / name) if sub else (self.out / name)
+        tree = self.spec.get("outputUnder", "")
+        variant, _, leaf = name.rpartition("/")
+        root = self.out / variant if variant else self.out
+        return (root / tree / leaf) if tree else (root / leaf)
 
     def source(self, key: str) -> Path:
         node = self.spec["sources"][key]
@@ -241,6 +243,7 @@ class Pipeline:
             print("   %s %s -> %s" % ("копия" if runner == "copy" else "переименование",
                                       src.name, dst.name))
             if not dry:
+                dst.parent.mkdir(parents=True, exist_ok=True)
                 if runner == "copy":
                     shutil.copyfile(src, dst)
                 else:
@@ -248,6 +251,12 @@ class Pipeline:
                     shutil.move(str(src), str(dst))
             return
         args = [self.resolve(a) for a in step["args"]]
+        # Папки под выход заводим сами: Blender при экспорте несуществующий каталог
+        # не создаёт, а падает уже следующим шагом, на переименовании, и причина
+        # выглядит совсем не там, где она есть.
+        for tok, val in zip(step["args"], args):
+            if isinstance(tok, str) and tok.startswith("@out:"):
+                Path(val).parent.mkdir(parents=True, exist_ok=True)
         if runner == "blender":
             blender = str(P.blender) if getattr(P, "blender", "") else ""
             if not blender or not Path(blender).is_file():
@@ -268,31 +277,40 @@ class Pipeline:
             raise SystemExit("шаг отказал: %s" % step["name"])
 
     def verify(self) -> list[dict]:
-        """Сверка собранного с тем, что лежит в моде — ПО СМЫСЛУ, а не по байтам.
+        """Сверка собранного с тем, что лежит в модах — ПО СМЫСЛУ, а не по байтам.
 
         Проверено 10.09: пересборка даёт файл с другой контрольной суммой, но геометрия
-        совпадает до последней вершины во всех шестнадцати частях. Экспорт NIF просто
-        не побайтово повторяем. Поэтому вход закрепляется суммой (это неизменные чужие
-        файлы), а выход сверяется содержимым: части, число вершин, координаты, имена
-        ползунков и их сдвиги. Сумма здесь дала бы ложную тревогу на каждой сборке.
+        совпадает до последней вершины. Экспорт NIF не побайтово повторяем, поэтому вход
+        закрепляется суммой, а выход сверяется содержимым.
         """
-        target = self.mods / self.spec["mod"] / self.spec.get(
-            "installUnder", "Meshes/Actors/WerewolfBeast/Character Assets")
         rows = []
-        for name in self.spec.get("outputs", []):
-            built, shipped = self.built(name), target / name
-            if not built.is_file():
-                rows.append({"file": name, "state": "НЕ СОБРАН"})
-                continue
-            if not shipped.is_file():
-                rows.append({"file": name, "state": "в моде такого нет", "new": True})
+        for key, mod in self.spec.get("mods", {}).items():
+            target = self.mods / mod["name"] / mod.get("under", "")
+            for name, src in mod["files"].items():
+                built, shipped = self.built(src), target / name
+                row = {"mod": key, "file": name}
+                if not built.is_file():
+                    rows.append({**row, "state": "НЕ СОБРАН"})
+                    continue
+                if not shipped.is_file():
+                    rows.append({**row, "state": "мода ещё нет", "new": True})
+                    continue
+                try:
+                    rows.append({**row, **(_diff_tri(shipped, built) if name.endswith(".tri")
+                                           else _diff_nif(shipped, built))})
+                except Exception as e:                      # noqa: BLE001
+                    rows.append({**row, "state": "сверить нечем: %s" % e})
+        # Наборы обязаны стоять на ОДНОЙ геометрии: пропуск ползунков её не трогает.
+        for a, b in self.spec.get("sameGeometry", []):
+            pa, pb = self.built(a), self.built(b)
+            row = {"mod": "наборы", "file": "%s = %s" % (a, b)}
+            if not (pa.is_file() and pb.is_file()):
+                rows.append({**row, "state": "НЕ СОБРАН"})
                 continue
             try:
-                rows.append({"file": name, **(_diff_tri(shipped, built)
-                                              if name.endswith(".tri")
-                                              else _diff_nif(shipped, built))})
+                rows.append({**row, **_diff_nif(pa, pb)})
             except Exception as e:                          # noqa: BLE001
-                rows.append({"file": name, "state": "сверить нечем: %s" % e})
+                rows.append({**row, "state": "сверить нечем: %s" % e})
         return rows
 
     # ---- манифест ------------------------------------------------------------------
@@ -321,7 +339,7 @@ def main(argv: list[str]) -> int:
 
     print("мод    : %s %s" % (spec["mod"], spec["version"]))
     print("сборка : %s" % out)
-    (out / spec.get("outputUnder", "")).mkdir(parents=True, exist_ok=True)
+    out.mkdir(parents=True, exist_ok=True)
 
     print("\nвход:")
     sources = pipe.check_sources("--allow-source-drift" in argv)
@@ -347,7 +365,7 @@ def main(argv: list[str]) -> int:
         elif r.get("maxDelta") is not None:
             extra = "  (частей %s, наибольшее расхождение %s)" % (
                 r.get("shapes", r.get("morphs")), r["maxDelta"])
-        print("   %-28s %s%s" % (r["file"], r["state"], extra))
+        print("   %-8s %-34s %s%s" % (r.get("mod", ""), r["file"], r["state"], extra))
 
     man = pipe.manifest(sources, verified)
     (out / "claw-build.json").write_text(
@@ -355,15 +373,16 @@ def main(argv: list[str]) -> int:
     print("\nманифест: %s" % (out / "claw-build.json"))
 
     if "--install" in argv:
-        target = Path(P.mods) / spec["mod"] / "Meshes/Actors/WerewolfBeast/Character Assets"
-        target.mkdir(parents=True, exist_ok=True)
-        for name in spec.get("outputs", []):
-            src = pipe.built(name)
-            if src.is_file():
-                shutil.copyfile(src, target / name)
-        shutil.copyfile(out / "claw-build.json",
-                        Path(P.mods) / spec["mod"] / "claw-build.json")
-        print("положено в мод: %s" % (Path(P.mods) / spec["mod"]))
+        for mod in spec.get("mods", {}).values():
+            target = Path(P.mods) / mod["name"] / mod.get("under", "")
+            target.mkdir(parents=True, exist_ok=True)
+            for name, src in mod["files"].items():
+                built = pipe.built(src)
+                if built.is_file():
+                    shutil.copyfile(built, target / name)
+            shutil.copyfile(out / "claw-build.json",
+                            Path(P.mods) / mod["name"] / "claw-build.json")
+            print("положено в мод: %s (%d файлов)" % (mod["name"], len(mod["files"])))
     return 0
 
 
