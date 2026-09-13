@@ -47,7 +47,7 @@ CONTENT = [
     "dependencies.json",
     "morphbench/*.py",
     "presenters/*.py",
-    "locale/*.json",
+    "locale/*/*.json",
     "docs/*.md",
 ]
 #: Что не кладём, даже если оно подошло под образец выше.

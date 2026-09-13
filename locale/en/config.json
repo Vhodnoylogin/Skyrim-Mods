@@ -1,0 +1,7 @@
+{
+  "#": "Base language. Every key in use must have a text here: other languages fall back to it.",
+  "#keys": "A key is a latin label, never a sentence. Substitution is by name: %(name)s.",
+  "#adding": "A new section goes into a NEW FILE in this folder - no existing file is rewritten.",
+  "config.pyniflyBadPath": "the pynifly path in morphbench.json does not exist: %(path)s",
+  "config.pyniflyMissing": "PyNifly add-on not found; name its folder with the pynifly key in %(config)s"
+}

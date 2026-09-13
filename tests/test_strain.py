@@ -456,7 +456,7 @@ class TestCommandLine(unittest.TestCase):
                          bench.strain(0.5, 0.5, "left"))
         code, out, _ = self.cli(["strain", "x.nif"], bench)
         self.assertEqual(code, 0)
-        self.assertIn("морф", out.splitlines()[0])
+        self.assertIn("morph", out.splitlines()[0])
 
     def test_sliders_measure_the_set(self):
         rows = self.run_json(["--json", "strain", "x.nif", "--slider", "Right=1",
@@ -473,7 +473,7 @@ class TestCommandLine(unittest.TestCase):
     def test_bad_sliders_refused(self):
         code, _, err = self.cli(["strain", "x.nif", "--slider", "Right"], self.fresh())
         self.assertEqual(code, 2)
-        self.assertIn("ИМЯ=ЧИСЛО", err)
+        self.assertIn("NAME=NUMBER", err)
         code, _, err = self.cli(["strain", "x.nif", "--slider", "Nope=1"], self.fresh())
         self.assertEqual(code, 2)
         self.assertIn("нет ползунка", err)
