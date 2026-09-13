@@ -6,12 +6,12 @@
     "_": "Донор задаёт ВСЁ, кроме чисел капсул: узлы, шарниры, контроллеры. Выход обязан совпасть с ним по размеру - иначе тронута структура."
   },
   "body": {
-    "mod": "CLAW - Anatomy",
+    "mod": "CLAW - Configurable Lycanthrope Anatomy and Weight",
     "path": "Meshes/Actors/WerewolfBeast/Character Assets/malebodywerewolf_1.nif",
     "_": "Самец: он крупнее, и капсулы по нему сидят на самке тоже (15% кожи снаружи в среднем против 17% у самого самца). Второй скелет не нужен."
   },
   "output": {
-    "mod": "CLAW - Anatomy",
+    "mod": "CLAW - Configurable Lycanthrope Anatomy and Weight",
     "path": "Meshes/Actors/WerewolfBeast/Character Assets/skeleton.nif"
   },
   "percentile": 90.0,

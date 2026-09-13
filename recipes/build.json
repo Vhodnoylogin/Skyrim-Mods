@@ -173,6 +173,56 @@
       "_": "Нужен только ради файла морфов; худую половину пересобирать незачем."
     },
     {
+      "name": "шары охвата: malebodywerewolf_1.nif",
+      "runner": "python",
+      "script": "fix-bounds.py",
+      "args": [
+        "@out:adult/malebodywerewolf_1.nif",
+        "--tri",
+        "@out:adult/malebodywerewolf.tri"
+      ],
+      "_": [
+        "Шар охвата у каждой части считается по позе покоя, а морфы уводят вершины за него,",
+        "и деталь пропадает по углу обзора. Правится ПОСЛЕ сборки тела и файла морфов:",
+        "раньше считать нечего. Померено 13.09 на поставленном моде - за свой шар выходили",
+        "15 частей из 16, fur_tailtip на 192%, mouth на 104%.",
+        "",
+        "--tri указан НАРОЧНО и указывает на взрослый файл морфов: базовый мод возит свои",
+        "24 ползунка, но в игре поверх него ложится надстройка с 29, и шар обязан накрывать",
+        "широкий случай. Без ключа верстак взял бы файл по имени меша, то есть узкий."
+      ]
+    },
+    {
+      "name": "шары охвата: malebodywerewolf_0.nif",
+      "runner": "python",
+      "script": "fix-bounds.py",
+      "args": [
+        "@out:adult/malebodywerewolf_0.nif",
+        "--tri",
+        "@out:adult/malebodywerewolf.tri"
+      ]
+    },
+    {
+      "name": "шары охвата: femalebodywerewolf_1.nif",
+      "runner": "python",
+      "script": "fix-bounds.py",
+      "args": [
+        "@out:adult/femalebodywerewolf_1.nif",
+        "--tri",
+        "@out:adult/femalebodywerewolf.tri"
+      ]
+    },
+    {
+      "name": "шары охвата: femalebodywerewolf_0.nif",
+      "runner": "python",
+      "script": "fix-bounds.py",
+      "args": [
+        "@out:adult/femalebodywerewolf_0.nif",
+        "--tri",
+        "@out:adult/femalebodywerewolf.tri"
+      ]
+    },
+    {
       "name": "скелет: капсулы столкновений по телу",
       "runner": "python",
       "script": "build-skeleton.py",
