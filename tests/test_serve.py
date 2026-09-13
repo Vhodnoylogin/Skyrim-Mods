@@ -48,11 +48,12 @@ def get(url: str):
 
 
 def quiet():
-    """Строки журнала запросов — не в вывод проверок."""
+    """Строки журнала запросов — не в вывод проверок. Глушится одна точка записи,
+    через которую идут и запросы, и ошибки, и сообщения http.server."""
     handler = getattr(serve, "_Handler", None)
-    if handler is None or not hasattr(handler, "log_message"):
+    if handler is None or not hasattr(handler, "_write"):
         return contextlib.nullcontext()
-    return mock.patch.object(handler, "log_message", lambda self, *a: None)
+    return mock.patch.object(handler, "_write", lambda self, *a: None)
 
 
 def write_body(cfg, folder: Path) -> tuple[Path, Path]:
@@ -215,6 +216,44 @@ class TestWebServer(unittest.TestCase):
             get(base + "/api/environment")
         # Первый сервер остановка второго не задела.
         self.json("/api/environment")
+
+
+@unittest.skipIf(WebServer is None, "нет presenters/serve.py")
+class TestDeadJournal(unittest.TestCase):
+    """Труба к тому, кто запустил сервер, закрылась — обслуживание продолжается.
+
+    Так выглядит снятое окно запуска: сервер пишет строку журнала в трубу, читателя
+    у которой больше нет. Писалась она внутри отправки ответа, до заголовков, поэтому
+    падение уносило с собой каждый обслуживаемый запрос: клиент получал обрыв связи
+    без единого слова, а работа при этом делалась. Теперь выбывает один приёмник.
+    """
+
+    def test_serving_survives_and_the_other_sink_keeps_the_record(self):
+        from morphbench.journal import Journal, ListSink, StreamSink
+        from test_journal import DeadStream
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bench = common.bench(tmp, common.sample_model(), None)
+            dead = StreamSink(DeadStream(), "debug")
+            kept = ListSink("debug")
+            server = WebServer(bench, root=tmp, host="127.0.0.1", port=0,
+                               journal=Journal([dead, kept], "serve")).start()
+            try:
+                base = server.url.rstrip("/")
+                for _ in range(3):
+                    code, ctype, body = get(base + "/api/catalog")
+                    self.assertEqual(code, 200, body[:300])
+                code, ctype, body = get(base + "/")
+                self.assertEqual(code, 200)
+                # Отказ отправки тоже не должен ронять сервер: 404 приходит как 404.
+                self.assertEqual(get(base + "/api/no-such-path")[0], 404)
+            finally:
+                server.stop()
+                server.close()
+            self.assertFalse(dead.alive)
+            lines = "\n".join(kept.lines)
+            self.assertIn("/api/catalog", lines)
+            self.assertIn("выбыл", lines)
 
 
 if __name__ == "__main__":

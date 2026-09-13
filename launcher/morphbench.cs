@@ -276,6 +276,17 @@ class Launcher
 
     public string Cli(string args) { return RunCli(args); }
 
+    // Сервер уже поднят: не поднимать второго, а отдать ему корень обзора. Делается это
+    // тем же вызовом `mb.py serve`, что и подъём: правило «свободно - поднять, поднят -
+    // подключиться и передать путь» живёт в команде, в одном месте, и своей ветки решения
+    // у окна нет. Из-под MO2 передаётся Data игры, которую этот процесс видит сквозь usvfs.
+    public string HandOver(string root)
+    {
+        string args = "serve --no-browser";
+        if (!string.IsNullOrEmpty(root)) args += " --root " + Module.Quote(root);
+        return RunCli(args);
+    }
+
     string RunCli(string args)
     {
         var start = new ProcessStartInfo(Python, Module.Quote(Path.Combine(Home, Module.Script)) + " " + args)
@@ -638,8 +649,7 @@ class MainForm : Form
         if (launcher == null) return;
         if (status.Up)
         {
-            Append("сервер уже поднят: " + status.Url);
-            if (options.Start) { OpenPage(); options.Start = false; }
+            HandOver();
             return;
         }
         if (status.State == "busy")
@@ -668,6 +678,30 @@ class MainForm : Form
     }
 
     bool pendingOpen;
+
+    /// Сервер уже поднят - подключиться к нему и передать корень обзора. Вызов тот же,
+    /// что и при подъёме, поэтому нажатие «Поднять» идемпотентно: поднят сервер или нет,
+    /// окно делает одно и то же, а разбирается в этом команда.
+    void HandOver()
+    {
+        string root = rootBox.Text.Trim();
+        bool open = options.Start;
+        options.Start = false;
+        stateLabel.Text = "сервер поднят - передаю корень…";
+        SetButtons(false);
+        ThreadPool.QueueUserWorkItem(_ =>
+        {
+            string outp;
+            try { outp = launcher.HandOver(root); }
+            catch (Exception e) { outp = "передать корень не удалось: " + e.Message; }
+            BeginInvoke((Action)(() =>
+            {
+                Append(outp.Trim().Length > 0 ? outp.Trim() : "сервер уже поднят: " + status.Url);
+                if (open) OpenPage();
+                Refresh(true);
+            }));
+        });
+    }
 
     void StopServer()
     {
