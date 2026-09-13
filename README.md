@@ -57,8 +57,9 @@ microphone stays one for everybody.
 
 Everything a player can read is a key, and the lines behind the keys live in Skyrim's own
 translation files - `Interface\Translations\Envoy*_<language>.txt`. English is the source
-language and ships inside the mod; every other language is a mod of its own with a single folder
-in it, so adding a language means adding a mod.
+language, and **every language ships inside the module it belongs to**: a translation is a part of
+the module and not a mod to install beside it. The engine takes the file that matches the language
+of the game.
 
 The log is no exception: its lines are keys too. Exactly one thing stays as it came - **the
 recognised speech**. Translating what a person said would be meaningless; it is data, not a
