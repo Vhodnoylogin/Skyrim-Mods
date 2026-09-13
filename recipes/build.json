@@ -266,7 +266,20 @@
         "skeleton.nif": "adult/skeleton.nif",
         "malebodywerewolf.tri": "base/malebodywerewolf.tri",
         "femalebodywerewolf.tri": "base/femalebodywerewolf.tri"
-      }
+      },
+      "rootFiles": {
+        "CLAW.esp": "@asset:plugins/CLAW.esp"
+      },
+      "_rootFiles": [
+        "Плагин мода: одна переопределённая запись ARMA NakedTorsoWerewolfBeast (000CDD87).",
+        "В ней указана ЖЕНСКАЯ модель - в ванильной игре это поле пусто, и самка получает",
+        "мужской меш, - и включён ползунок веса. Без плагина все четыре тела лежат мёртвым",
+        "грузом: игра их не спрашивает.",
+        "",
+        "Лежит в assets\\ под Git LFS, а не собирается: сделан руками, рецептом не выражается.",
+        "До 13.09 он ехал в моде Elegant... - Morph Probe, остатке пробника, которого",
+        "у игрока не будет - то есть выпуск ушёл бы без него и молча не работал."
+      ]
     },
     "adult": {
       "name": "CLAW - Anatomy",
