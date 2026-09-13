@@ -58,9 +58,9 @@ class TestEnvAndCatalog(unittest.TestCase):
     def test_env_text(self):
         with mo2(False):
             text = run(["env"], self.cfg)
-        self.assertIn("под MO2", text)
-        self.assertIn("нет", text)
-        self.assertIn("не задан", text)
+        self.assertIn("under MO2", text)
+        self.assertIn("no", text)
+        self.assertIn("not set", text)
 
     def test_catalog_json(self):
         with mo2(False):
@@ -78,12 +78,12 @@ class TestEnvAndCatalog(unittest.TestCase):
     def test_catalog_text(self):
         with mo2(False):
             text = run(["catalog", str(self.root)], self.cfg)
-        self.assertIn("меш", text)
+        self.assertIn("mesh", text)
         self.assertIn("body_0.nif", text)
         self.assertIn("TRIP", text)
         self.assertIn("FRTRI", text)
         with mo2(False):
-            self.assertIn("мешей не найдено",
+            self.assertIn("no meshes found",
                           run(["catalog", str(self.root), "--find", "zzz"], self.cfg))
 
     def test_catalog_without_root_outside_mo2(self):
@@ -127,7 +127,7 @@ class TestServeStatusAndStop(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()) as err:
                 code = mb.main(["serve", "--stop", "--port", str(port)])
         self.assertEqual(code, 2)
-        self.assertIn("не поднят", err.getvalue())
+        self.assertIn("not up", err.getvalue())
 
     def test_status_and_stop_of_a_running_server(self):
         from presenters.serve import WebServer
@@ -140,7 +140,7 @@ class TestServeStatusAndStop(unittest.TestCase):
                                       self.cfg))
                 self.assertEqual((data["state"], data["url"]), ("ours", server.url))
                 text_out = run(["serve", "--status", "--port", str(server.port)], self.cfg)
-                self.assertIn("поднят", text_out)
+                self.assertIn("server: up", text_out)
                 # Отказ поднятого сервера - одной строкой и кодом 2, а не трассировкой.
                 with mock.patch.object(mb, "MorphBench", lambda *a, **k: MorphBench(self.cfg)):
                     with contextlib.redirect_stdout(io.StringIO()), \

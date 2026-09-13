@@ -268,7 +268,7 @@ class TestCommandLine(Fixture):
         root = ET.fromstring(data["text"].encode("utf-8"))
         self.assertEqual(root.find("bone").get("name"), "NPC Head [Head]")
         printed = self.run_ok(["physics", "memory.nif", "--engine", "smp", "--out", str(path)])
-        self.assertIn("записан", printed)
+        self.assertIn("written", printed)
 
     def test_physics_takes_sliders_and_only(self):
         """Кожа - то, что видно: спрятал шерсть - у звена нет шерсти в частях."""
@@ -291,7 +291,7 @@ class TestCommandLine(Fixture):
         self.bench.rig = None
         code, _, err = self.main(["physics", "memory.nif", "--engine", "cbpc"])
         self.assertEqual(code, 2)
-        self.assertIn("скелет", err)
+        self.assertIn("skeleton", err)
 
 
 

@@ -1,54 +1,13 @@
-"""Командная строка верстака — такой же клиент фасада, как и всё остальное.
+"""Command line of the workbench - a client of the facade like every other layer.
 
-Здесь нет ни одного вычисления: разбор доводов, вызов метода `MorphBench` и передача
-результата слою показа. Именно поэтому всё, что умеет будущее окно, умеет и она.
+There is not a single computation here: arguments are parsed, a method of `MorphBench`
+is called, and the result is handed to a presenter. That is exactly why anything a window
+can do, this can do too.
 
-    python mb.py summary <меш.nif>
-    python mb.py shapes  <меш.nif>
-    python mb.py bones   <меш.nif> [--shape body] [--find Hand]
-    python mb.py morphs  <меш.nif> [--morph Paw] [--shape body]
-    python mb.py empty   <меш.nif>
-    python mb.py missing <меш.nif> CLAWNeck CLAWEars ...
-    python mb.py strain  <меш.nif> [--morph Paw] [--threshold 0.25] [--amount 1.0]
-    python mb.py strain  <меш.nif> --slider A=1 --slider B=1     растяжение при НАБОРЕ ползунков
-    python mb.py strain  <меш.nif> --pairs [--top 10] [--by gain]  перебор пар: какие два рвут вместе
-    python mb.py budget  <меш.nif> [--threshold 0.25]            на какой величине каждый ползунок рвёт
-    python mb.py layers  <меш.nif> --morph CLAWBelly [--base body] [--adjacent]
-    python mb.py binding <меш.nif> --shape body --morph CLAWPawSize
-    python mb.py focus   <меш.nif> [--bone Finger | --morph CLAWPawSize | --shape head]
-    python mb.py render  <меш.nif> --out кадр.png [--view front | --look 40,15] [--colour bone]
-                         [--slider CLAWEars=1] [--only body,head] [--morph CLAWPawSize]
-                         [--focus-bone Finger | --focus-morph CLAWPawSize | --focus-shape head]
-                         [--zoom 2 | --zoom-at=2,0.4,-0.3] [--pan=5,-3] [--size 900x900]
-                         [--light camera|world] [--light-dir=x,y,z] [--light-power=a,d,f]
-    python mb.py bounds  <меш.nif> [--shape S] [--write новый.nif]   шары охвата: в файле, нужный, перебор
-    python mb.py chains  <меш.nif> [--skeleton S.nif] [--engine smp|cbpc] [--assign tail=smp,ear=cbpc]
-                                                       цепочки костей: кожа по звеньям, обрывы, кому отдана
-    python mb.py physics <меш.nif> [--skeleton S.nif] --engine smp|cbpc [--assign ...] [--out файл]
-    python mb.py physics <меш.nif> [--skeleton S.nif] --engine smp|cbpc --check <готовый файл>
-                                                       настройки качающей физики одного движка его форматом
-    python mb.py colliders [меш.nif] --skeleton <skeleton.nif> [--find Thigh] [--clearance]
-    python mb.py fit       <меш.nif> --skeleton <skeleton.nif> [--find Thigh] [--slider X=1]
-                           [--only body] [--bundle N --split axis|kmeans] [--save новый.nif] [--ppb]
-    python mb.py sheet   <меш.nif> --out папка [--views front,side,below] [--prefix view]
-    python mb.py web     <меш.nif> --out страница.html  (те же ключи, что у render)
-    python mb.py env                                   под MO2 ли мы и какой корень обзора
-    python mb.py catalog [папка] [--all] [--find X]    обзор мешей с подобранными морфами
-    python mb.py serve   [--root папка] [--port N] [--nif X]   страница со списком мешей
-    python mb.py serve   --status | --stop             жив ли сервер; остановить его
-
-`serve` без ключей просто поднимает сервер: корень обзора - Data игры под MO2, иначе его
-называют на странице. Если сервер на этом адресе уже поднят, второй не поднимается:
-ему отдаётся корень (из-под MO2 - Data игры, которую видит этот процесс) и открывается
-страница. Окно `morphbench.exe` рядом делает то же кнопками - поднять, остановить,
-состояние, папка обзора, страница - и из-под MO2 видит Data со всеми модами.
-
-У render, sheet и web меш можно взять из обзора вместо пути: `--entry <номер|имя> [--root папка]`.
-Скелет (`skeleton.nif` в папке меша) подбирается сам, иначе - ключ `--skeleton` у любой
-команды; render, sheet и web умеют `--colliders` - слой капсул поверх тела.
-Ко всякой команде подходит `--json`: тот же ответ машинно, без таблиц.
-Файл морфов подбирается рядом с мешем сам; можно задать явно ключом `--tri`.
-Пары чисел с минусом впереди пишутся через знак равенства: `--pan=-5,3`, `--look=-10,5`.
+The usage text the user sees is not here: it lives under the key `cli.usage` in
+`locale/<language>/cli.json`, like every other string this program prints. So does every
+argparse help line. The language is settled at the top of `main()` - before the parser is
+built, because the help is put together at construction, not at printing.
 """
 from __future__ import annotations
 
@@ -64,7 +23,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import errno                                  # noqa: E402
 
 from morphbench import MorphBench            # noqa: E402
-from morphbench.i18n import t              # noqa: E402
+from morphbench.config import Config       # noqa: E402
+from morphbench.i18n import t, use         # noqa: E402
 from presenters import ppb, text             # noqa: E402
 
 # Отказы фасада, которые командная строка показывает одной строкой, а не трассировкой.
@@ -83,7 +43,7 @@ def _bench(args) -> MorphBench:
     elif not getattr(args, "skeleton", None):
         # Скелет самодостаточен: капсулы можно смотреть и без тела. Тело нужно только
         # посадке и подгонке, и они скажут об этом сами.
-        raise ValueError("назовите меш: путь к .nif либо --entry <номер|имя> [--root папка]")
+        raise ValueError(t("cli.err.noMesh"))
     if getattr(args, "skeleton", None):
         bench.open_skeleton(args.skeleton)
     return bench
@@ -94,18 +54,28 @@ def _numbers(text: str, key: str, low: int, high: int) -> list[float]:
     try:
         values = [float(p) for p in str(text).split(",")]
     except ValueError:
-        raise ValueError("%s: ожидались числа через запятую, а не %r" % (key, text))
+        raise ValueError(t("cli.err.notNumbers", key=key, value=text))
     if not low <= len(values) <= high:
-        raise ValueError("%s: нужно %s чисел, а не %d" % (
-            key, str(low) if low == high else "от %d до %d" % (low, high), len(values)))
+        raise ValueError(t("cli.err.wrongCount", key=key, got=len(values),
+                           want=str(low) if low == high else t("cli.err.between",
+                                                               low=low, high=high)))
     return values
 
 
-def _out(args, data, columns=None, empty="пусто") -> None:
+def _col(name: str) -> str:
+    """Заголовок столбца по ключу: столбец называет код, слово - словарь языка."""
+    return t("cli.col." + name)
+
+
+def _yesno(value) -> str:
+    return t("cli.yes") if value else t("cli.no")
+
+
+def _out(args, data, columns=None, empty=None) -> None:
     if args.json:
         print(json.dumps(data, ensure_ascii=False, indent=2))
     elif columns is not None:
-        print(text.table(data, columns, empty))
+        print(text.table(data, columns, t("cli.empty.empty") if empty is None else empty))
     else:
         print(data)
 
@@ -118,27 +88,27 @@ def cmd_summary(args) -> int:
 
 def cmd_shapes(args) -> int:
     _out(args, _bench(args).shapes(),
-         [("name", "часть"), ("vertices", "вершин"), ("triangles", "треуг."),
-          ("bones", "костей"), ("morphs", "морфов"), ("bounds", "охват X / Y / Z")])
+         [("name", _col("shape")), ("vertices", _col("vertices")), ("triangles", _col("triangles")),
+          ("bones", _col("bones")), ("morphs", _col("morphs")), ("bounds", _col("bounds"))])
     return 0
 
 
 def cmd_bones(args) -> int:
     _out(args, _bench(args).bones(args.shape, args.find),
-         [("bone", "кость"), ("vertices", "вершин")])
+         [("bone", _col("bone")), ("vertices", _col("vertices"))])
     return 0
 
 
 def cmd_morphs(args) -> int:
     _out(args, _bench(args).morph_stats(args.morph, args.shape),
-         [("shape", "часть"), ("morph", "морф"), ("vertices", "вершин"),
-          ("maxShift", "макс"), ("meanShift", "средн"), ("bounds", "охват X / Y / Z")])
+         [("shape", _col("shape")), ("morph", _col("morph")), ("vertices", _col("vertices")),
+          ("maxShift", _col("max")), ("meanShift", _col("mean")), ("bounds", _col("bounds"))])
     return 0
 
 
 def cmd_empty(args) -> int:
     rows = _bench(args).empty_morphs()
-    _out(args, rows, [("shape", "часть"), ("morph", "морф")], "пустых морфов нет")
+    _out(args, rows, [("shape", _col("shape")), ("morph", _col("morph"))], t("cli.empty.noEmptyMorphs"))
     return 0
 
 
@@ -147,9 +117,9 @@ def cmd_missing(args) -> int:
     if args.json:
         print(json.dumps(rows, ensure_ascii=False))
     elif rows:
-        print("в файле нет: %s" % ", ".join(rows))
+        print(t("cli.msg.notInFile", names=", ".join(rows)))
     else:
-        print("все названные ползунки на месте")
+        print(t("cli.msg.allPresent"))
     return 0
 
 
@@ -160,7 +130,7 @@ def _sliders(bench: MorphBench, pairs) -> None:
         try:
             amount = float(value)
         except ValueError:
-            raise ValueError("--slider: ожидалось ИМЯ=ЧИСЛО, а не %r" % pair) from None
+            raise ValueError(t("cli.err.sliderPair", value=pair)) from None
         bench.set_slider(name.strip(), amount)
 
 
@@ -178,9 +148,9 @@ def cmd_strain(args) -> int:
         _out(args, rows if args.json else text.strain_set(rows))
         return 0
     _out(args, bench.strain(args.amount, args.threshold, args.morph),
-         [("shape", "часть"), ("morph", "морф"), ("maxStrain", "макс"),
-          ("p99Strain", "99%"), ("overThreshold", "рёбер сверх"),
-          ("worstBounds", "где именно X / Y / Z")])
+         [("shape", _col("shape")), ("morph", _col("morph")), ("maxStrain", _col("max")),
+          ("p99Strain", "99%"), ("overThreshold", _col("edgesOver")),
+          ("worstBounds", _col("worstBounds"))])
     return 0
 
 
@@ -193,10 +163,10 @@ def cmd_budget(args) -> int:
 
 def cmd_layers(args) -> int:
     _out(args, _bench(args).layers(args.morph, args.base, args.adjacent),
-         [("follower", "оболочка"), ("followerMax", "её макс"),
-          ("baseMax", "у кожи"), ("ratio", "доля"), ("missing", "не следует"),
-          ("contact", "над сдвигом"), ("adjacent", "смежна"), ("expectedMax", "должна на")],
-         "смежных оболочек нет" if args.adjacent else "пусто")
+         [("follower", _col("follower")), ("followerMax", _col("followerMax")),
+          ("baseMax", _col("baseMax")), ("ratio", _col("ratio")), ("missing", _col("notFollowing")),
+          ("contact", _col("contact")), ("adjacent", _col("adjacent")), ("expectedMax", _col("expectedMax"))],
+         t("cli.empty.noAdjacentCovers") if args.adjacent else None)
     return 0
 
 
@@ -208,14 +178,14 @@ def cmd_binding(args) -> int:
                           "leftBehind": bench.bones_left_behind(shape, args.morph)},
                          ensure_ascii=False, indent=2))
         return 0
-    print("кости, чьи вершины морф двигает:")
+    print(t("cli.msg.bonesMoved"))
     print(text.table(bench.morph_bones(shape, args.morph),
-                     [("bone", "кость"), ("share", "доля морфа")], "ни одной"))
+                     [("bone", _col("bone")), ("share", _col("share"))], t("cli.empty.none")))
     print()
-    print("кости, сдвинутые лишь частично — здесь поверхность растягивается:")
+    print(t("cli.msg.bonesPartly"))
     print(text.table(bench.bones_left_behind(shape, args.morph),
-                     [("bone", "кость"), ("leftBehind", "осталось на месте")],
-                     "таких нет"))
+                     [("bone", _col("bone")), ("leftBehind", _col("leftBehind"))],
+                     t("cli.empty.noSuch")))
     return 0
 
 
@@ -230,17 +200,18 @@ def cmd_focus(args) -> int:
         else:
             state = bench.focus_shape(args.shape)
         focus = state["focus"]
-        _out(args, focus if args.json else "смотрим на %s: центр %s, радиус %.2f" % (
-            focus["name"], " ".join("%g" % x for x in focus["centre"]), focus["radius"]))
+        _out(args, focus if args.json else t(
+            "cli.msg.looking", name=focus["name"], radius=focus["radius"],
+            centre=" ".join("%g" % x for x in focus["centre"])))
         return 0
     targets = bench.focus_targets()
     if args.json:
         print(json.dumps(targets, ensure_ascii=False, indent=2))
         return 0
-    cols = [("name", "цель"), ("centre", "центр X Y Z"), ("radius", "радиус")]
-    for kind, title in (("shapes", "части меша"), ("bones", "кости"), ("morphs", "морфы")):
+    cols = [("name", _col("target")), ("centre", _col("centre")), ("radius", _col("radius"))]
+    for kind, title in (("shapes", "части меша"), ("bones", "кости"), ("morphs", _col("morphKind"))):
         print("%s:" % title)
-        print(text.table(targets[kind], cols, "нет"))
+        print(text.table(targets[kind], cols, t("cli.empty.nothing")))
         print()
     return 0
 
@@ -259,7 +230,7 @@ def _apply_view(bench: MorphBench, args) -> None:
     if opt("size"):
         w, _, h = args.size.partition("x")
         if not (w.strip().isdigit() and h.strip().isdigit()):
-            raise ValueError("--size: ожидалось ШИРИНАxВЫСОТА, например 900x900, а не %r" % args.size)
+            raise ValueError(t("cli.err.size", value=args.size))
         bench.resize(int(w), int(h))
     if opt("focus_bone"):
         bench.focus_bone(args.focus_bone)
@@ -297,7 +268,7 @@ def _assign(bench: MorphBench, args) -> None:
     for item in str(raw).split(","):
         needle, sep, engine = item.partition("=")
         if not sep or not needle.strip():
-            raise ValueError("--assign: ожидалось <подстрока ствола>=smp|cbpc через запятую, а не %r" % item)
+            raise ValueError(t("cli.err.assignPair", value=item))
         pairs[needle.strip()] = engine.strip()
     bench.assign_chains(pairs)
 
@@ -318,7 +289,7 @@ def _physics_check(bench: MorphBench, args, layer) -> int:
     Код выхода 3 - находки есть; 0 - файл ссылается только на то, что существует."""
     path = Path(args.check)
     if not path.is_file():
-        raise ValueError("нет файла для проверки: %s" % path)
+        raise ValueError(t("cli.err.noCheckFile", path=path))
     content = path.read_text(encoding="utf-8", errors="replace")
     bones = bench.skeleton_bones()
     if args.engine == "smp":
@@ -328,9 +299,10 @@ def _physics_check(bench: MorphBench, args, layer) -> int:
     if args.json:
         _out(args, {"file": str(path), "engine": args.engine, "problems": rows, "ok": not rows})
     else:
-        _out(args, rows, [("kind", "род"), ("name", "имя"), ("where", "где"), ("problem", "в чём дело")],
-             "%s: ссылается только на то, что есть в скелете%s" % (
-                 path.name, " и меше" if args.engine == "smp" and bench.is_open() else ""))
+        _out(args, rows, [("kind", _col("kind")), ("name", _col("name")), ("where", _col("where")), ("problem", _col("problem"))],
+             t("cli.msg.checkClean", file=path.name,
+               andMesh=t("cli.msg.andMesh")
+               if args.engine == "smp" and bench.is_open() else ""))
     return 3 if rows else 0
 
 
@@ -345,7 +317,7 @@ def cmd_physics(args) -> int:
     from presenters import cbpc, smp
     bench = _bench(args)
     if not bench.has_skeleton():
-        raise ValueError("назовите скелет: --skeleton <skeleton.nif>")
+        raise ValueError(t("cli.err.noSkeleton"))
     if args.check:
         return _physics_check(bench, args, smp if args.engine == "smp" else cbpc)
     _assign(bench, args)
@@ -371,7 +343,7 @@ def cmd_physics(args) -> int:
     if args.json:
         _out(args, result)
     elif args.out:
-        print("записан: %s" % result["saved"])
+        print(t("cli.msg.saved", path=result["saved"]))
     else:
         print(body, end="")
     return 0
@@ -399,11 +371,11 @@ def cmd_colliders(args) -> int:
     """Капсулы скелета числами: где стоят, какие и как сидят по коже."""
     bench = _bench(args)
     if not bench.has_skeleton():
-        raise ValueError("назовите скелет: --skeleton <skeleton.nif>")
+        raise ValueError(t("cli.err.noSkeleton"))
     rows = bench.colliders(args.find)
     if args.clearance:
         if not bench.is_open():
-            raise ValueError("--clearance меряет капсулы по коже: назовите ещё и меш")
+            raise ValueError(t("cli.err.clearanceNeedsMesh"))
         fit = {r["bone"]: r for r in bench.collider_clearance(args.find)}
         for row in rows:
             row["clearance"] = fit.get(row["bone"])
@@ -415,7 +387,7 @@ def cmd_fit(args) -> int:
     """Посадить капсулы по коже при нынешних ползунках."""
     bench = _bench(args)
     if not bench.has_skeleton():
-        raise ValueError("назовите скелет: --skeleton <skeleton.nif>")
+        raise ValueError(t("cli.err.noSkeleton"))
     _apply_view(bench, args)
     rows = bench.collider_fit(args.find, args.percentile, bundle=args.bundle or 1,
                               split=args.split)
@@ -429,7 +401,7 @@ def cmd_fit(args) -> int:
         return 0
     lines = [text.fitted(rows)]
     if args.save:
-        lines.append("скелет: %s" % result["saved"])
+        lines.append(t("cli.msg.skeletonSaved", path=result["saved"]))
     if args.ppb:
         lines.append("\n".join(result["ppb"]))
     _out(args, "\n".join(lines))
@@ -442,7 +414,7 @@ def cmd_render(args) -> int:
     _apply_view(bench, args)
     path = Raster(bench).save(args.out)
     _out(args, {"saved": str(path), "view": bench.view_state(),
-                "sliders": bench.sliders()} if args.json else "кадр: %s" % path)
+                "sliders": bench.sliders()} if args.json else t("cli.msg.frame", path=path))
     return 0
 
 
@@ -463,7 +435,7 @@ def cmd_web(args) -> int:
     _apply_view(bench, args)
     path = WebPage(bench).save(args.out)
     _out(args, {"saved": str(path), "view": bench.view_state(),
-                "sliders": bench.sliders()} if args.json else "страница: %s" % path)
+                "sliders": bench.sliders()} if args.json else t("cli.msg.page", path=path))
     return 0
 
 
@@ -473,10 +445,10 @@ def cmd_env(args) -> int:
     if args.json:
         print(json.dumps(env, ensure_ascii=False, indent=2))
         return 0
-    print("под MO2:        %s" % ("да" if env["insideMo2"] else "нет"))
-    print("корень обзора:  %s" % (env["dataRoot"] or "не задан - назовите папку"))
-    print("игры в реестре: %s" % (", ".join("%s (%s)" % (g["game"], g["root"])
-                                             for g in env["games"]) or "нет"))
+    print(t("cli.env.insideMo2", yes=_yesno(env["insideMo2"])))
+    print(t("cli.env.root", root=env["dataRoot"] or t("cli.env.rootUnset")))
+    print(t("cli.env.games", games=", ".join("%s (%s)" % (g["game"], g["root"])
+                                             for g in env["games"]) or t("cli.empty.nothing")))
     return 0
 
 
@@ -487,8 +459,8 @@ def cmd_catalog(args) -> int:
     if args.find:
         low = args.find.lower()
         rows = [r for r in rows if low in r["name"].lower()]
-    _out(args, rows, [("index", "№"), ("name", "меш"), ("kind", "морфы")],
-         "мешей не найдено" if not args.all else "мешей нет")
+    _out(args, rows, [("index", _col("index")), ("name", _col("mesh")), ("kind", _col("morphKind"))],
+         t("cli.empty.noMeshesWithMorphs") if not args.all else t("cli.empty.noMeshes"))
     return 0
 
 
@@ -532,15 +504,16 @@ def cmd_serve(args) -> int:
     _out(args, {"started": True, "url": server.url,
                 "root": None if server.root is None else str(server.root),
                 "insideMo2": bench.environment()["insideMo2"]} if args.json else
-         "обзор: %s\nстраница: %s" % (server.root or "не задан - назовите папку на странице",
-                                        server.url))
+         t("cli.serve.browsing", root=server.root or t("cli.serve.rootOnPage"))
+         + "\n" + t("cli.serve.pageAt", url=server.url))
     sys.stdout.flush()                      # адрес виден сразу, даже если вывод в трубу
     server.run(open_browser=not args.no_browser)
     return 0
 
 
-_STATES = {"free": "не поднят", "ours": "поднят", "busy": "порт занят другой программой",
-           "slow": "кто-то есть, но не отвечает"}
+#: Состояние сервера ключом локализации, а не текстом: печатают его два места.
+_STATES = {"free": "cli.state.free", "ours": "cli.state.ours",
+           "busy": "cli.state.busy", "slow": "cli.state.slow"}
 
 
 def _serve_status(bench: MorphBench, link, args) -> int:
@@ -553,13 +526,14 @@ def _serve_status(bench: MorphBench, link, args) -> int:
     if args.json:
         _out(args, status)
         return 0
-    lines = ["сервер: %s  %s" % (_STATES[status["state"]], status["url"])]
+    lines = [t("cli.status.server", state=t(_STATES[status["state"]]), url=status["url"])]
     if status["state"] == "ours":
-        lines.append("под MO2: %s;  корень: %s%s" % (
-            "да" if status["insideMo2"] else "нет", status["root"] or "не задан",
-            "" if status["meshes"] is None else " (%d мешей)" % status["meshes"]))
-    lines.append("этот процесс под MO2: %s;  Data игры: %s" % (
-        "да" if here["insideMo2"] else "нет", here["dataRoot"] or "нет"))
+        lines.append(t("cli.status.serverEnv", yes=_yesno(status["insideMo2"]),
+                       root=status["root"] or t("cli.status.rootUnset"),
+                       meshes="" if status["meshes"] is None
+                       else t("cli.status.meshes", count=status["meshes"])))
+    lines.append(t("cli.status.here", yes=_yesno(here["insideMo2"]),
+                   data=here["dataRoot"] or t("cli.no")))
     _out(args, "\n".join(lines))
     return 0
 
@@ -567,9 +541,9 @@ def _serve_status(bench: MorphBench, link, args) -> int:
 def _serve_stop(link, args) -> int:
     state = link.probe()
     if state != "ours":
-        raise ValueError("на %s %s - останавливать нечего" % (link.url, _STATES[state]))
+        raise ValueError(t("cli.err.nothingToStop", url=link.url, state=t(_STATES[state])))
     got = link.shutdown()
-    _out(args, got if args.json else "остановлен: %s" % got["url"])
+    _out(args, got if args.json else t("cli.msg.stopped", url=got["url"]))
     return 0
 
 
@@ -594,9 +568,12 @@ def _hand_over(bench: MorphBench, link, args) -> int:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(prog="mb", description=__doc__,
+    # Language is settled BEFORE the parser is built: argparse help is text too,
+    # and it is put together at parser construction, not at printing.
+    use(Config().get("language", "auto"))
+    ap = argparse.ArgumentParser(prog="mb", description=t("cli.usage"),
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--json", action="store_true", help="машинный вывод вместо таблиц")
+    ap.add_argument("--json", action="store_true", help=t("cli.opt.top.json"))
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     def add(name, fn, nif_required=True, **kw):
@@ -604,101 +581,97 @@ def main(argv=None) -> int:
         p.add_argument("nif", nargs=None if nif_required else "?", default=None)
         p.add_argument("--tri", default=None)
         p.add_argument("--skeleton", default=None,
-                       help="файл скелета: из него читаются капсулы столкновений")
+                       help=t("cli.opt.top.skeleton"))
         # Без умолчания: иначе --json, поставленный ПЕРЕД именем команды, затирался бы.
         p.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
         p.set_defaults(func=fn)
         return p
 
-    add("summary", cmd_summary, help="что за меш открыт")
-    add("shapes", cmd_shapes, help="части меша")
-    p = add("bones", cmd_bones, help="кости и сколько вершин они держат")
+    add("summary", cmd_summary, help=t("cli.cmd.summary"))
+    add("shapes", cmd_shapes, help=t("cli.cmd.shapes"))
+    p = add("bones", cmd_bones, help=t("cli.cmd.bones"))
     p.add_argument("--shape", default=None)
     p.add_argument("--find", default=None)
-    p = add("morphs", cmd_morphs, help="что делает каждый ползунок")
+    p = add("morphs", cmd_morphs, help=t("cli.cmd.morphs"))
     p.add_argument("--morph", default=None)
     p.add_argument("--shape", default=None)
-    add("empty", cmd_empty, help="ползунки, которые не двигают ничего")
-    p = add("missing", cmd_missing, help="каких ожидаемых ползунков нет в файле")
+    add("empty", cmd_empty, help=t("cli.cmd.empty"))
+    p = add("missing", cmd_missing, help=t("cli.cmd.missing"))
     p.add_argument("names", nargs="+")
-    p = add("strain", cmd_strain, help="где морф рвёт поверхность")
+    p = add("strain", cmd_strain, help=t("cli.cmd.strain"))
     p.add_argument("--morph", default=None)
     p.add_argument("--amount", type=float, default=1.0)
     p.add_argument("--threshold", type=float, default=None,
-                   help="порог растяжения; по умолчанию strainThreshold из настроек")
+                   help=t("cli.opt.strain.threshold"))
     p.add_argument("--slider", action="append", default=[],
-                   help="значение ползунка ИМЯ=ЧИСЛО, ключ повторяем: растяжение при НАБОРЕ "
-                        "(--morph и --amount при этом не действуют)")
+                   help=t("cli.opt.strain.slider"))
     p.add_argument("--pairs", action="store_true",
-                   help="перебор пар ползунков при --amount: какие два вместе рвут сильнее, "
-                        "чем каждый поодиночке")
-    p.add_argument("--top", type=int, default=10, help="сколько худших пар показать; 0 - все")
+                   help=t("cli.opt.strain.pairs"))
+    p.add_argument("--top", type=int, default=10, help=t("cli.opt.strain.top"))
     p.add_argument("--by", choices=["max", "gain"], default="max",
-                   help="порядок пар: max - по растяжению вместе, gain - по прибавке пары "
-                        "над худшим из двух одиночных")
+                   help=t("cli.opt.strain.by"))
     p = add("budget", cmd_budget,
-            help="бюджет амплитуд: на какой величине каждый ползунок переходит порог")
+            help=t("cli.cmd.budget"))
     p.add_argument("--threshold", type=float, default=None,
-                   help="порог растяжения; по умолчанию strainThreshold из настроек")
-    p = add("layers", cmd_layers, help="следуют ли оболочки за кожей")
+                   help=t("cli.opt.budget.threshold"))
+    p = add("layers", cmd_layers, help=t("cli.cmd.layers"))
     p.add_argument("--morph", required=True)
-    p.add_argument("--base", default=None, help="базовая часть; по умолчанию baseShape из настроек")
+    p.add_argument("--base", default=None, help=t("cli.opt.layers.base"))
     p.add_argument("--adjacent", action="store_true",
-                   help="только оболочки над сдвигаемой кожей - те, что обязаны следовать")
-    p = add("binding", cmd_binding, help="к каким костям привязано то, что двигает морф")
-    p.add_argument("--shape", default=None, help="часть меша; по умолчанию baseShape из настроек")
+                   help=t("cli.opt.layers.adjacent"))
+    p = add("binding", cmd_binding, help=t("cli.cmd.binding"))
+    p.add_argument("--shape", default=None, help=t("cli.opt.binding.shape"))
     p.add_argument("--morph", required=True)
-    p = add("chains", cmd_chains, help="цепочки костей для качающейся физики: кожа по звеньям")
+    p = add("chains", cmd_chains, help=t("cli.cmd.chains"))
     p.add_argument("--engine", choices=("smp", "cbpc"), default=None,
-                   help="только цепочки, отданные этому движку (chainEngines в настройках)")
-    p.add_argument("--only", default=None, help="какие части меша считать")
+                   help=t("cli.opt.chains.engine"))
+    p.add_argument("--only", default=None, help=t("cli.opt.chains.only"))
     p.add_argument("--assign", default=None,
-                   help="кому отдана цепочка на этот запуск, поверх настроек: tail=smp,ear=cbpc")
+                   help=t("cli.opt.chains.assign"))
     p = add("physics", cmd_physics,
-            help="настройки качающей физики одного движка: smp (XML) или cbpc (строки трёх файлов)")
+            help=t("cli.cmd.physics"))
     p.add_argument("--engine", choices=("smp", "cbpc"), required=True,
-                   help="какой движок: цепочки другого в вывод не попадают")
+                   help=t("cli.opt.physics.engine"))
     p.add_argument("--assign", default=None,
-                   help="кому отдана цепочка на этот запуск, поверх настроек: tail=smp,ear=cbpc")
-    p.add_argument("--out", default=None, help="записать текст в файл; без ключа - печать")
+                   help=t("cli.opt.physics.assign"))
+    p.add_argument("--out", default=None, help=t("cli.opt.physics.out"))
     p.add_argument("--check", default=None,
-                   help="проверить готовый файл настроек этого движка: ссылается ли он на кости "
-                        "скелета и части меша; код выхода 3, если есть находки")
+                   help=t("cli.opt.physics.check"))
     p.add_argument("--percentile", type=float, default=None,
-                   help="доля точек внутри радиуса капсулы; по умолчанию из настроек")
+                   help=t("cli.opt.physics.percentile"))
     p.add_argument("--slider", action="append", default=[])
-    p.add_argument("--only", default=None, help="какие части меша считать кожей")
-    p = add("bounds", cmd_bounds, help="шары охвата частей: в файле, нужный, перебор")
-    p.add_argument("--shape", default=None, help="одна часть; по умолчанию все")
+    p.add_argument("--only", default=None, help=t("cli.opt.physics.only"))
+    p = add("bounds", cmd_bounds, help=t("cli.cmd.bounds"))
+    p.add_argument("--shape", default=None, help=t("cli.opt.bounds.shape"))
     p.add_argument("--margin", type=float, default=None,
-                   help="запас сверх нужного радиуса в долях; по умолчанию boundsMargin")
-    p.add_argument("--write", default=None, help="записать исправленные шары в НОВЫЙ файл")
+                   help=t("cli.opt.bounds.margin"))
+    p.add_argument("--write", default=None, help=t("cli.opt.bounds.write"))
     p.add_argument("--shrink", action="store_true",
-                   help="при записи и сжимать шары до нужного; без ключа шар только расширяется")
+                   help=t("cli.opt.bounds.shrink"))
     p = add("colliders", cmd_colliders, nif_required=False,
-            help="капсулы столкновений скелета")
-    p.add_argument("--find", default=None, help="подстрока имени кости")
+            help=t("cli.cmd.colliders"))
+    p.add_argument("--find", default=None, help=t("cli.opt.colliders.find"))
     p.add_argument("--clearance", action="store_true",
-                   help="и посадка по коже при нынешних ползунках")
-    p = add("focus", cmd_focus, help="наведение камеры: на кость, морф или часть")
-    p.add_argument("--bone", default=None, help="имя кости или его часть")
+                   help=t("cli.opt.colliders.clearance"))
+    p = add("focus", cmd_focus, help=t("cli.cmd.focus"))
+    p.add_argument("--bone", default=None, help=t("cli.opt.focus.bone"))
     p.add_argument("--morph", default=None)
     p.add_argument("--shape", default=None)
 
     p = add("fit", cmd_fit, nif_required=False,
-            help="посадить капсулы по коже при нынешних ползунках")
+            help=t("cli.cmd.fit"))
     p.add_argument("--entry", default=None)
     p.add_argument("--root", default=None)
-    p.add_argument("--find", default=None, help="подстрока имени кости")
+    p.add_argument("--find", default=None, help=t("cli.opt.fit.find"))
     p.add_argument("--percentile", type=float, default=None,
-                   help="доля точек внутри радиуса; по умолчанию из настроек")
+                   help=t("cli.opt.fit.percentile"))
     p.add_argument("--bundle", type=int, default=None,
-                   help="связка из N капсул вместо одной: облако режется на куски")
+                   help=t("cli.opt.fit.bundle"))
     p.add_argument("--split", choices=("axis", "kmeans"), default=None,
-                   help="как резать: ломтики вдоль оси кости или сгустки; по умолчанию bundleSplit")
-    p.add_argument("--save", default=None, help="записать новый файл скелета")
+                   help=t("cli.opt.fit.split"))
+    p.add_argument("--save", default=None, help=t("cli.opt.fit.save"))
     p.add_argument("--ppb", action="store_true",
-                   help="выдать строки настроек Precision Physic Bodies")
+                   help=t("cli.opt.fit.ppb"))
     p.add_argument("--slider", action="append", default=[])
     p.add_argument("--only", default=None)
 
@@ -707,8 +680,8 @@ def main(argv=None) -> int:
                           ("web", cmd_web, "самодостаточная страница со смотрелкой")):
         p = add(name, fn, nif_required=False, help=hlp)
         p.add_argument("--entry", default=None,
-                       help="меш из обзора по номеру или имени вместо пути к .nif")
-        p.add_argument("--root", default=None, help="корень обзора для --entry")
+                       help=t("cli.opt.view.entry"))
+        p.add_argument("--root", default=None, help=t("cli.opt.view.root"))
         p.add_argument("--out", required=True)
         p.add_argument("--view", default=None)
         p.add_argument("--colour", "--color", dest="colour", default="shade",
@@ -718,55 +691,53 @@ def main(argv=None) -> int:
         p.add_argument("--only", default=None)
         p.add_argument("--zoom", type=float, default=None)
         p.add_argument("--look", default=None,
-                       help="произвольный ракурс: поворот,подъём в градусах (с минусом: --look=-10,5)")
+                       help=t("cli.opt.view.look"))
         p.add_argument("--pan", default=None,
-                       help="сдвиг кадра вправо,вверх в единицах модели (с минусом: --pan=-5,3)")
+                       help=t("cli.opt.view.pan"))
         p.add_argument("--size", default=None)
         p.add_argument("--zoom-at", dest="zoom_at", default=None,
-                       help="масштаб к точке: новый масштаб,x,y - точка в долях половины "
-                            "меньшей стороны кадра от центра, вправо и вверх (--zoom-at=2,0.4,-0.3)")
+                       help=t("cli.opt.view.zoomat"))
         p.add_argument("--light", choices=["camera", "world"], default=None,
-                       help="свет за камерой (camera) или отдельно от неё (world)")
+                       help=t("cli.opt.view.light"))
         p.add_argument("--light-dir", dest="light_dir", default=None,
-                       help="направление на источник x,y,z: в осях камеры при --light camera, "
-                            "иначе мировое (--light-dir=0.3,0.5,0.8)")
+                       help=t("cli.opt.view.lightdir"))
         p.add_argument("--light-power", dest="light_power", default=None,
-                       help="силы света: рассеянная,направленная[,встречная] (--light-power=0.3,0.7,0.15)")
+                       help=t("cli.opt.view.lightpower"))
         p.add_argument("--focus-bone", dest="focus_bone", default=None)
         p.add_argument("--focus-morph", dest="focus_morph", default=None)
         p.add_argument("--focus-shape", dest="focus_shape", default=None)
         p.add_argument("--colliders", action="store_true",
-                       help="слой капсул поверх тела; нужен --skeleton")
+                       help=t("cli.opt.view.colliders"))
         p.add_argument("--bumper", action="store_true",
-                       help="и цилиндр перемещения: он вчетверо больше тела")
+                       help=t("cli.opt.view.bumper"))
         if name == "sheet":
             p.add_argument("--views", default=None)
             p.add_argument("--prefix", default="view")
 
     # Команды без меша: окружение, обзор и страница со списком.
-    p = sub.add_parser("env", help="под MO2 ли запущены и какой корень обзора")
+    p = sub.add_parser("env", help=t("cli.cmd.env"))
     p.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     p.set_defaults(func=cmd_env)
-    p = sub.add_parser("catalog", help="обзор мешей под папкой")
+    p = sub.add_parser("catalog", help=t("cli.cmd.catalog"))
     p.add_argument("root", nargs="?", default=None,
-                   help="корень обзора; без него - Data игры под MO2 либо catalogRoot из настроек")
-    p.add_argument("--all", action="store_true", help="и меши без файла морфов")
-    p.add_argument("--find", default=None, help="подстрока пути")
+                   help=t("cli.opt.catalog.root"))
+    p.add_argument("--all", action="store_true", help=t("cli.opt.catalog.all"))
+    p.add_argument("--find", default=None, help=t("cli.opt.catalog.find"))
     p.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     p.set_defaults(func=cmd_catalog)
-    p = sub.add_parser("serve", help="страница со списком мешей на локальном порту")
-    p.add_argument("--root", default=None, help="корень обзора; умолчание как у catalog")
-    p.add_argument("--nif", default=None, help="меш, открытый сразу")
+    p = sub.add_parser("serve", help=t("cli.cmd.serve"))
+    p.add_argument("--root", default=None, help=t("cli.opt.serve.root"))
+    p.add_argument("--nif", default=None, help=t("cli.opt.serve.nif"))
     p.add_argument("--tri", default=None)
-    p.add_argument("--host", default=None, help="адрес; по умолчанию serveHost из настроек")
-    p.add_argument("--port", type=int, default=None, help="порт; по умолчанию servePort из настроек")
-    p.add_argument("--all", action="store_true", help="и меши без файла морфов")
+    p.add_argument("--host", default=None, help=t("cli.opt.serve.host"))
+    p.add_argument("--port", type=int, default=None, help=t("cli.opt.serve.port"))
+    p.add_argument("--all", action="store_true", help=t("cli.opt.serve.all"))
     p.add_argument("--no-browser", dest="no_browser", action="store_true",
-                   help="не открывать браузер самому")
+                   help=t("cli.opt.serve.nobrowser"))
     p.add_argument("--parent", type=int, default=None,
-                   help="номер процесса, за которым сервер уходит; без него сторожа нет")
-    p.add_argument("--status", action="store_true", help="жив ли сервер на этом адресе")
-    p.add_argument("--stop", action="store_true", help="остановить поднятый сервер")
+                   help=t("cli.opt.serve.parent"))
+    p.add_argument("--status", action="store_true", help=t("cli.opt.serve.status"))
+    p.add_argument("--stop", action="store_true", help=t("cli.opt.serve.stop"))
     p.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     p.set_defaults(func=cmd_serve)
 

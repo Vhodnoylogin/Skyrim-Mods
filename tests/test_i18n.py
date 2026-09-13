@@ -21,9 +21,24 @@ from morphbench import i18n  # noqa: E402
 LOCALE = Path(i18n.__file__).resolve().parent.parent / "locale"
 
 
-def write(folder: Path, name: str, data: dict) -> None:
-    (folder / ("%s.json" % name)).write_text(json.dumps(data, ensure_ascii=False),
-                                             encoding="utf-8")
+def write(folder: Path, name: str, data: dict, section: str = "") -> None:
+    """Словарь языка: единым файлом либо файлом раздела внутри папки языка."""
+    if section:
+        (folder / name).mkdir(parents=True, exist_ok=True)
+        path = folder / name / ("%s.json" % section)
+    else:
+        path = folder / ("%s.json" % name)
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+
+def texts_of(language: str) -> dict:
+    """Все тексты одного языка из папки выпуска: файлы раздела слиты в один словарь."""
+    out = {}
+    for path in sorted((LOCALE / language).glob("*.json")):
+        for k, v in json.loads(path.read_text(encoding="utf-8-sig")).items():
+            if not k.startswith("#"):
+                out[k] = v
+    return out
 
 
 class TestCatalogue(unittest.TestCase):
@@ -86,18 +101,63 @@ class TestCatalogue(unittest.TestCase):
             self.assertEqual(cat.text("#"), "#")
 
 
+class TestFolders(unittest.TestCase):
+    """Язык - папка с произвольными файлами разделов: новый раздел кладут НОВЫМ файлом,
+    и ни один существующий при этом не переписывается."""
+
+    def test_sections_merge_into_one_language(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            write(folder, "en", {"cli.one": "one"}, section="cli")
+            write(folder, "en", {"page.two": "two"}, section="page")
+            cat = i18n.Catalogue("en", folder)
+            self.assertEqual(cat("cli.one"), "one")
+            self.assertEqual(cat("page.two"), "two")
+            # Добавить раздел - это положить ещё один файл, ничего не трогая.
+            write(folder, "en", {"page.three": "three"}, section="extra")
+            self.assertEqual(i18n.Catalogue("en", folder)("page.three"), "three")
+
+    def test_folder_language_falls_back_to_folder_base(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            write(folder, "en", {"a.one": "one", "a.two": "two"}, section="a")
+            write(folder, "xx", {"a.one": "один"}, section="a")
+            cat = i18n.Catalogue("xx", folder)
+            self.assertEqual(cat("a.one"), "один")
+            self.assertEqual(cat("a.two"), "two")
+
+    def test_one_key_in_two_files_is_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            write(folder, "en", {"a.one": "первый"}, section="one")
+            write(folder, "en", {"a.one": "второй"}, section="two")
+            cat = i18n.Catalogue("en", folder)
+            self.assertEqual(cat("a.one"), "первый")      # берётся первый по имени файла
+            self.assertIsNotNone(cat.problem)
+            self.assertIn("a.one", cat.problem)
+
+    def test_available_lists_folders(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            write(folder, "en", {"a.one": "one"}, section="a")
+            write(folder, "ru", {"a.one": "один"}, section="a")
+            write(folder, "de", {"a.one": "eins"})            # единым файлом - тоже язык
+            self.assertEqual(i18n.Catalogue("en", folder).available(), ["de", "en", "ru"])
+
+
 class TestShippedLocales(unittest.TestCase):
     """Словари, которые едут с верстаком."""
 
     def setUp(self):
-        self.langs = {p.stem: json.loads(p.read_text(encoding="utf-8-sig"))
-                      for p in LOCALE.glob("*.json")}
-        self.keys = {lang: {k for k in d if not k.startswith("#")}
-                     for lang, d in self.langs.items()}
+        self.langs = {p.name: texts_of(p.name) for p in LOCALE.iterdir() if p.is_dir()}
+        self.keys = {lang: set(d) for lang, d in self.langs.items()}
 
     def test_english_is_there_and_is_the_base(self):
         self.assertIn("en", self.langs)
         self.assertIn("ru", self.langs)
+        self.assertTrue(self.keys["en"], "в английском нет ни одного текста")
+        # Единых файлов рядом с папками быть не должно: раскладка одна, а не две.
+        self.assertEqual(sorted(p.name for p in LOCALE.glob("*.json")), [])
 
     def test_every_language_covers_the_same_keys(self):
         base = self.keys["en"]
@@ -125,7 +185,7 @@ class TestShippedLocales(unittest.TestCase):
         саму метку."""
         import re
         used = set()
-        call = re.compile(r'\bt\(\s*"([a-zA-Z][\w.]*)"')
+        call = re.compile(r'\bt\(\s*"([a-zA-Z][\w.]*\w)"')
         root = LOCALE.parent
         for folder in ("morphbench", "presenters", "."):
             for path in sorted((root / folder).glob("*.py")):
