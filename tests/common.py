@@ -14,9 +14,14 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
+
+# Проверки сверяются с текстами сообщений дословно, поэтому язык у них задан,
+# а не взят с машины: иначе набор проходил бы у одного и падал у другого.
+os.environ.setdefault("MORPHBENCH_LANG", "en")
 
 import numpy as np
 

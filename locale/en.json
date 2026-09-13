@@ -1,0 +1,26 @@
+{
+  "#": "Base language. Every key in use must have a text here: other languages fall back to it.",
+  "#keys": "A key is a latin label, never a sentence. Substitution is by name: %(name)s.",
+  "#adding": "To add a language: copy this file, translate the right-hand sides, keep the keys.",
+
+  "journal.badLevel": "unknown journal level %(level)r; known levels: %(known)s",
+  "journal.noStream": "there is no stream to write to",
+  "journal.sinkDown": "sink %(sink)s dropped out: %(error)s",
+  "journal.configProblem": "journal settings: %(problem)s",
+
+  "serve.parentGone": "the process that started the server (%(pid)d) is already gone",
+  "serve.leavingWithParent": "process %(pid)d, which started the server, has ended - leaving with it",
+  "serve.notMorphbench": "whatever answers at %(url)s, it is not morphbench",
+  "serve.noSuchPath": "no such path: %(path)s",
+  "serve.indexNotANumber": "index must be a whole number, not %(value)r",
+  "serve.portTaken": "port %(port)d is taken by another program; name a different one with --port",
+  "serve.portSilent": "something is at %(url)s but did not answer within %(seconds).0f s: if that is our server walking a large folder, try again later",
+  "catalog.rootNotSet": "no folder to browse: name one outside MO2, or set catalogRoot in the settings",
+  "serve.foreignServer": "the server at %(url)s was started outside MO2 and cannot see the build's meshes; close it and start again from inside MO2",
+  "serve.alreadyUp": "already up: %(url)s",
+  "serve.handedRoot": "browsing: %(root)s (%(meshes)d meshes)",
+  "serve.openMeshOnPage": "the server is already up at %(url)s: pick a mesh on the page, --nif does not apply here",
+
+  "config.pyniflyMissing": "PyNifly add-on not found; name its folder with the pynifly key in %(config)s",
+  "config.pyniflyBadPath": "the pynifly path in morphbench.json does not exist: %(path)s"
+}

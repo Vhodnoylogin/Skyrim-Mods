@@ -255,7 +255,7 @@ class TestDeadJournal(unittest.TestCase):
             self.assertFalse(dead.alive)
             lines = "\n".join(kept.lines)
             self.assertIn("/api/catalog", lines)
-            self.assertIn("выбыл", lines)
+            self.assertIn("dropped out", lines)
 
 
 @unittest.skipIf(WebServer is None, "нет presenters/serve.py")
