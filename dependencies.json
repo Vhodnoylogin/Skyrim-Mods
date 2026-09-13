@@ -1,0 +1,66 @@
+{
+  "note": [
+    "Чужое, без чего верстак не работает. Файл правится человеком: это ЗАЯВЛЕНИЕ о зависимостях,",
+    "а не их копия. Искать их за человека умеет install.py рядом; он же вписывает найденные пути",
+    "в morphbench.json. Свои разборщики чужих форматов верстак не пишет намеренно - отсюда PyNifly.",
+    "",
+    "Поля записи:",
+    "  name      как называется, для человека",
+    "  kind      runtime | python-package | folder - чем проверять наличие",
+    "  why       зачем это верстаку; без этого поля запись добавлять нельзя",
+    "  required  false - без неё работает всё, кроме названного в why",
+    "  setting   ключ morphbench.json, куда install.py вписывает найденный путь (для folder)",
+    "  proof     файлы внутри папки, по которым она опознаётся - чтобы не принять чужую",
+    "  search    где искать; * подставляется как в именах файлов, %ПЕРЕМЕННАЯ% берётся из окружения",
+    "  bundled   путь внутри пакета, если зависимость положена внутрь: тогда её не ищут",
+    "  license   под чем распространяется - от этого зависит, можно ли класть внутрь"
+  ],
+  "dependencies": [
+    {
+      "name": "Python",
+      "kind": "runtime",
+      "why": "на нём написан весь верстак",
+      "required": true,
+      "minimum": "3.12",
+      "get": "https://www.python.org/downloads/",
+      "license": "PSF-2.0"
+    },
+    {
+      "name": "numpy",
+      "kind": "python-package",
+      "import": "numpy",
+      "why": "вся арифметика по вершинам: морфы, растяжение, охваты, капсулы",
+      "required": true,
+      "install": "pip install numpy",
+      "license": "BSD-3-Clause"
+    },
+    {
+      "name": "pillow",
+      "kind": "python-package",
+      "import": "PIL",
+      "why": "запись кадров в PNG (render, sheet); без неё работает всё остальное, включая страницу",
+      "required": false,
+      "install": "pip install pillow",
+      "license": "MIT-CMU"
+    },
+    {
+      "name": "PyNifly",
+      "kind": "folder",
+      "why": "чтение и запись NIF и файлов морфов TRI/TRIP; своих разборщиков этих форматов у верстака нет и быть не должно - иначе появится второе прочтение формата, способное разойтись с первым",
+      "required": true,
+      "setting": "pynifly",
+      "proof": ["pyn/pynifly.py", "NiflyDLL.dll", "tri/trifile.py"],
+      "search": [
+        "%APPDATA%/Blender Foundation/Blender/*/scripts/addons/io_scene_nifly",
+        "%APPDATA%/Blender Foundation/Blender/*/extensions/*/io_scene_nifly",
+        "%LOCALAPPDATA%/Blender Foundation/Blender/*/scripts/addons/io_scene_nifly",
+        "%USERPROFILE%/Documents/PyNifly/io_scene_nifly",
+        "./vendor/io_scene_nifly",
+        "./io_scene_nifly"
+      ],
+      "get": "https://www.nexusmods.com/skyrimspecialedition/mods/70441",
+      "license": "GPL-3.0",
+      "remark": "Сам Blender НЕ нужен: верстак не обращается к bpy, ему нужна только папка аддона. Обычно она и лежит среди аддонов Blender - оттуда и поиск."
+    }
+  ]
+}

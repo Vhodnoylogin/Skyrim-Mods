@@ -46,6 +46,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
+from morphbench.environment import process_alive, wait_process
 from morphbench.journal import Journal, from_config
 
 from .web import WebPage
@@ -166,6 +167,7 @@ class WebServer:
         self.httpd.daemon_threads = True
         self.port = int(self.httpd.server_address[1])
         self._thread: threading.Thread | None = None
+        self._watcher: threading.Thread | None = None
 
     @property
     def url(self) -> str:
@@ -197,6 +199,38 @@ class WebServer:
             self._thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
             self._thread.start()
         return self
+
+    def watch_parent(self, pid: int) -> None:
+        """Уйти вместе с тем, кто поднял.
+
+        Сервер живёт в отдельном процессе, и окно запуска, снятое мирно, останавливает его
+        само. Снятое ЖЁСТКО (аварийное завершение, «Снять задачу», выход из системы) -
+        не успевает, и остаётся невидимый процесс: он держит порт, продолжает читать файлы
+        сквозь подмену MO2, которая для него уже устарела, а MO2 его больше не считает
+        запущенной программой. Хуже того, точка входа идемпотентна, и следующий запуск
+        молча подключится именно к нему. Поэтому сервер ждёт своего родителя сам.
+
+        Сторож необязателен: без номера процесса его нет и поведение прежнее - сервер,
+        поднятый из консоли, ничьей смерти не ждёт.
+        """
+        pid = int(pid)
+        if pid <= 0:
+            return
+        if not process_alive(pid):
+            self.journal.warn("тот, кто поднял сервер (процесс %d), уже не жив" % pid)
+            return
+
+        def watch() -> None:
+            wait_process(pid)
+            self.journal.warn("процесс %d, поднявший сервер, завершился - ухожу за ним" % pid)
+            self.httpd.shutdown()
+            # Порт отпускается здесь же. Одной остановки цикла мало: слушающее гнездо
+            # осталось бы открытым, и сервер стал бы чёрной дырой - соединение
+            # принимается, ответа нет, а клиент ждёт до своего предела.
+            self.close()
+
+        self._watcher = threading.Thread(target=watch, daemon=True, name="parent-watch")
+        self._watcher.start()
 
     def stop(self) -> None:
         if self._thread is not None:

@@ -22,6 +22,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.Globalization;
 using System.IO;
 using System.Net;
 using System.Text;
@@ -354,6 +355,11 @@ class Launcher
     {
         if (Owns) return;
         string args = Module.Quote(Path.Combine(Home, Module.Script)) + " serve --no-browser --json";
+        // Сервер уходит вместе с этим окном САМ. Мирное закрытие останавливает его и так,
+        // но снятое жёстко окно на это времени не имеет, и без сторожа оставался бы
+        // невидимый сервер: порт занят, подмена MO2 для него устарела, а следующий запуск
+        // молча подключился бы именно к нему.
+        args += " --parent " + Process.GetCurrentProcess().Id.ToString(CultureInfo.InvariantCulture);
         if (!string.IsNullOrEmpty(root)) args += " --root " + Module.Quote(root);
         var start = new ProcessStartInfo(Python, args)
         {
