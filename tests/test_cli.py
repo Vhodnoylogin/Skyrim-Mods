@@ -148,7 +148,7 @@ class TestServeStatusAndStop(unittest.TestCase):
                         code = mb.main(["serve", "--no-browser", "--port", str(server.port),
                                         "--root", str(Path(self.tmp.name) / "nowhere")])
                 self.assertEqual(code, 2)
-                self.assertIn("нет папки", err.getvalue())
+                self.assertIn("no folder to browse", err.getvalue())
                 stopped = json.loads(run(["serve", "--stop", "--port", str(server.port), "--json"],
                                          self.cfg))
                 self.assertEqual(stopped, {"stopping": True, "url": server.url})

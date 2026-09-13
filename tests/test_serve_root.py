@@ -73,8 +73,8 @@ class TestRootlessServer(unittest.TestCase):
         self.assertIn("не задан", repr(self.server))
         self.assertEqual(self.json("/api/root"), {"root": None, "meshes": None})
         self.assertIsNone(self.json("/api/environment")["root"])
-        self.assertIn("корень обзора не задан", self.json("/api/catalog", 400)["error"])
-        self.assertIn("корень обзора не задан", self.json("/api/payload?index=0", 400)["error"])
+        self.assertIn("no browse root", self.json("/api/catalog", 400)["error"])
+        self.assertIn("no browse root", self.json("/api/payload?index=0", 400)["error"])
         code, ctype, body = get(self.base + "/")
         self.assertEqual(code, 200)
         self.assertIn(b"<canvas", body)
@@ -89,7 +89,7 @@ class TestRootlessServer(unittest.TestCase):
         with self.assertRaises(RequestError) as ctx:
             self.link.set_root(str(self.root / "nowhere"))
         self.assertEqual(ctx.exception.status, 404)
-        self.assertIn("нет папки", ctx.exception.message)
+        self.assertIn("no folder to browse", ctx.exception.message)
         self.assertEqual(self.json("/api/root")["root"], self.server.root and str(self.server.root))
 
     def test_03b_probe_does_not_wait_for_the_facade_lock(self):

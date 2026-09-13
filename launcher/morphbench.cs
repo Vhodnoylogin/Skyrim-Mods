@@ -25,6 +25,7 @@ using System.Drawing;
 using System.Globalization;
 using System.IO;
 using System.Net;
+using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -501,6 +502,19 @@ class MainForm : Form
     {
         this.options = options;
         Text = "morphbench";
+        // Значок заголовка задаётся явно: /win32icon даёт значок ФАЙЛУ (проводник, панель
+        // задач), а окно WinForms без этого рисует свой стандартный. Берётся тот же .ico,
+        // вложенный ресурсом, - в нём все размеры, и Windows выбирает 16 точек для
+        // заголовка сама, вместо того чтобы мельчить большой.
+        try
+        {
+            using (var s = Assembly.GetExecutingAssembly().GetManifestResourceStream("morphbench.ico"))
+                if (s != null) Icon = new Icon(s);
+        }
+        catch (Exception) { }
+        if (Icon == null)
+            try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); }
+            catch (Exception) { }
         Font = new Font("Segoe UI", 9f);
         // Размеры заданы для 96 dpi и умножаются на масштаб экрана сами: шрифты и кнопки
         // WinForms масштабирует по dpi, а размер окна - нет.

@@ -255,7 +255,7 @@ class WebServer:
     def _root_required(self, query: Query) -> str:
         root = self._root_of(query)
         if root is None:
-            raise RequestError(400, "корень обзора не задан: назовите папку ключом root=")
+            raise RequestError(400, t("serve.rootNotGiven"))
         return root
 
     def api_environment(self) -> dict:
@@ -276,7 +276,7 @@ class WebServer:
             if key is not None:
                 self.bench.open_entry(key, self._root_required(query), not query.flag("all"))
             if not self.bench.is_open():
-                raise RequestError(400, "меш не открыт: назовите его ключом name= или index=")
+                raise RequestError(400, t("serve.meshNotOpen"))
             return WebPage(self.bench).payload()
 
     def api_root(self, query: Query) -> dict:

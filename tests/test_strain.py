@@ -476,7 +476,7 @@ class TestCommandLine(unittest.TestCase):
         self.assertIn("NAME=NUMBER", err)
         code, _, err = self.cli(["strain", "x.nif", "--slider", "Nope=1"], self.fresh())
         self.assertEqual(code, 2)
-        self.assertIn("нет ползунка", err)
+        self.assertIn("no slider", err)
 
     def test_pairs(self):
         rows = self.run_json(["strain", "x.nif", "--pairs", "--top", "1", "--json"], self.fresh())
