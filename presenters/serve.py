@@ -36,7 +36,6 @@ from __future__ import annotations
 
 import json
 import socket
-import sys
 import threading
 import urllib.error
 import urllib.parse
@@ -46,6 +45,8 @@ from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
+
+from morphbench.journal import Journal, from_config
 
 from .web import WebPage
 
@@ -144,9 +145,13 @@ class WebServer:
     для порта 0, который выбирает система.
     """
 
-    def __init__(self, bench, root=None, host=None, port=None, with_morphs: bool = True):
+    def __init__(self, bench, root=None, host=None, port=None, with_morphs: bool = True,
+                 journal: Journal | None = None):
         self.bench = bench
         self.cfg = bench.cfg
+        # Журнал заводится по настройкам: труба к тому, кто запустил, и файл рядом.
+        # Свой передают проверки и слои, которым журнал нужен в руках.
+        self.journal = journal if journal is not None else from_config(self.cfg, "serve")
         self.with_morphs = bool(with_morphs)
         self.host = str(host or self.cfg["serveHost"])
         self.lock = threading.Lock()
@@ -202,6 +207,7 @@ class WebServer:
 
     def close(self) -> None:
         self.httpd.server_close()
+        self.journal.close()
 
     # ---- ответы: каждый - вызовы фасада под замком ------------------------------------
     def _root_of(self, query: Query) -> str | None:
@@ -433,14 +439,33 @@ class _Handler(BaseHTTPRequestHandler):
         except Exception as e:  # noqa: BLE001 - любой отказ уходит клиенту кодом и текстом
             self._send_json({"error": _message(e)}, _status_of(e))
 
-    def log_message(self, fmt, *args) -> None:
-        """Строка журнала без падения на консоли, которой чужд UTF-8. Опрос состояния
-        (окно спрашивает его каждые несколько секунд) в журнал не пишется - иначе он
-        заслонил бы собой всё остальное."""
-        if args and any(p in str(args[0]) for p in ("/api/environment", "/api/root ")):
-            return
-        line = "%s - %s\n" % (self.address_string(), fmt % args)
+    # ---- журнал -----------------------------------------------------------------------
+    def _quiet(self) -> bool:
+        """Опрос состояния: тот, кто сервер запустил, спрашивает его на каждое обновление,
+        и в окне опрос заслонил бы собой всё остальное. Поэтому он пишется уровнем ниже,
+        а не выбрасывается: в файле журнала он остаётся, там он и нужен. Передача корня
+        (`/api/root?root=...`) - событие, а не опрос, и идёт обычным уровнем."""
+        # Разбор мог не дойти до пути (кривая первая строка запроса) - тогда это не опрос.
+        url = urlsplit(getattr(self, "path", "") or "")
+        if url.path in ("/api/environment", "/favicon.ico"):
+            return True
+        return url.path == "/api/root" and "root=" not in url.query
+
+    def _write(self, level, text: str) -> None:
+        """Запись через журнал владельца. Журнал не бросает, но и путь до него не должен:
+        обращение идёт из отправки ответа, до заголовков, и любой отказ здесь оборвал бы
+        клиенту связь без единого слова - ровно тот дефект, ради которого журнал и завели."""
         try:
-            sys.stderr.write(line)
-        except UnicodeEncodeError:
-            sys.stderr.write(line.encode("ascii", "replace").decode("ascii"))
+            self.owner.journal.log(level, "%s - %s" % (self.address_string(), text))
+        except Exception:                    # noqa: BLE001 - журнал ответу не хозяин
+            pass
+
+    def log_request(self, code="-", size="-") -> None:
+        self._write("debug" if self._quiet() else "info",
+                    '"%s" %s %s' % (getattr(self, "requestline", "-"), code, size))
+
+    def log_error(self, fmt, *args) -> None:
+        self._write("error", fmt % args)
+
+    def log_message(self, fmt, *args) -> None:
+        self._write("info", fmt % args)
