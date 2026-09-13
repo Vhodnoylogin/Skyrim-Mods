@@ -1,81 +1,101 @@
 # Envoy Framework
 
-Мост между Skyrim и внешними моделями. Микрофоном и голосом владеет одна часть на всю
-игру; моды подписываются на её результат вместо того, чтобы поднимать собственный движок.
+A bridge between Skyrim and outside models. The microphone and the voice are owned by one part
+for the whole game; mods subscribe to its result instead of raising an engine of their own.
 
-Четыре канала:
+Four channels:
 
-| Канал | Что делает | Форма взаимодействия |
+| Channel | What it does | Shape of the exchange |
 |---|---|---|
-| `Listen` | распознанная речь игрока приходит в игру | поток, темы, аукцион |
-| `Speak`  | игра просит озвучить реплику | очередь с приоритетом и прерыванием |
-| `Ask`    | игра задаёт вопрос модели | запрос-ответ |
-| `State`  | реестр состояния мира | публикация и опрос |
+| `Listen` | the recognised speech of the player arrives in the game | a stream, topics, an auction |
+| `Speak`  | the game asks for a line to be spoken | a queue with priority and interruption |
+| `Ask`    | the game puts a question to a model | request and answer |
+| `State`  | the register of the state of the world | publishing and polling |
 
-Первый срез реализует только `Listen` и `State` в объёме ядра. Остальное добавляется,
-не трогая написанное.
+The first cut implements only `Listen` and `State`, to the extent of the core. The rest is added
+without touching what is written.
 
-## Три части, и каждая ставится отдельно
+## Three parts, and each is installed on its own
 
-Envoy — это **один мод и одна ветка** git, но внутри три самостоятельные части. У каждой
-своя сборка, свои скрипты раскладки, свой мод в сборке MO2 и своё описание. Человек
-ставит столько, сколько ему нужно.
+Envoy is **one mod and one git branch**, but inside it there are three parts that stand alone.
+Each has its own build, its own lay-out scripts, its own mod in the MO2 build and its own
+description. A person installs as many of them as they need.
 
-| Часть | Папка | Мод в сборке | Описание |
+| Part | Folder | Mod in the build | Description |
 |---|---|---|---|
-| **Envoy** — мост | `bridge\` | `Envoy Framework` | [bridge/README.md](bridge/README.md) |
-| **EnvoyVoiceAdapter** — микрофон и модели | `adapter-voice\` | `Envoy Framework - Voice Adapter` | [adapter-voice/README.md](adapter-voice/README.md) |
-| **мод-модель** — одна конкретная модель | `model-whisper-ru\` | `Envoy Framework - Voice Model - Whisper RU` | [model-whisper-ru/README.md](model-whisper-ru/README.md) |
+| **Envoy** - the bridge | `bridge\` | `Envoy Framework` | [bridge/README.md](bridge/README.md) |
+| **EnvoyVoiceAdapter** - the microphone and the models | `adapter-voice\` | `Envoy Framework - Voice Adapter` | [adapter-voice/README.md](adapter-voice/README.md) |
+| **a model mod** - one particular model | `model-whisper-ru\` | `Envoy Framework - Voice Model - Whisper RU` | [model-whisper-ru/README.md](model-whisper-ru/README.md) |
 
-Рядом лежит `subscribers\demo\` — трое тестовых подписчиков. Это не часть поставки,
-а проверка: на них видно, как мост решает спор между модами. В рабочие профили они не нужны.
+Next to them lies `subscribers\demo\` - three test subscribers. That is not part of the delivery
+but a check: on them it shows how the bridge settles an argument between mods. They are not
+wanted in the working profiles.
 
-### Зачем разделено именно так
+### Why it is divided exactly like this
 
-Разделение проведено по одному признаку: **что меняется независимо**.
+The division follows one mark: **what changes independently**.
 
-- **Мост** не знает ни о микрофоне, ни о моделях, ни о HTTP. Он раздаёт реплики подписчикам
-  и разбирает споры между ними. Его можно заменить целиком, не трогая остального.
-- **Адаптер** владеет микрофоном. Захват звука, тишина и границы фраз - его дело, и делает
-  это его собственная служба, которая едет внутри его же мода и поднимается сама. Внутрь
-  игры адаптер говорит вызовом функции через контракт моста. Ни одной модели по имени
-  он не знает.
-- **Мод-модель** не содержит кода вообще и программой не является. Это файлы модели и листок
-  рядом с ними: как её зовут, что она умеет, где лежат её веса. Звук ей даёт служба адаптера.
+- **The bridge** knows nothing about the microphone, the models or HTTP. It deals utterances out
+  to the subscribers and settles the arguments between them. It can be replaced whole without
+  touching anything else.
+- **The adapter** owns the microphone. Capturing the sound, the silence and the boundaries of
+  phrases are its business, and it is done by its own service, which rides inside its own mod and
+  comes up by itself. Into the game the adapter speaks by calling a function through the contract
+  of the bridge. It knows not a single model by name.
+- **A model mod** holds no code at all and is not a program. It is the files of a model and a
+  listing next to them: what the model is called, what it can do, where its weights lie. The
+  sound is given to it by the service of the adapter.
 
-Отсюда два свойства сразу. **Игроку нечего запускать руками** — он ставит адаптер как
-обычный мод, и служба поднимается сама. И **смена модели не требует ни новой сборки,
-ни правки настроек**: человек ставит другой мод, а микрофон остаётся один на всех.
+Two properties follow at once. **A player has nothing to start by hand** - they install the
+adapter like any other mod, and the service comes up on its own. And **changing the model needs
+neither a new build nor an edit to the settings**: a person installs a different mod, while the
+microphone stays one for everybody.
 
-## Что кого требует
+## Text on screen
 
-    мод-модель  ->  требует адаптер
-    адаптер     ->  требует мост
-    подписчик   ->  требует мост
+Everything a player can read is a key, and the lines behind the keys live in Skyrim's own
+translation files - `Interface\Translations\Envoy*_<language>.txt`. English is the source
+language and ships inside the mod; every other language is a mod of its own with a single folder
+in it, so adding a language means adding a mod.
 
-Общий у всех один **контракт**, и между частями он не копируется. Мост кладёт его папкой
-`SDK\` внутрь собственного мода: заголовок C-ABI для адаптеров и объявления Papyrus для
-слушателей. Адаптер и подписчик собираются против **установленного мода моста**, а не против
-соседней папки в репозитории — ровно так же, как это сделает любой чужой мод. Поэтому их
-сборка и отказывается идти, пока мост не выложен: это проверка, а не неудобство.
+The log is deliberately left out of this and stays English. Its lines travel into other people's
+bug reports, and a log in a language the author cannot read is a log nobody can answer.
 
-Контракт мод-модели — свой, и публикует его адаптер:
+The tables are written as UTF-8 in `localization/` of each module and turned into what the game
+reads by `bridge/tools/build-localization.py`, which the bridge publishes in its SDK for exactly
+this reason.
+
+## What needs what
+
+    a model mod  ->  needs the adapter
+    the adapter  ->  needs the bridge
+    a subscriber ->  needs the bridge
+
+They all share one **contract**, and it is not copied between the parts. The bridge puts it into
+the `Envoy Framework - SDK` package, which is laid out next to the mod: the C ABI header for
+adapters and the Papyrus declarations for listeners. The adapter and the subscriber build against
+the **installed SDK** rather than against a neighbouring folder in the repository - exactly as any
+other mod will. That is why their build refuses to run until the bridge is laid out: it is a
+check, not an inconvenience.
+
+The contract of a model mod is its own, and it is published by the adapter:
 [adapter-voice/contract/envoy-voice-model.md](adapter-voice/contract/envoy-voice-model.md).
 
-## Принципы
+## Principles
 
-- **Ни одной константы в коде.** Всё настраиваемое живёт в файле настроек рядом с модулем,
-  а встроенный набор значений создаёт этот файл при первом запуске.
-- **Никакой привязки к редакции игры.** Признак — не «это VR», а «есть ли поставщик ключа».
-  Поле без поставщика отвечает «неизвестно», а не подставляет ложь.
-- **Ключ описывает вопрос, а не способ ответа.** `core.target.looked`, а не «перекрестье».
-- **Детерминизм.** Ни один спор не решается порядком пробуждения скриптов.
-- **Ядро не знает платформы.** Связь с SKSE — отдельный слой поверх, и это держится сборкой:
-  цель `envoy-host` собирает ядро без CommonLibSSE.
+- **Not one constant in the code.** Everything configurable lives in a settings file next to the
+  module, and the built-in set of values creates that file on the first launch.
+- **No tie to an edition of the game.** The mark is not "this is VR" but "is there a provider for
+  the key". A field with no provider answers "unknown" rather than making something up.
+- **A key describes the question, not the way it is answered.** `core.target.looked`, not "the
+  crosshair".
+- **Determinism.** Not one argument is settled by the order in which scripts woke up.
+- **The core knows no platform.** The link to SKSE is a layer of its own on top, and that rests on
+  the build: the `envoy-host` target builds the core without CommonLibSSE.
 
-## Порядок сборки
+## The order of building
 
-Мост — **первым**, всегда: пока его `SDK\` не появился в `mods\`, остальные не соберутся.
+The bridge comes **first**, always: until its SDK appears in `mods\`, the rest will not build.
 
 ```
 cd bridge         && cmake --build build --config Release && tools\build-papyrus.ps1 && tools\deploy.ps1 -Apply
@@ -83,15 +103,16 @@ cd adapter-voice  && cmake --build build --config Release && tools\deploy.ps1 -A
 cd model-whisper-ru                                       && tools\deploy.ps1 -Apply
 ```
 
-Раскладку и упаковку запускать только при закрытой игре.
+Lay out and pack only with the game closed.
 
-## Где что искать
+## Where to look for what
 
-| Вопрос | Куда смотреть |
+| Question | Where to look |
 |---|---|
-| как устроен аукцион, темы, придержание | [bridge/README.md](bridge/README.md) |
-| как проверить мост без игры | [bridge/README.md](bridge/README.md), цель `envoy-host` |
-| как написать свой адаптер | `SDK\envoy-adapter.h` в моде моста |
-| как подписаться из мода на Papyrus | `SDK\Envoy.psc`, `SDK\envoy-papyrus.md` |
-| как добавить свою модель | [adapter-voice/contract/envoy-voice-model.md](adapter-voice/contract/envoy-voice-model.md) |
-| как устроена мод-модель изнутри | [model-whisper-ru/README.md](model-whisper-ru/README.md) |
+| how the auction, the topics and holding work | [bridge/README.md](bridge/README.md) |
+| how to check the bridge without the game | [bridge/README.md](bridge/README.md), the `envoy-host` target |
+| how to write an adapter of your own | `cpp\envoy-adapter.h` in the SDK package |
+| how to subscribe from a mod in Papyrus | `papyrus\Envoy.psc`, `docs\envoy-papyrus.md` in the SDK package |
+| how to add a model of your own | [adapter-voice/contract/envoy-voice-model.md](adapter-voice/contract/envoy-voice-model.md) |
+| how a model mod is built inside | [model-whisper-ru/README.md](model-whisper-ru/README.md) |
+| how to translate the text into another language | `localization\` of the module, and the section above |
