@@ -5,12 +5,10 @@
 
 ## Что нужно
 
-    python install.py            что найдено, чего нет и что с этим делать
-    python install.py --apply    вписать найденные пути в morphbench.json
-    python install.py --pip      доставить недостающие пакеты python
+    python release.py --version X   собрать выпуск (в репозитории, не в архиве)
 
-Скрипт ищет всё нужное сам и говорит по каждой недостающей вещи, где её взять; заявлено оно
-в `dependencies.json` рядом. Ниже — тот же список словами.
+Пользователю выпуска ставить нечего: всё внутри архива. Ниже - то, что нужно для работы
+С ИСХОДНИКАМИ, из рабочей копии; состав выпуска заявлен в `dependencies.json`.
 
 - Python 3.12 с пакетами `numpy` и `pillow` (без `pillow` нет растеризатора PNG).
 - Аддон **PyNifly** в каталоге аддонов Blender: `%APPDATA%\Blender Foundation\Blender\<версия>\scripts\addons\io_scene_nifly`.

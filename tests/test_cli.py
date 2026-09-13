@@ -95,7 +95,7 @@ class TestEnvAndCatalog(unittest.TestCase):
                 with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
                     code = mb.main(["catalog", "--json"])
             self.assertEqual(code, 2)
-            self.assertIn("корень обзора не задан", err.getvalue())
+            self.assertIn("no folder to browse", err.getvalue())
             cfg = common.config(self.tmp.name, catalogRoot=str(self.root))
             rows = json.loads(run(["catalog", "--json"], cfg))
             self.assertEqual([r["name"] for r in rows], WITH_MORPHS)

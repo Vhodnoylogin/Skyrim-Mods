@@ -90,14 +90,14 @@ class TestSinkFailure(unittest.TestCase):
         # Живой получил обе записи плюс известие о выбывшем приёмнике.
         self.assertIn("первая", "\n".join(alive.lines))
         self.assertIn("вторая", "\n".join(alive.lines))
-        self.assertTrue(any("выбыл" in line for line in alive.lines), alive.lines)
+        self.assertTrue(any("dropped out" in line for line in alive.lines), alive.lines)
 
     def test_failure_is_reported_once(self):
         dead, alive = StreamSink(DeadStream(), "debug"), ListSink("debug")
         j = Journal([dead, alive])
         for _ in range(5):
             j.info("строка")
-        self.assertEqual(sum("выбыл" in line for line in alive.lines), 1, alive.lines)
+        self.assertEqual(sum("dropped out" in line for line in alive.lines), 1, alive.lines)
 
     def test_log_never_raises(self):
         # Ни с одним живым приёмником, ни вовсе без приёмников.

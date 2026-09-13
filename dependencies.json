@@ -1,19 +1,25 @@
 {
   "note": [
     "Чужое, без чего верстак не работает. Файл правится человеком: это ЗАЯВЛЕНИЕ о зависимостях,",
-    "а не их копия. Искать их за человека умеет install.py рядом; он же вписывает найденные пути",
-    "в morphbench.json. Свои разборщики чужих форматов верстак не пишет намеренно - отсюда PyNifly.",
+    "а не их копия. По нему release.py собирает выпуск, и по нему же пишется THIRD-PARTY.md -",
+    "перечень чужого внутри пакета с лицензиями, который GPL-3 обязывает показывать.",
+    "",
+    "Выпуск самодостаточен: всё, что можно положить внутрь, лежит внутри. Скачивать отдельно",
+    "пользователю нечего. Зависимость, которую положить нельзя, помечается bundle: false,",
+    "и тогда в описании обязано быть сказано, где её взять.",
     "",
     "Поля записи:",
     "  name      как называется, для человека",
-    "  kind      runtime | python-package | folder - чем проверять наличие",
+    "  kind      runtime | python-package | folder - чем оно является",
     "  why       зачем это верстаку; без этого поля запись добавлять нельзя",
     "  required  false - без неё работает всё, кроме названного в why",
-    "  setting   ключ morphbench.json, куда install.py вписывает найденный путь (для folder)",
-    "  proof     файлы внутри папки, по которым она опознаётся - чтобы не принять чужую",
-    "  search    где искать; * подставляется как в именах файлов, %ПЕРЕМЕННАЯ% берётся из окружения",
-    "  bundled   путь внутри пакета, если зависимость положена внутрь: тогда её не ищут",
-    "  license   под чем распространяется - от этого зависит, можно ли класть внутрь"
+    "  bundle    кладём ли внутрь выпуска; решает ЛИЦЕНЗИЯ, а не удобство",
+    "  into      куда внутри пакета ложится",
+    "  setting   ключ morphbench.json, которым путь задаётся вручную, если что-то не так",
+    "  proof     файлы внутри папки, по которым она опознаётся - чтобы не взять чужую",
+    "  search    где искать её на машине сборщика; * как в именах файлов, %ПЕРЕМЕННАЯ% из окружения",
+    "  source    откуда взята и где лежат её исходники - этого требует GPL при раздаче двоичного",
+    "  license   под чем распространяется"
   ],
   "dependencies": [
     {
@@ -22,7 +28,10 @@
       "why": "на нём написан весь верстак",
       "required": true,
       "minimum": "3.12",
-      "get": "https://www.python.org/downloads/",
+      "bundle": true,
+      "into": "python",
+      "embeddable": "https://www.python.org/ftp/python/%(version)s/python-%(version)s-embed-amd64.zip",
+      "source": "https://www.python.org/downloads/source/",
       "license": "PSF-2.0"
     },
     {
@@ -31,7 +40,9 @@
       "import": "numpy",
       "why": "вся арифметика по вершинам: морфы, растяжение, охваты, капсулы",
       "required": true,
-      "install": "pip install numpy",
+      "bundle": true,
+      "into": "vendor",
+      "source": "https://github.com/numpy/numpy",
       "license": "BSD-3-Clause"
     },
     {
@@ -40,7 +51,9 @@
       "import": "PIL",
       "why": "запись кадров в PNG (render, sheet); без неё работает всё остальное, включая страницу",
       "required": false,
-      "install": "pip install pillow",
+      "bundle": true,
+      "into": "vendor",
+      "source": "https://github.com/python-pillow/Pillow",
       "license": "MIT-CMU"
     },
     {
@@ -48,19 +61,26 @@
       "kind": "folder",
       "why": "чтение и запись NIF и файлов морфов TRI/TRIP; своих разборщиков этих форматов у верстака нет и быть не должно - иначе появится второе прочтение формата, способное разойтись с первым",
       "required": true,
+      "bundle": true,
+      "into": "vendor/io_scene_nifly",
       "setting": "pynifly",
       "proof": ["pyn/pynifly.py", "NiflyDLL.dll", "tri/trifile.py"],
       "search": [
         "%APPDATA%/Blender Foundation/Blender/*/scripts/addons/io_scene_nifly",
         "%APPDATA%/Blender Foundation/Blender/*/extensions/*/io_scene_nifly",
         "%LOCALAPPDATA%/Blender Foundation/Blender/*/scripts/addons/io_scene_nifly",
-        "%USERPROFILE%/Documents/PyNifly/io_scene_nifly",
-        "./vendor/io_scene_nifly",
-        "./io_scene_nifly"
+        "./vendor/io_scene_nifly"
       ],
-      "get": "https://www.nexusmods.com/skyrimspecialedition/mods/70441",
+      "source": "https://github.com/BadDogSkyrim/PyNifly",
       "license": "GPL-3.0",
-      "remark": "Сам Blender НЕ нужен: верстак не обращается к bpy, ему нужна только папка аддона. Обычно она и лежит среди аддонов Blender - оттуда и поиск."
+      "remark": [
+        "Сам Blender НЕ нужен: верстак не обращается к bpy, ему нужна только папка аддона.",
+        "Обычно она лежит среди аддонов Blender - оттуда и поиск при сборке.",
+        "Внутрь пакета кладётся законно: лицензии совпадают. NiflyDLL.dll двоичный, поэтому",
+        "GPL требует называть, откуда взяты его исходники, - см. source и THIRD-PARTY.md.",
+        "Страницы на Nexus для Skyrim у аддона нет; дом - GitHub, есть ещё страница в разделе",
+        "Fallout 4: https://www.nexusmods.com/fallout4/mods/52319"
+      ]
     }
   ]
 }

@@ -47,6 +47,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from morphbench.environment import process_alive, wait_process
+from morphbench.i18n import t
 from morphbench.journal import Journal, from_config
 
 from .web import WebPage
@@ -124,7 +125,7 @@ class Query:
             try:
                 return int(index)
             except ValueError:
-                raise RequestError(400, "index должен быть целым числом, а не %r" % index)
+                raise RequestError(400, t("serve.indexNotANumber", value=index))
         return self.get("name")
 
 
@@ -217,12 +218,12 @@ class WebServer:
         if pid <= 0:
             return
         if not process_alive(pid):
-            self.journal.warn("тот, кто поднял сервер (процесс %d), уже не жив" % pid)
+            self.journal.warn(t("serve.parentGone", pid=pid))
             return
 
         def watch() -> None:
             wait_process(pid)
-            self.journal.warn("процесс %d, поднявший сервер, завершился - ухожу за ним" % pid)
+            self.journal.warn(t("serve.leavingWithParent", pid=pid))
             self.httpd.shutdown()
             # Порт отпускается здесь же. Одной остановки цикла мало: слушающее гнездо
             # осталось бы открытым, и сервер стал бы чёрной дырой - соединение
@@ -353,7 +354,7 @@ class ServerLink:
     def _get(self, path: str) -> dict:
         with self._opener.open(self.url.rstrip("/") + path, timeout=self.timeout) as r:
             if not str(r.headers.get("Server", "")).startswith(SERVER_NAME):
-                raise RequestError(502, "на %s отвечает не morphbench" % self.url)
+                raise RequestError(502, t("serve.notMorphbench", url=self.url))
             return json.loads(r.read().decode("utf-8"))
 
     def probe(self) -> str:
@@ -469,7 +470,7 @@ class _Handler(BaseHTTPRequestHandler):
                 self.send_response(204)
                 self.end_headers()
             else:
-                raise RequestError(404, "нет такого пути: %s" % url.path)
+                raise RequestError(404, t("serve.noSuchPath", path=url.path))
         except Exception as e:  # noqa: BLE001 - любой отказ уходит клиенту кодом и текстом
             self._send_json({"error": _message(e)}, _status_of(e))
 

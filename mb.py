@@ -64,6 +64,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import errno                                  # noqa: E402
 
 from morphbench import MorphBench            # noqa: E402
+from morphbench.i18n import t              # noqa: E402
 from presenters import ppb, text             # noqa: E402
 
 # Отказы фасада, которые командная строка показывает одной строкой, а не трассировкой.
@@ -509,11 +510,9 @@ def cmd_serve(args) -> int:
         return _serve_stop(link, args)
     state = link.probe()
     if state == "busy":
-        raise ValueError("порт %d занят другой программой; назовите другой ключом --port"
-                         % link.port)
+        raise ValueError(t("serve.portTaken", port=link.port))
     if state == "slow":
-        raise ValueError("на %s кто-то есть, но за %.0f с не ответил: если это наш сервер "
-                         "за обходом большой папки - повторите позже" % (link.url, link.timeout))
+        raise ValueError(t("serve.portSilent", url=link.url, seconds=link.timeout))
     if state == "ours":
         return _hand_over(bench, link, args)
     try:
@@ -522,7 +521,7 @@ def cmd_serve(args) -> int:
     except OSError as e:
         # Порт заняли между опросом и подъёмом: отказ словами, как и для чужой программы.
         if getattr(e, "winerror", None) == 10048 or e.errno == errno.EADDRINUSE:
-            raise ValueError("порт %d занят: %s" % (link.port, e)) from None
+            raise ValueError(t("serve.portTaken", port=link.port)) from None
         raise
     if args.nif:
         bench.open(args.nif, args.tri, getattr(args, "skeleton", None))
@@ -579,20 +578,18 @@ def _hand_over(bench: MorphBench, link, args) -> int:
     here = bench.environment()
     there = link.environment()
     if here["insideMo2"] and not there["insideMo2"]:
-        raise ValueError("сервер на %s поднят вне MO2 и не видит мешей сборки; закройте его "
-                         "и запустите снова из-под MO2" % link.url)
+        raise ValueError(t("serve.foreignServer", url=link.url))
     root = args.root if args.root is not None else here["dataRoot"]
     handed = link.set_root(root) if root is not None else None
     if args.nif:
-        raise ValueError("сервер уже поднят на %s: выберите меш на странице, --nif здесь "
-                         "не действует" % link.url)
+        raise ValueError(t("serve.openMeshOnPage", url=link.url))
     if not args.no_browser:
         link.open_page()
     _out(args, {"started": False, "url": link.url, "root": there.get("root") if handed is None
                 else handed["root"], "handed": handed, "insideMo2": there["insideMo2"]}
          if args.json else
-         "уже поднят: %s%s" % (link.url, "" if handed is None else
-                                "\nобзор: %s (%d мешей)" % (handed["root"], handed["meshes"])))
+         t("serve.alreadyUp", url=link.url) + ("" if handed is None else "\n" + t(
+             "serve.handedRoot", root=handed["root"], meshes=handed["meshes"])))
     return 0
 
 
