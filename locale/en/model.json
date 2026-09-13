@@ -1,5 +1,5 @@
 {
-  "#": "Core messages.",
+  "#": "Core: the mesh - its shapes, vertices, triangles and bones.",
   "model.noBlock": "the file has no block %(block)d (there are %(count)d)",
   "model.noMeshFile": "no mesh file: %(path)s",
   "model.noMorphFile": "no morph file: %(path)s",

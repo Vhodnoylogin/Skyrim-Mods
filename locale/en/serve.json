@@ -1,5 +1,5 @@
 {
-  "#": "Base language. Every key in use must have a text here: other languages fall back to it.",
+  "#": "The local server: what the launch says about a port, and what a request is refused with.",
   "#keys": "A key is a latin label, never a sentence. Substitution is by name: %(name)s.",
   "#adding": "A new section goes into a NEW FILE in this folder - no existing file is rewritten.",
   "serve.alreadyUp": "already up: %(url)s",

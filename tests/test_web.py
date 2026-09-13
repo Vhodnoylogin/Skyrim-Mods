@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Страница со смотрелкой: собирается из бенча в памяти и ни к чему снаружи не обращается.
+"""The page with the viewer: built from a bench in memory and reaching for nothing outside.
 
-Страница обязана быть самодостаточной — открываться с диска без сети, — поэтому в ней не
-может быть ни одной ссылки на http:// или https://. Если слоя `presenters.web` ещё нет,
-набор пропускается: его пишут отдельно, и отсутствие модуля — не сбой ядра.
+The page has to be self-contained - it must open from disk without a network - so it cannot
+hold a single link to http:// or https://. If the `presenters.web` layer is not there yet,
+the set is skipped: it is written apart, and a missing module is not a failure of the core.
 """
 import os
 import sys
@@ -21,7 +21,7 @@ except ImportError as e:  # noqa: N816
     IMPORT_ERROR = e
 
 
-@unittest.skipIf(WebPage is None, "presenters/web.py ещё нет: %s" % (
+@unittest.skipIf(WebPage is None, "there is no presenters/web.py yet: %s" % (
     IMPORT_ERROR if WebPage is None else ""))
 class TestWebPage(unittest.TestCase):
 
@@ -36,21 +36,23 @@ class TestWebPage(unittest.TestCase):
         self.assertIn("<canvas", self.html)
 
     def test_names_of_shapes_and_morphs(self):
-        """Части и ползунки видны на странице по имени — иначе нечем управлять."""
+        """Parts and sliders are visible on the page by name - otherwise there is nothing to
+        steer."""
         for name in ("body", "fur"):
             self.assertIn(name, self.html, name)
         for name in ("Up", "Wide", "Tip"):
             self.assertIn(name, self.html, name)
 
     def test_no_external_links(self):
-        """Ни одной ссылки наружу: страница обязана открываться без сети."""
+        """Not one link outside: the page has to open without a network."""
         self.assertNotIn("http://", self.html)
         self.assertNotIn("https://", self.html)
 
     def test_payload_matches_facade(self):
-        """Вложенные в страницу числа — те же, что отдаёт фасад: вершины и признак кости
-        побитно, смещения int16 × множитель и растяжение uint8 × максимум — в пределах
-        кванта, состояние показа — тем же словарём. Иначе страница показывала бы не то тело."""
+        """The numbers folded into the page are the ones the facade gives: vertices and the
+        bone key bit for bit, int16 offsets x the multiplier and uint8 strain x the maximum -
+        within one quantum, the state of the view as the same dictionary. Otherwise the page
+        would be showing a different body."""
         import base64
         import numpy as np
 
@@ -68,7 +70,7 @@ class TestWebPage(unittest.TestCase):
             np.testing.assert_array_equal(unpack(shape["boneKey"], "<i2"), self.bench.bone_key(name))
             np.testing.assert_array_equal(unpack(shape["vertices"], "<f4").reshape(-1, 3),
                                           self.bench.model.shape(name).verts)
-        self.assertTrue(payload["deltas"], "в образце есть морфы - смещения должны быть вложены")
+        self.assertTrue(payload["deltas"], "the sample has morphs - the offsets must be folded in")
         for morph, per_shape in payload["deltas"].items():
             for name, d in per_shape.items():
                 raw = self.bench.morph_deltas(name, morph)
@@ -85,16 +87,17 @@ class TestWebPage(unittest.TestCase):
                 values = unpack(s["values"], "u1").astype(np.float32) * s["max"] / 255.0
                 self.assertEqual(sorted(idx.tolist()), np.nonzero(full > 0)[0].tolist())
                 self.assertLessEqual(float(np.abs(values - full[idx]).max()), s["max"] / 510 + 1e-6)
-        # Страница строит кадр по этим числам, поэтому получает их без округления.
+        # The page builds its frame from these numbers, so it gets them without rounding.
         self.assertEqual(payload["view"], self.bench.view_state(precise=True))
         self.assertEqual(payload["sliders"], self.bench.sliders())
 
     def test_targets_include_command_line_focus(self):
-        """Наведение по подстроке из командной строки нет среди целей, но ядро сосчитало
-        его сферу — страница получает её под тем же именем и может выбрать снова."""
-        self.bench.focus_bone("Han")     # подстрока, объединяющая кости
+        """An aim set by a substring from the command line is not among the targets, but the
+        core has worked out its sphere - the page gets it under the same name and can choose
+        it again."""
+        self.bench.focus_bone("Han")     # a substring that joins bones together
         targets = WebPage(self.bench).payload()["targets"]
-        hit = [t for t in targets["bones"] if t["name"] == "Han"]
+        hit = [aim for aim in targets["bones"] if aim["name"] == "Han"]
         self.assertEqual(len(hit), 1)
         focus = self.bench.view_state()["focus"]
         self.assertEqual([round(x, 2) for x in hit[0]["centre"]], focus["centre"])
@@ -120,9 +123,9 @@ def _index_dtype(kind):
 
 
 def _rig(with_bumper: bool = False):
-    """Скелет в памяти помощниками из test_colliders: по капсуле на костях Hand и Fur
-    образца (Hand держит кожу, Fur — оболочку) и, по просьбе, бампер. Путь у него -
-    memory.nif, как у всех фигур в памяти."""
+    """A skeleton in memory, by the helpers from test_colliders: a capsule on the Hand and
+    Fur bones of the sample (Hand holds the skin, Fur the shell) and, if asked for, a bumper.
+    Its path is memory.nif, as for every figure built in memory."""
     from test_colliders import body, cap, rig
     bumper = body("Bump", cap("Bump", radius=25.0), kind="bhkSimpleShapePhantom") if with_bumper else None
     return rig(body("Hand", cap("Hand", radius=2.0)), body("Fur", cap("Fur", radius=1.0)), bumper=bumper)
@@ -136,11 +139,11 @@ def _chunk_tris(chunk):
     return _unpack(chunk["triangles"], _index_dtype(chunk["indexType"])).reshape(-1, 3)
 
 
-@unittest.skipIf(WebPage is None, "presenters/web.py ещё нет")
+@unittest.skipIf(WebPage is None, "there is no presenters/web.py yet")
 class TestWebPageColliders(unittest.TestCase):
-    """Слой капсул: без скелета его в странице нет, со скелетом капсулы вложены целиком —
-    кусками по костям, теми же треугольниками, что отдаёт фасад, — а состояние слоя идёт
-    из view_state()."""
+    """The capsule layer: without a skeleton the page holds none of it, with a skeleton the
+    capsules are folded in whole - in pieces by bone, by the same triangles the facade gives
+    - and the state of the layer comes from view_state()."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -148,7 +151,8 @@ class TestWebPageColliders(unittest.TestCase):
         self.bench = common.bench(self.tmp.name, common.sample_model(), common.sample_morphs())
 
     def test_without_skeleton(self):
-        """Скелета нет — colliders None, имя скелета None, слой в состоянии выключен."""
+        """No skeleton - colliders is None, the name of the skeleton is None, the layer is
+        off in the state."""
         page = WebPage(self.bench)
         payload = page.payload()
         self.assertFalse(self.bench.has_skeleton())
@@ -156,13 +160,13 @@ class TestWebPageColliders(unittest.TestCase):
         self.assertIsNone(payload["names"]["skeleton"])
         self.assertFalse(payload["view"]["colliders"])
         self.assertFalse(payload["view"]["bumper"])
-        # Раздел «Капсулы» панель строит по этому же признаку, поэтому в данных
-        # страницы капсул нет вовсе.
+        # The panel builds its "Capsules" section by this same key, so the data of the page
+        # holds no capsules at all.
         self.assertIn('"colliders":null', page.html())
 
     def test_with_skeleton_in_memory(self):
-        """Капсулы в странице — кусками по костям, с именами костей, и в каждом те же
-        вершины и треугольники, что у collider_meshes() фасада."""
+        """The capsules on the page - in pieces by bone, with the names of the bones, and in
+        each of them the same vertices and triangles as in the facade's collider_meshes()."""
         import numpy as np
         self.bench.rig = _rig()
         payload = WebPage(self.bench).payload()
@@ -177,10 +181,10 @@ class TestWebPageColliders(unittest.TestCase):
             np.testing.assert_array_equal(_chunk_tris(chunk), piece["tris"])
         self.assertEqual(sum(b["vertexCount"] for b in got["bodies"]),
                          sum(p["verts"].shape[0] for p in pieces))
-        self.assertIsNone(got["bumper"], "бампера в этом скелете нет")
+        self.assertIsNone(got["bumper"], "this skeleton has no bumper")
         self.assertEqual(payload["names"]["skeleton"], "memory.nif")
         self.assertEqual(payload["summary"]["colliders"], 2)
-        # Слой выключен, пока не попросили, и включается тем же методом фасада.
+        # The layer is off until it is asked for, and is switched by the same facade method.
         self.assertFalse(payload["view"]["colliders"])
         self.bench.show_colliders(True)
         payload = WebPage(self.bench).payload()
@@ -189,26 +193,29 @@ class TestWebPageColliders(unittest.TestCase):
         self.assertEqual(payload["view"], self.bench.view_state(precise=True))
 
     def test_bumper_is_packed_apart(self):
-        """Цилиндр перемещения — отдельным куском, чтобы страница клала его по своему флагу."""
+        """The movement cylinder goes as a piece of its own, so that the page lays it down
+        by its own flag."""
         self.bench.rig = _rig(with_bumper=True)
         got = WebPage(self.bench).payload()["colliders"]
         self.assertIsNotNone(got["bumper"])
         self.assertEqual(got["bumper"]["vertexCount"], self.bench.bumper_mesh()[0].shape[0])
         self.assertEqual([b["bone"] for b in got["bodies"]], ["Hand", "Fur"],
-                         "бампер не попадает в куски по костям")
+                         "the bumper does not land among the pieces by bone")
 
     def test_payload_keeps_every_bone_when_a_part_is_hidden(self):
-        """Скрытая часть не меняет payload: страница несёт куски ВСЕХ костей и прячет
-        капсулу сама, по heldBones видимых частей, — зеркалом visible_collider_bones().
-        Что ядро при этом отдаёт в collider_mesh() меньше вершин, проверяет test_colliders."""
+        """A hidden part does not change the payload: the page carries the pieces of EVERY
+        bone and hides a capsule itself, by the heldBones of the visible parts - a mirror of
+        visible_collider_bones(). That the core meanwhile gives out fewer vertices in
+        collider_mesh() is checked by test_colliders."""
         self.bench.rig = _rig()
         whole = WebPage(self.bench).payload()
-        self.bench.only(["body"])                       # оболочка fur (кость Fur) скрыта
+        self.bench.only(["body"])                       # the fur shell (bone Fur) is hidden
         payload = WebPage(self.bench).payload()
         self.assertEqual([b["bone"] for b in payload["colliders"]["bodies"]], ["Hand", "Fur"])
         self.assertEqual(sum(b["vertexCount"] for b in payload["colliders"]["bodies"]),
                          sum(b["vertexCount"] for b in whole["colliders"]["bodies"]))
-        # То, по чему страница решает: у кожи веса только у Hand и Finger, у оболочки - у Fur.
+        # What the page decides by: the skin has weights only on Hand and Finger, the shell
+        # only on Fur.
         by_name = {s["name"]: s for s in payload["shapes"]}
         self.assertEqual(sorted(by_name["body"]["heldBones"]), ["Finger", "Hand"])
         self.assertEqual(by_name["fur"]["heldBones"], ["Fur"])
@@ -216,7 +223,8 @@ class TestWebPageColliders(unittest.TestCase):
         self.assertTrue(payload["settings"]["collidersFollowParts"])
 
     def test_settings_carry_colour_and_opacity(self):
-        """Цвет и прозрачность слоя — из тех же ключей настроек, что у растеризатора."""
+        """The colour and opacity of the layer - from the same keys of the settings as the
+        rasteriser's."""
         st = WebPage(self.bench).payload()["settings"]
         self.assertEqual(st["colliderColour"], [float(x) for x in self.bench.cfg["colliderColour"]])
         self.assertEqual(st["colliderOpacity"], float(self.bench.cfg["colliderOpacity"]))

@@ -1,36 +1,37 @@
-"""Слой показа: та же страница, но с локального порта и с выбором модели.
+"""The presentation layer: the same page, but from a local port and with a choice of model.
 
-Файл с диска держит одно тело, и чтобы посмотреть другое, страницу надо собрать заново.
-Сервер снимает это ограничение: он держит фасад открытым, отдаёт страницу по запросу
-и по запросу же открывает в фасаде другой меш из обзора. Всё, что он умеет, - вызовы
-фасада: `catalog`, `open_entry`, `environment` и упаковка `WebPage`. Ни одного вычисления
-здесь нет, как и в остальных слоях.
+A file on disk holds one body, and to look at another the page has to be built again. The
+server lifts that limit: it keeps the facade open, hands out the page on request, and on
+request opens another mesh from the browse list in that same facade. Everything it can do
+is facade calls - `catalog`, `open_entry`, `environment` and the packing done by
+`WebPage`. There is not one computation here, just as in the other layers.
 
-Стандартная библиотека и ничего сверх неё: `ThreadingHTTPServer` на порту из настроек.
-Фасад один и не потокобезопасен, поэтому каждый запрос берёт замок на всё время работы
-с ним. Страница, которую отдаёт сервер, обращается только к нему самому - переходом
-на другой запрос `/?name=...`; запросов наружу у неё нет, как и у файла с диска.
+The standard library and nothing above it: `ThreadingHTTPServer` on the port from the
+settings. There is one facade and it is not thread-safe, so every request takes the lock for
+the whole time it works with it. The page the server hands out talks to that server alone -
+by going to another request, `/?name=...`; it makes no request that leaves the machine,
+and neither does the file on disk.
 
-Корень обзора необязателен: сервер поднимается и без него - с пустым списком и полем
-для папки на странице, - а назвать корень можно потом, запросом `/api/root`. Так его
-передаёт запуск из-под MO2: `ServerLink` с той стороны спрашивает, жив ли сервер,
-и отдаёт ему Data игры.
+The browse root is optional: the server comes up without one - with an empty list and a
+field for the folder on the page - and the root can be named later, through `/api/root`.
+That is how a launch from inside MO2 passes it on: `ServerLink` on the other side asks
+whether the server is alive and hands it the game's Data.
 
-Маршруты:
+Routes:
 
-    GET /                                  страница с открытым телом (или пустым холстом)
-    GET /?name=<путь от корня>&root=<папка>  открыть меш по имени и отдать страницу
-    GET /?index=N&root=<папка>&all=1       ...по номеру в обзоре; all=1 - обзор и без морфов
-    GET /?root=<папка>                     страница со списком другой папки
-    GET /api/environment                   bench.environment()
-    GET /api/catalog?root=&all=0|1&rescan=0|1   bench.catalog(...)
-    GET /api/payload?index=|name=&root=    open_entry, затем WebPage(bench).payload()
-    GET /api/root?root=<папка>             сделать папку корнем сервера; без root - какой сейчас
-    GET /api/shutdown                      остановить сервер: ответ уходит, цикл завершается
+    GET /                                    the page with the open body (or an empty canvas)
+    GET /?name=<path from the root>&root=<folder>  open a mesh by name and return the page
+    GET /?index=N&root=<folder>&all=1        ...by its number in the browse list; all=1 - meshes without morphs too
+    GET /?root=<folder>                      the page with the listing of another folder
+    GET /api/environment                     bench.environment()
+    GET /api/catalog?root=&all=0|1&rescan=0|1    bench.catalog(...)
+    GET /api/payload?index=|name=&root=      open_entry, then WebPage(bench).payload()
+    GET /api/root?root=<folder>              make the folder the server's root; without root - which one it is now
+    GET /api/shutdown                        stop the server: the answer goes out, the loop ends
 
-Ошибки в /api/* - JSON {"error": ...} с кодом: 400 - запрос не разобран или корень
-не задан, 404 - нет записи или папки, 403 - под MO2 папка вне Data игры. На странице
-та же ошибка показывается текстом в разделе «Модель».
+A refusal in /api/* is JSON {"error": ...} with a code: 400 - the request could not be read
+or no root is set, 404 - no such entry or folder, 403 - under MO2, a folder outside the
+game's Data. On the page the same refusal is shown as text in the "Model" section.
 """
 from __future__ import annotations
 
@@ -53,24 +54,30 @@ from morphbench.journal import Journal, from_config
 from .assets import PREFIX, PageAssets
 from .web import WebPage
 
-_TRUE = ("1", "true", "yes", "on", "да")
-#: Подпись в заголовке Server: по ней `ServerLink` отличает свой сервер от чужой программы
-#: на том же порту.
+#: The words a query flag counts as "on". This is protocol, not text: it is read out of a
+#: URL, so it stays latin whatever language the run speaks. The last one is the Russian
+#: "yes", accepted since before the catalogue existed and kept so that a link already
+#: typed by hand goes on working; it is written as an escape to leave no Cyrillic in the
+#: source.
+_TRUE = ("1", "true", "yes", "on", "\u0434\u0430")
+#: The signature in the Server: header - `ServerLink` tells our own server from another
+#: program on the same port by it.
 SERVER_NAME = "morphbench/1"
-#: Адреса «слушать на всех интерфейсах»: набирать такой адрес нельзя - Windows отвечает
-#: WSAEADDRNOTAVAIL, - поэтому к серверу на нём обращаются по loopback.
+#: The "listen on every interface" addresses: such an address cannot be dialled - Windows
+#: answers WSAEADDRNOTAVAIL - so a server on one of them is reached over loopback.
 _WILDCARD = ("0.0.0.0", "", "::", "*")
 
 
 def dial_host(host) -> str:
-    """Адрес, по которому к серверу обращаются, если он слушает на `host`."""
+    """The address the server is reached at when it listens on `host`."""
     host = str(host or "").strip()
     return "127.0.0.1" if host in _WILDCARD else host
 
 
 class RequestError(ValueError):
-    """Запрос, который нельзя исполнить: код ответа и текст, понятный человеку.
-    Это отказ, а не сбой, - потому ValueError: командная строка печатает его одной строкой."""
+    """A request that cannot be carried out: a response code and a text a person can read.
+    This is a refusal, not a failure - hence ValueError: the command line prints it as one
+    line."""
 
     def __init__(self, status: int, message: str):
         super().__init__(message)
@@ -79,8 +86,8 @@ class RequestError(ValueError):
 
 
 def _status_of(exc: BaseException) -> int:
-    """Код ответа по исключению фасада: чем именно не угодил запрос, знает фасад,
-    а какой это код - слой."""
+    """The response code for an exception: the facade knows what the request got wrong,
+    and which code that makes is this layer's business."""
     if isinstance(exc, RequestError):
         return exc.status
     if isinstance(exc, PermissionError):
@@ -93,15 +100,15 @@ def _status_of(exc: BaseException) -> int:
 
 
 def _message(exc: BaseException) -> str:
-    """Текст исключения без обёртки KeyError, которая заключает его в кавычки."""
+    """The text of an exception without the KeyError wrapper, which puts it in quotes."""
     if exc.args and isinstance(exc.args[0], str):
         return exc.args[0]
     return str(exc) or exc.__class__.__name__
 
 
 class Query:
-    """Разобранная строка запроса: корень, ключ записи, флаги. Каждое значение - последнее
-    из повторённых, пустое - как отсутствующее."""
+    """A parsed query string: the root, the key of the entry, the flags. Every value is the
+    last of the repeated ones, an empty one counts as absent."""
 
     def __init__(self, raw: str):
         self.values = {k: v[-1] for k, v in parse_qs(raw, keep_blank_values=True).items()}
@@ -115,12 +122,13 @@ class Query:
 
     @property
     def root(self) -> str | None:
-        """Папка обзора из запроса либо None - корень сервера."""
+        """The browse folder from the request, or None - the server's root."""
         return self.get("root")
 
     @property
     def key(self):
-        """Что открыть: номер записи (`index`) или имя (`name`); None - ничего."""
+        """What to open: the number of the entry (`index`) or its name (`name`); None -
+        nothing."""
         index = self.get("index")
         if index is not None:
             try:
@@ -131,33 +139,36 @@ class Query:
 
 
 class _Server(ThreadingHTTPServer):
-    """Второй сервер на том же порту обязан упасть, а не молча сесть рядом: SO_REUSEADDR,
-    который http.server включает по умолчанию, на Windows разрешает такой второй bind."""
+    """A second server on the same port has to fail, not sit down quietly beside the first:
+    SO_REUSEADDR, which http.server turns on by default, lets that second bind through on
+    Windows."""
 
     allow_reuse_address = False
 
 
 class WebServer:
-    """Сервер страницы поверх фасада.
+    """The page server on top of the facade.
 
-    Корень обзора: явная папка, иначе умолчание окружения (под MO2 - Data игры), иначе
-    никакого - сервер поднимается с пустым списком, и папку называют на странице или
-    запросом `/api/root`. Явную папку проверяет фасад сразу: вне MO2 несуществующая
-    откажет FileNotFoundError, под MO2 чужая - PermissionError, и их увидит тот, кто
-    запустил. Порт занимается сразу, чтобы `url` был верен ещё до `run()` - в том числе
-    для порта 0, который выбирает система.
+    The browse root: the folder named outright, otherwise the default of the environment
+    (under MO2 - the game's Data), otherwise none at all - the server comes up with an empty
+    list, and the folder is named on the page or through `/api/root`. A folder named
+    outright is checked by the facade at once: outside MO2 one that does not exist refuses
+    with FileNotFoundError, under MO2 a foreign one with PermissionError, and whoever
+    started the server sees it. The port is taken straight away so that `url` is right
+    before `run()` - including for port 0, which the system picks.
     """
 
     def __init__(self, bench, root=None, host=None, port=None, with_morphs: bool = True,
                  journal: Journal | None = None):
         self.bench = bench
         self.cfg = bench.cfg
-        # Журнал заводится по настройкам: труба к тому, кто запустил, и файл рядом.
-        # Свой передают проверки и слои, которым журнал нужен в руках.
+        # The journal is built from the settings: the pipe to whoever started this, and a
+        # file beside it. One of their own is passed in by the checks and by layers that
+        # need the journal in hand.
         self.journal = journal if journal is not None else from_config(self.cfg, "serve")
         self.with_morphs = bool(with_morphs)
-        # Файлы страницы сервер раздаёт по одному: правка скрипта видна по перезагрузке,
-        # а средства браузера показывают настоящий файл с настоящими номерами строк.
+        # The server hands out the page's files one by one: an edit to a script shows on a
+        # reload, and the browser's own tools point at the real file with real line numbers.
         self.assets = PageAssets()
         self.host = str(host or self.cfg["serveHost"])
         self.lock = threading.Lock()
@@ -179,15 +190,15 @@ class WebServer:
         return "http://%s:%d/" % (dial_host(self.host), self.port)
 
     def set_root(self, root) -> dict:
-        """Сделать папку корнем сервера. Фасад проверяет её и делает первый обход -
-        страница всё равно попросит список."""
+        """Make a folder the server's root. The facade checks it and walks it once - the
+        page will ask for the listing anyway."""
         rows = self.bench.catalog(root, self.with_morphs)
         self.root = Path(root)
         return {"root": str(self.root), "meshes": len(rows)}
 
-    # ---- жизнь сервера ----------------------------------------------------------------
+    # ---- the life of the server -------------------------------------------------------
     def run(self, open_browser: bool = True) -> None:
-        """Обслуживать до Ctrl+C; по желанию сразу открыть страницу в браузере."""
+        """Serve until Ctrl+C; open the page in a browser straight away if asked."""
         if open_browser:
             webbrowser.open(self.url)
         try:
@@ -198,25 +209,26 @@ class WebServer:
             self.close()
 
     def start(self) -> "WebServer":
-        """Обслуживать в фоновом потоке - для проверок и для клиентов, которым нужен
-        и сервер, и своя работа рядом."""
+        """Serve on a background thread - for the checks, and for clients that need both a
+        server and their own work beside it."""
         if self._thread is None:
             self._thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
             self._thread.start()
         return self
 
     def watch_parent(self, pid: int) -> None:
-        """Уйти вместе с тем, кто поднял.
+        """Leave together with whoever raised the server.
 
-        Сервер живёт в отдельном процессе, и окно запуска, снятое мирно, останавливает его
-        само. Снятое ЖЁСТКО (аварийное завершение, «Снять задачу», выход из системы) -
-        не успевает, и остаётся невидимый процесс: он держит порт, продолжает читать файлы
-        сквозь подмену MO2, которая для него уже устарела, а MO2 его больше не считает
-        запущенной программой. Хуже того, точка входа идемпотентна, и следующий запуск
-        молча подключится именно к нему. Поэтому сервер ждёт своего родителя сам.
+        The server lives in a process of its own, and the launcher window, closed peacefully,
+        stops it itself. Killed HARD (a crash, "End task", a log-off) it does not get the
+        chance, and an invisible process is left behind: it holds the port, it goes on
+        reading files through MO2's substitution, which for it is already out of date, and
+        MO2 no longer counts it as a running program. Worse, the entry point is idempotent,
+        and the next launch will quietly attach to exactly that one. So the server waits for
+        its parent itself.
 
-        Сторож необязателен: без номера процесса его нет и поведение прежнее - сервер,
-        поднятый из консоли, ничьей смерти не ждёт.
+        The watch is optional: without a process number there is none and the behaviour is
+        as it was - a server raised from a console waits for nobody's death.
         """
         pid = int(pid)
         if pid <= 0:
@@ -229,9 +241,10 @@ class WebServer:
             wait_process(pid)
             self.journal.warn(t("serve.leavingWithParent", pid=pid))
             self.httpd.shutdown()
-            # Порт отпускается здесь же. Одной остановки цикла мало: слушающее гнездо
-            # осталось бы открытым, и сервер стал бы чёрной дырой - соединение
-            # принимается, ответа нет, а клиент ждёт до своего предела.
+            # The port is let go right here. Stopping the loop alone is not enough: the
+            # listening socket would stay open and the server would become a black hole -
+            # the connection is accepted, no answer comes, and the client waits until its
+            # own limit.
             self.close()
 
         self._watcher = threading.Thread(target=watch, daemon=True, name="parent-watch")
@@ -248,11 +261,12 @@ class WebServer:
         self.httpd.server_close()
         self.journal.close()
 
-    # ---- ответы: каждый - вызовы фасада под замком ------------------------------------
+    # ---- answers: every one of them facade calls under the lock ------------------------
     def _root_of(self, query: Query) -> str | None:
-        """Папка обзора для запроса: названная в нём либо корень сервера; None - ни той,
-        ни другого. Фасаду None значил бы «умолчание окружения», а у сервера умолчание
-        своё - его корень, - поэтому фасад отсюда None не получает."""
+        """The browse folder for a request: the one named in it or the server's root; None -
+        neither of them. To the facade None would mean "the default of the environment", and
+        the server has a default of its own - its root - so the facade never gets None from
+        here."""
         return query.root if query.root is not None else (
             None if self.root is None else str(self.root))
 
@@ -263,8 +277,9 @@ class WebServer:
         return root
 
     def api_environment(self) -> dict:
-        """Без замка: окружение читается из реестра, а не из фасада, и опознание сервера
-        не должно ждать, пока под замком идёт обход большой папки."""
+        """Without the lock: the environment is read from the registry, not from the facade,
+        and telling this server apart from another program must not wait for a walk of a
+        large folder going on under the lock."""
         return dict(self.bench.environment(),
                     root=None if self.root is None else str(self.root))
 
@@ -284,7 +299,7 @@ class WebServer:
             return WebPage(self.bench).payload()
 
     def api_root(self, query: Query) -> dict:
-        """Корень сервера: назвать новый либо спросить нынешний."""
+        """The server's root: name a new one, or ask which it is now."""
         with self.lock:
             if query.root is not None:
                 return self.set_root(query.root)
@@ -293,18 +308,20 @@ class WebServer:
                         self.bench.catalog(str(self.root), self.with_morphs))}
 
     def api_shutdown(self) -> dict:
-        """Остановить сервер по просьбе клиента - окна запуска или `serve --stop`.
+        """Stop the server at a client's asking - the launcher window's or `serve --stop`'s.
 
-        Ответ должен уйти раньше, чем цикл обслуживания остановится, а `shutdown()` ждёт
-        этот цикл и из потока запроса зваться не может, - поэтому отдельный поток."""
+        The answer has to leave before the serving loop stops, and `shutdown()` waits for
+        that loop and cannot be called from the request's own thread - hence a thread of its
+        own."""
         threading.Thread(target=self.httpd.shutdown, daemon=True).start()
         return {"stopping": True, "url": self.url}
 
     def page(self, query: Query) -> tuple[str, int]:
-        """Страница по запросу: список мешей под корнем, открытие названного тела, и всё,
-        что не удалось, - текстом на панели, а не пустым ответом. Список при неудаче
-        берётся по корню сервера, чтобы выбирать было из чего; без корня список пуст,
-        и это не ошибка - папку называют на странице."""
+        """The page for a request: the meshes under the root, the named body opened, and
+        whatever did not work - as text on the panel, not as an empty answer. On a failure
+        the listing is taken by the server's root, so that there is something to choose
+        from; without a root the listing is empty, and that is not a failure - the folder is
+        named on the page."""
         with_morphs = not query.flag("all")
         error, status = None, 200
         with self.lock:
@@ -318,7 +335,7 @@ class WebServer:
                 key = query.key
                 if key is not None:
                     bench.open_entry(key, self._root_required(query), with_morphs)
-            except Exception as e:  # noqa: BLE001 - любой отказ фасада показывается текстом
+            except Exception as e:  # noqa: BLE001 - any refusal of the facade is shown as text
                 error, status = _message(e), _status_of(e)
                 catalog = []
                 if self.root is not None:
@@ -332,23 +349,23 @@ class WebServer:
             return page.html(linked=True), status
 
     def __repr__(self) -> str:
-        return "WebServer(%s, корень=%s)" % (self.url, self.root or "не задан")
+        return "WebServer(%s, root=%s)" % (self.url, self.root or "not set")
 
 
 class ServerLink:
-    """Сторона клиента: жив ли сервер на этом адресе и наш ли он.
+    """The client side: is a server alive at this address, and is it ours.
 
-    Нужна запуску: `mb.py serve` сначала спрашивает, не поднят ли сервер уже, и если да -
-    не поднимает второго, а отдаёт ему корень и открывает страницу. Из-под MO2 это и есть
-    передача пути: процесс, запущенный MO2, видит Data игры сквозь usvfs и называет её
-    серверу.
+    The launch needs it: `mb.py serve` first asks whether a server is up already, and if it
+    is, does not raise a second one but hands it the root and opens the page. From inside
+    MO2 that is the handing over of the path: the process MO2 started sees the game's Data
+    through usvfs and names it to the server.
     """
 
     def __init__(self, host: str, port: int, timeout: float = 2.0):
         self.host = dial_host(host)
         self.port = int(port)
         self.timeout = float(timeout)
-        # Без прокси: адрес местный, а переменные окружения могут завернуть его наружу.
+        # No proxy: the address is local, and the environment variables could send it out.
         self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
     @property
@@ -362,8 +379,9 @@ class ServerLink:
             return json.loads(r.read().decode("utf-8"))
 
     def probe(self) -> str:
-        """`free` - порт свободен, `ours` - там наш сервер, `busy` - чужая программа,
-        `slow` - соединение есть, а ответа за отведённое время нет: кто там, неизвестно."""
+        """`free` - the port is free, `ours` - our server is there, `busy` - another program,
+        `slow` - there is a connection but no answer in the time allowed: who is there
+        cannot be told."""
         try:
             with socket.create_connection((self.host, self.port), timeout=self.timeout):
                 pass
@@ -375,16 +393,17 @@ class ServerLink:
             return "slow" if isinstance(e.reason, (TimeoutError, socket.timeout)) else "busy"
         except (TimeoutError, socket.timeout):
             return "slow"
-        except Exception:  # noqa: BLE001 - любой не наш ответ означает чужую программу
+        except Exception:  # noqa: BLE001 - any answer that is not ours means another program
             return "busy"
         return "ours"
 
     def environment(self) -> dict:
-        """Окружение работающего сервера: под MO2 ли он и какой у него корень."""
+        """The environment of the running server: is it under MO2 and what root it has."""
         return self._get("/api/environment")
 
     def _call(self, path: str) -> dict:
-        """Запрос к серверу; его отказ - RequestError с кодом и текстом сервера."""
+        """A request to the server; its refusal is a RequestError with the server's code and
+        text."""
         try:
             return self._get(path)
         except urllib.error.HTTPError as e:
@@ -395,20 +414,21 @@ class ServerLink:
             raise RequestError(e.code, message) from None
 
     def set_root(self, root) -> dict:
-        """Отдать серверу корень обзора. Отказ сервера - RequestError с его текстом."""
+        """Hand the browse root to the server. A refusal of the server is a RequestError
+        with its text."""
         return self._call("/api/root?" + urllib.parse.urlencode({"root": str(root)}))
 
     def root(self) -> dict:
-        """Корень сервера и число мешей под ним."""
+        """The server's root and the number of meshes under it."""
         return self._call("/api/root")
 
     def shutdown(self) -> dict:
-        """Попросить сервер остановиться."""
+        """Ask the server to stop."""
         return self._call("/api/shutdown")
 
     def status(self) -> dict:
-        """Одним словарём: свободен ли порт, наш ли сервер, что он знает о себе.
-        `state` - free, ours или busy; остальное заполнено только для ours."""
+        """In one dictionary: is the port free, is the server ours, what it knows about
+        itself. `state` is free, ours or busy; the rest is filled in for ours only."""
         state = self.probe()
         out = {"state": state, "url": self.url, "insideMo2": None, "root": None, "meshes": None}
         if state == "ours":
@@ -417,7 +437,7 @@ class ServerLink:
             out["dataRoot"] = env.get("dataRoot")
             try:
                 out.update(self.root())
-            except Exception:  # noqa: BLE001 - корень не обязателен для состояния
+            except Exception:  # noqa: BLE001 - the root is not required for the state
                 out["root"] = env.get("root")
         return out
 
@@ -426,7 +446,7 @@ class ServerLink:
 
 
 class _Handler(BaseHTTPRequestHandler):
-    """Разбор пути и отправка ответа; содержание - у WebServer."""
+    """Reading the path and sending the answer; the content is WebServer's."""
 
     server_version = SERVER_NAME
 
@@ -434,7 +454,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.owner = owner
         super().__init__(*args, **kwargs)
 
-    # ---- отправка ---------------------------------------------------------------------
+    # ---- sending ----------------------------------------------------------------------
     def _send(self, body: bytes, content_type: str, status: int = 200) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
@@ -450,8 +470,8 @@ class _Handler(BaseHTTPRequestHandler):
     def _send_html(self, html: str, status: int = 200) -> None:
         self._send(html.encode("utf-8"), "text/html; charset=utf-8", status)
 
-    # ---- маршруты ---------------------------------------------------------------------
-    def do_GET(self) -> None:  # noqa: N802 - имя задаёт http.server
+    # ---- routes -----------------------------------------------------------------------
+    def do_GET(self) -> None:  # noqa: N802 - the name is set by http.server
         url = urlsplit(self.path)
         query = Query(url.query)
         owner = self.owner
@@ -473,33 +493,36 @@ class _Handler(BaseHTTPRequestHandler):
                 body, kind = owner.assets.blob(url.path[len(PREFIX):])
                 self._send(body, kind)
             elif url.path == "/favicon.ico":
-                # Значок у страницы встроенный; браузеры всё равно спрашивают - молча пусто.
+                # The page carries its own icon; browsers ask anyway - empty, and quietly.
                 self.send_response(204)
                 self.end_headers()
             else:
                 raise RequestError(404, t("serve.noSuchPath", path=url.path))
-        except Exception as e:  # noqa: BLE001 - любой отказ уходит клиенту кодом и текстом
+        except Exception as e:  # noqa: BLE001 - any refusal goes to the client as a code and a text
             self._send_json({"error": _message(e)}, _status_of(e))
 
-    # ---- журнал -----------------------------------------------------------------------
+    # ---- the journal ------------------------------------------------------------------
     def _quiet(self) -> bool:
-        """Опрос состояния: тот, кто сервер запустил, спрашивает его на каждое обновление,
-        и в окне опрос заслонил бы собой всё остальное. Поэтому он пишется уровнем ниже,
-        а не выбрасывается: в файле журнала он остаётся, там он и нужен. Передача корня
-        (`/api/root?root=...`) - событие, а не опрос, и идёт обычным уровнем."""
-        # Разбор мог не дойти до пути (кривая первая строка запроса) - тогда это не опрос.
+        """The status poll: whoever raised the server asks it on every refresh, and in the
+        window that poll would blot out everything else. So it is written a level down
+        rather than thrown away: in the journal file it stays, and that is where it is
+        wanted. Handing over the root (`/api/root?root=...`) is an event, not a poll, and
+        goes at the usual level."""
+        # The parse may not have reached the path (a mangled first line of the request) -
+        # then it is not a poll.
         url = urlsplit(getattr(self, "path", "") or "")
         if url.path in ("/api/environment", "/favicon.ico"):
             return True
         return url.path == "/api/root" and "root=" not in url.query
 
     def _write(self, level, text: str) -> None:
-        """Запись через журнал владельца. Журнал не бросает, но и путь до него не должен:
-        обращение идёт из отправки ответа, до заголовков, и любой отказ здесь оборвал бы
-        клиенту связь без единого слова - ровно тот дефект, ради которого журнал и завели."""
+        """A record through the owner's journal. The journal does not throw, and neither
+        must the way to it: this is reached from sending the answer, before the headers, and
+        any refusal here would cut the client off without a single word - exactly the defect
+        the journal was made for."""
         try:
             self.owner.journal.log(level, "%s - %s" % (self.address_string(), text))
-        except Exception:                    # noqa: BLE001 - журнал ответу не хозяин
+        except Exception:                    # noqa: BLE001 - the journal is not the answer's master
             pass
 
     def log_request(self, code="-", size="-") -> None:

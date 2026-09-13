@@ -27,12 +27,12 @@ from morphbench.config import Config       # noqa: E402
 from morphbench.i18n import t, use         # noqa: E402
 from presenters import ppb, text             # noqa: E402
 
-# Отказы фасада, которые командная строка показывает одной строкой, а не трассировкой.
+# Refusals of the facade: the command line shows these as one line, not as a traceback.
 _REFUSALS = (ValueError, PermissionError, FileNotFoundError, KeyError)
 
 
 def _bench(args) -> MorphBench:
-    """Открыть меш: по пути либо по записи обзора (`--entry`, `--root`)."""
+    """Open a mesh: by a path, or by an entry of the catalogue (`--entry`, `--root`)."""
     bench = MorphBench()
     entry = getattr(args, "entry", None)
     if entry is not None:
@@ -41,8 +41,8 @@ def _bench(args) -> MorphBench:
     elif args.nif:
         bench.open(args.nif, args.tri)
     elif not getattr(args, "skeleton", None):
-        # Скелет самодостаточен: капсулы можно смотреть и без тела. Тело нужно только
-        # посадке и подгонке, и они скажут об этом сами.
+        # A skeleton stands on its own: the capsules can be looked at without a body.
+        # Only fitting and clearance want the body, and they say so themselves.
         raise ValueError(t("cli.err.noMesh"))
     if getattr(args, "skeleton", None):
         bench.open_skeleton(args.skeleton)
@@ -50,7 +50,8 @@ def _bench(args) -> MorphBench:
 
 
 def _numbers(text: str, key: str, low: int, high: int) -> list[float]:
-    """Числа через запятую из значения ключа; их должно быть от low до high."""
+    """Comma-separated numbers from the value of a key; there must be between `low`
+    and `high` of them."""
     try:
         values = [float(p) for p in str(text).split(",")]
     except ValueError:
@@ -63,7 +64,7 @@ def _numbers(text: str, key: str, low: int, high: int) -> list[float]:
 
 
 def _col(name: str) -> str:
-    """Заголовок столбца по ключу: столбец называет код, слово - словарь языка."""
+    """Heading of a column by key: the code names the column, the catalogue the word."""
     return t("cli.col." + name)
 
 
@@ -124,7 +125,7 @@ def cmd_missing(args) -> int:
 
 
 def _sliders(bench: MorphBench, pairs) -> None:
-    """Ключи --slider ИМЯ=ЧИСЛО - в set_slider фасада."""
+    """`--slider NAME=NUMBER` keys into the facade's set_slider."""
     for pair in pairs:
         name, _, value = pair.partition("=")
         try:
@@ -135,8 +136,8 @@ def _sliders(bench: MorphBench, pairs) -> None:
 
 
 def cmd_strain(args) -> int:
-    """Растяжение по одному морфу (как было), при наборе ползунков (--slider) или
-    перебором пар (--pairs)."""
+    """Strain of one morph (as it always was), of a SET of sliders (--slider), or of
+    every pair of them (--pairs)."""
     bench = _bench(args)
     if args.pairs:
         rows = bench.strain_pairs(args.amount, args.threshold, args.top, args.by)
@@ -149,13 +150,13 @@ def cmd_strain(args) -> int:
         return 0
     _out(args, bench.strain(args.amount, args.threshold, args.morph),
          [("shape", _col("shape")), ("morph", _col("morph")), ("maxStrain", _col("max")),
-          ("p99Strain", "99%"), ("overThreshold", _col("edgesOver")),
+          ("p99Strain", _col("p99")), ("overThreshold", _col("edgesOver")),
           ("worstBounds", _col("worstBounds"))])
     return 0
 
 
 def cmd_budget(args) -> int:
-    """Бюджет амплитуд: на какой величине каждый ползунок переходит порог растяжения."""
+    """Amplitude budget: at what value each slider crosses the strain threshold."""
     rows = _bench(args).budget(args.threshold)
     _out(args, rows if args.json else text.budget(rows))
     return 0
@@ -190,7 +191,7 @@ def cmd_binding(args) -> int:
 
 
 def cmd_focus(args) -> int:
-    """Наведение камеры числами: куда она смотрит и что могла бы взять в кадр."""
+    """Aiming the camera in numbers: where it looks, and what it could take into frame."""
     bench = _bench(args)
     if args.bone or args.morph or args.shape:
         if args.bone:
@@ -209,7 +210,8 @@ def cmd_focus(args) -> int:
         print(json.dumps(targets, ensure_ascii=False, indent=2))
         return 0
     cols = [("name", _col("target")), ("centre", _col("centre")), ("radius", _col("radius"))]
-    for kind, title in (("shapes", "части меша"), ("bones", "кости"), ("morphs", _col("morphKind"))):
+    for kind, title in (("shapes", _col("shapeKind")), ("bones", _col("boneKind")),
+                        ("morphs", _col("morphKind"))):
         print("%s:" % title)
         print(text.table(targets[kind], cols, t("cli.empty.nothing")))
         print()
@@ -217,8 +219,8 @@ def cmd_focus(args) -> int:
 
 
 def _apply_view(bench: MorphBench, args) -> None:
-    """Ключи показа - в вызовы фасада, в том порядке, в каком они друг от друга зависят.
-    Ключа может не быть у команды вовсе (у `fit` нет ракурса): тогда он не задан."""
+    """View keys into facade calls, in the order in which they depend on one another.
+    A command need not have a key at all (`fit` has no view): then it is simply unset."""
     opt = lambda name, default=None: getattr(args, name, default)  # noqa: E731
     _sliders(bench, opt("slider") or [])
     if opt("only"):
@@ -254,13 +256,12 @@ def _apply_view(bench: MorphBench, args) -> None:
         bench.light_power(*_numbers(args.light_power, "--light-power", 1, 3))
     if opt("colliders"):
         if not bench.has_skeleton():
-            raise ValueError("--colliders без скелета: рядом с мешем нет %s, добавьте "
-                             "--skeleton <skeleton.nif>" % bench.cfg["skeletonFile"])
+            raise ValueError(t("cli.err.collidersNoSkeleton", file=bench.cfg["skeletonFile"]))
         bench.show_colliders(True, bool(opt("bumper")))
 
 
 def _assign(bench: MorphBench, args) -> None:
-    """`--assign tail=smp,ear=cbpc`: кому отдана цепочка на этот запуск, поверх настроек."""
+    """`--assign tail=smp,ear=cbpc`: who a chain is given to for this run, over the settings."""
     raw = getattr(args, "assign", None)
     if not raw:
         return
@@ -274,7 +275,7 @@ def _assign(bench: MorphBench, args) -> None:
 
 
 def cmd_chains(args) -> int:
-    """Цепочки костей для качающейся физики: вершины по звеньям, обрывы, назначение."""
+    """Bone chains for swinging physics: vertices along the links, breaks, who owns what."""
     bench = _bench(args)
     _assign(bench, args)
     if getattr(args, "only", None):
@@ -285,8 +286,9 @@ def cmd_chains(args) -> int:
 
 
 def _physics_check(bench: MorphBench, args, layer) -> int:
-    """Готовый файл настроек против скелета и меша: движок молчит об ошибках, а мы нет.
-    Код выхода 3 - находки есть; 0 - файл ссылается только на то, что существует."""
+    """A ready settings file against the skeleton and the mesh: the engine keeps quiet
+    about mistakes, we do not. Exit code 3 - there are findings; 0 - the file refers
+    only to what exists."""
     path = Path(args.check)
     if not path.is_file():
         raise ValueError(t("cli.err.noCheckFile", path=path))
@@ -307,12 +309,13 @@ def _physics_check(bench: MorphBench, args, layer) -> int:
 
 
 def cmd_physics(args) -> int:
-    """Настройки качающей физики одного движка - SMP или CBPC - текстом его формата.
+    """Settings of one swinging engine - SMP or CBPC - as text in its own format.
 
-    Цепочки, отданные другому движку, не пишутся: SMP и CBPC - разные движки, одну кость
-    обоим отдавать нельзя. Шапка текста перечисляет, какая цепочка кому отдана и какие
-    не отданы никому. Капсулы по звеньям (их читает CBPC) считает фасад; текст складывает
-    слой показа `presenters\\smp.py` либо `presenters\\cbpc.py`.
+    Chains given to the other engine are not written: SMP and CBPC are different engines,
+    and one bone cannot be given to both. The head of the text lists which chain is given
+    to whom and which are given to nobody. Capsules along the links (CBPC reads those) are
+    counted by the facade; the text is put together by the presenter `presenters\\smp.py`
+    or `presenters\\cbpc.py`.
     """
     from presenters import cbpc, smp
     bench = _bench(args)
@@ -323,7 +326,7 @@ def cmd_physics(args) -> int:
     _assign(bench, args)
     _apply_view(bench, args)
     layer = smp if args.engine == "smp" else cbpc
-    shapes = bench.visible_shapes()                  # кожа - то, что видно, как у fit
+    shapes = bench.visible_shapes()                  # skin is what is visible, as with fit
     chains = bench.chains(shapes=shapes)
     rows = bench.chain_capsules(args.engine, args.percentile, shapes=shapes)
     summary = bench.summary()
@@ -350,17 +353,19 @@ def cmd_physics(args) -> int:
 
 
 def cmd_bounds(args) -> int:
-    """Шары охвата частей: в файле, куда тянется геометрия, какой нужен; --write кладёт
-    исправленные в новый файл."""
+    """Bounding spheres of the shapes: the one in the file, the one the geometry reaches
+    out to, the one it needs; --write puts the corrected ones into a new file."""
     bench = _bench(args)
     if args.write:
         result = bench.bounds_write(args.write, args.shape, args.margin, shrink=args.shrink)
         if args.json:
             _out(args, result)
         else:
-            _out(args, text.bounds(result["rows"]) + "\nзаписан: %s (%d частей расширено%s)"
-                 % (result["saved"], len(result["shapes"]),
-                    ", %d оставлено как есть" % len(result["kept"]) if result["kept"] else ""))
+            kept = (t("cli.msg.boundsKept", count=len(result["kept"]))
+                    if result["kept"] else "")
+            _out(args, text.bounds(result["rows"]) + "\n"
+                 + t("cli.msg.boundsWritten", path=result["saved"],
+                     count=len(result["shapes"]), kept=kept))
         return 0
     rows = bench.bounds(args.shape, args.margin)
     _out(args, rows if args.json else text.bounds(rows))
@@ -368,7 +373,8 @@ def cmd_bounds(args) -> int:
 
 
 def cmd_colliders(args) -> int:
-    """Капсулы скелета числами: где стоят, какие и как сидят по коже."""
+    """Capsules of the skeleton in numbers: where they stand, what they are, how they
+    sit against the skin."""
     bench = _bench(args)
     if not bench.has_skeleton():
         raise ValueError(t("cli.err.noSkeleton"))
@@ -384,7 +390,7 @@ def cmd_colliders(args) -> int:
 
 
 def cmd_fit(args) -> int:
-    """Посадить капсулы по коже при нынешних ползунках."""
+    """Fit the capsules to the skin at the current sliders."""
     bench = _bench(args)
     if not bench.has_skeleton():
         raise ValueError(t("cli.err.noSkeleton"))
@@ -440,7 +446,8 @@ def cmd_web(args) -> int:
 
 
 def cmd_env(args) -> int:
-    """Где запущены: под MO2 или нет, какие игры видны, какой корень обзора по умолчанию."""
+    """Where we run: under MO2 or not, which games are visible, what the browse root
+    falls back to."""
     env = MorphBench().environment()
     if args.json:
         print(json.dumps(env, ensure_ascii=False, indent=2))
@@ -453,7 +460,7 @@ def cmd_env(args) -> int:
 
 
 def cmd_catalog(args) -> int:
-    """Обзор мешей под корнем: номер, путь от корня, формат морфов."""
+    """A catalogue of meshes under a root: number, path from the root, morph format."""
     bench = MorphBench()
     rows = bench.catalog(args.root, with_morphs=not args.all)
     if args.find:
@@ -465,11 +472,12 @@ def cmd_catalog(args) -> int:
 
 
 def cmd_serve(args) -> int:
-    """Страница со списком мешей на локальном порту: выбор тела без перезапуска.
+    """A page with the list of meshes on a local port: pick a body without restarting.
 
-    Без ключей просто поднимает сервер. Если на этом адресе сервер уже поднят, второй
-    не поднимается: ему отдаётся корень обзора и открывается страница. Из-под MO2 это
-    и есть передача пути - Data игры, которую видит этот процесс сквозь usvfs.
+    With no keys it simply brings a server up. If one is already up at that address,
+    a second is not started: it is handed the browse root and the page is opened. Under
+    MO2 that is exactly how the path travels - the game Data this process sees through
+    usvfs.
     """
     from presenters.serve import ServerLink, WebServer
     bench = MorphBench()
@@ -491,38 +499,41 @@ def cmd_serve(args) -> int:
         server = WebServer(bench, root=args.root, host=args.host, port=args.port,
                            with_morphs=not args.all)
     except OSError as e:
-        # Порт заняли между опросом и подъёмом: отказ словами, как и для чужой программы.
+        # The port was taken between the probe and the start: refuse in words, the same
+        # way as for another program.
         if getattr(e, "winerror", None) == 10048 or e.errno == errno.EADDRINUSE:
             raise ValueError(t("serve.portTaken", port=link.port)) from None
         raise
     if args.nif:
         bench.open(args.nif, args.tri, getattr(args, "skeleton", None))
     if getattr(args, "parent", None):
-        # Уйти вместе с тем, кто поднял: иначе жёстко снятое окно оставляет невидимый
-        # сервер на живой подмене MO2, к которому следующий запуск молча подключится.
+        # Leave together with whoever started it: otherwise a window killed outright
+        # leaves an invisible server sitting on a live MO2 overlay, and the next run
+        # silently attaches to that one.
         server.watch_parent(args.parent)
     _out(args, {"started": True, "url": server.url,
                 "root": None if server.root is None else str(server.root),
                 "insideMo2": bench.environment()["insideMo2"]} if args.json else
          t("cli.serve.browsing", root=server.root or t("cli.serve.rootOnPage"))
          + "\n" + t("cli.serve.pageAt", url=server.url))
-    sys.stdout.flush()                      # адрес виден сразу, даже если вывод в трубу
+    sys.stdout.flush()                      # the address shows at once, even into a pipe
     server.run(open_browser=not args.no_browser)
     return 0
 
 
-#: Состояние сервера ключом локализации, а не текстом: печатают его два места.
+#: The server state as a localisation key rather than as text: two places print it.
 _STATES = {"free": "cli.state.free", "ours": "cli.state.ours",
            "busy": "cli.state.busy", "slow": "cli.state.slow"}
 
 
 def _serve_status(bench: MorphBench, link, args) -> int:
-    """Жив ли сервер на адресе из настроек - и что этот процесс знает о своём окружении."""
+    """Whether a server is alive at the address from the settings - and what this process
+    knows about its own surroundings."""
     status = link.status()
     here = bench.environment()
     status["hereInsideMo2"] = here["insideMo2"]
     status["hereDataRoot"] = here["dataRoot"]
-    status["hereCandidates"] = here["candidates"]     # что этот процесс видит в Data игр
+    status["hereCandidates"] = here["candidates"]     # what this process sees in game Data
     if args.json:
         _out(args, status)
         return 0
@@ -548,7 +559,8 @@ def _serve_stop(link, args) -> int:
 
 
 def _hand_over(bench: MorphBench, link, args) -> int:
-    """Сервер уже поднят: отдать ему корень и открыть страницу, а не поднимать второй."""
+    """A server is already up: hand it the root and open the page, rather than start
+    a second one."""
     here = bench.environment()
     there = link.environment()
     if here["insideMo2"] and not there["insideMo2"]:
@@ -582,7 +594,7 @@ def main(argv=None) -> int:
         p.add_argument("--tri", default=None)
         p.add_argument("--skeleton", default=None,
                        help=t("cli.opt.top.skeleton"))
-        # Без умолчания: иначе --json, поставленный ПЕРЕД именем команды, затирался бы.
+        # No default: otherwise --json put BEFORE the name of the command would be wiped.
         p.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
         p.set_defaults(func=fn)
         return p
@@ -675,9 +687,11 @@ def main(argv=None) -> int:
     p.add_argument("--slider", action="append", default=[])
     p.add_argument("--only", default=None)
 
-    for name, fn, hlp in (("render", cmd_render, "кадр в PNG"),
-                          ("sheet", cmd_sheet, "несколько ракурсов подряд"),
-                          ("web", cmd_web, "самодостаточная страница со смотрелкой")):
+    # The keys are spelled out in the calls, not held in a variable: a key that only ever
+    # reaches `t()` through a variable is invisible to a grep and to the catalogue check.
+    for name, fn, hlp in (("render", cmd_render, t("cli.cmd.render")),
+                          ("sheet", cmd_sheet, t("cli.cmd.sheet")),
+                          ("web", cmd_web, t("cli.cmd.web"))):
         p = add(name, fn, nif_required=False, help=hlp)
         p.add_argument("--entry", default=None,
                        help=t("cli.opt.view.entry"))
@@ -714,7 +728,7 @@ def main(argv=None) -> int:
             p.add_argument("--views", default=None)
             p.add_argument("--prefix", default="view")
 
-    # Команды без меша: окружение, обзор и страница со списком.
+    # Commands that need no mesh: the surroundings, the catalogue, the page with the list.
     p = sub.add_parser("env", help=t("cli.cmd.env"))
     p.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
     p.set_defaults(func=cmd_env)
@@ -745,7 +759,8 @@ def main(argv=None) -> int:
     try:
         return args.func(args)
     except _REFUSALS as e:
-        # Отказ фасада - не сбой программы: одна строка и код 2, как у argparse.
+        # A refusal of the facade is not a crash of the program: one line and code 2,
+        # the same as argparse gives.
         message = e.args[0] if e.args and isinstance(e.args[0], str) else str(e)
         print("%s: %s" % (args.cmd, message), file=sys.stderr)
         return 2

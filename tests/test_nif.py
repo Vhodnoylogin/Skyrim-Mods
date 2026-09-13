@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
-"""Чтение меша: крошечный NIF, записанный штатным PyNifly, читается BodyModel.from_nif.
+"""Reading a mesh: a tiny NIF written by PyNifly itself is read back by BodyModel.from_nif.
 
-Проверяется перенос данных из обвязки nifly в объекты ядра: вершины, треугольники, нормали,
-UV, веса костей и пустой список текстур. Файл создаётся самим PyNifly, поэтому меш вервольфа
-не нужен; если API PyNifly не даёт создать файл, набор пропускается с текстом исключения.
-Заодно проверяется open(): файл морфов подбирается рядом по имени без суффикса веса.
+What is checked is how the data carries over from the nifly wrapper into the objects of
+the core: vertices, triangles, normals, UVs, bone weights and an empty list of textures.
+The file is made by PyNifly itself, so no mesh of our own is needed; if the PyNifly API
+cannot make one, these tests are skipped with the text of the exception. open() is checked
+along the way: the morph file is picked up beside the mesh by name, without the weight
+suffix.
 """
 import os
 import sys
@@ -51,7 +53,7 @@ class TestFromNif(unittest.TestCase):
         self.assertEqual(self.model.vertex_count, 7)
         body = self.model.shape("body")
         self.assertTrue(np.allclose(body.verts, BODY["verts"]))
-        self.assertEqual(body.tris.tolist(), [list(t) for t in BODY["tris"]])
+        self.assertEqual(body.tris.tolist(), [list(tri) for tri in BODY["tris"]])
         self.assertTrue(np.allclose(body.normals, BODY["normals"]))
         self.assertTrue(np.allclose(body.uvs, BODY["uvs"]))
         fur = self.model.shape("fur")
@@ -59,7 +61,8 @@ class TestFromNif(unittest.TestCase):
         self.assertTrue(np.allclose(fur.verts, FUR["verts"]))
 
     def test_bones_and_weights(self):
-        """Веса доезжают до Bone: те же вершины, те же доли; часть без скина — без костей."""
+        """The weights make it as far as Bone: the same vertices, the same shares; a shape
+        with no skin comes with no bones."""
         body = self.model.shape("body")
         self.assertEqual(sorted(body.bones), sorted(BODY["bones"]))
         for name, pairs in BODY["bones"].items():
@@ -68,13 +71,13 @@ class TestFromNif(unittest.TestCase):
                              {v: w for v, w in pairs})
         self.assertEqual(self.model.bone_names(), sorted(BODY["bones"]))
         self.assertEqual(self.model.shape("fur").bones, {})
-        # Вершина 1 поделена поровну: побеждает та кость, что идёт первой в порядке части.
+        # Vertex 1 is split evenly: the bone that comes first in the shape's own order wins.
         order = body.bone_order()
         left, right = order.index("NPC L Hand [LHnd]"), order.index("NPC R Hand [RHnd]")
         self.assertEqual(body.dominant_bone().tolist(), [left, min(left, right), right, right])
 
     def test_textures_empty(self):
-        """Пустые слоты текстур не превращаются в пустые строки списка."""
+        """Empty texture slots do not turn into empty strings in the list."""
         self.assertEqual(self.model.shape("body").textures, [])
 
     def test_missing_file(self):
@@ -82,7 +85,8 @@ class TestFromNif(unittest.TestCase):
             BodyModel.from_nif(Path(self.tmp.name) / "none.nif", self.cfg)
 
     def test_open_finds_tri_next_to_mesh(self):
-        """tiny_0.nif → tiny.tri: суффикс веса отбрасывается, файл морфов подбирается сам."""
+        """tiny_0.nif -> tiny.tri: the weight suffix is dropped and the morph file is found
+        on its own."""
         TripFile = common.trip_file_class(self.cfg)
         trip = TripFile()
         moved = [tuple(v[k] + (1.0 if (i == 3 and k == 2) else 0.0) for k in range(3))

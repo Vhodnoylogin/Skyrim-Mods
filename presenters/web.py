@@ -1,31 +1,36 @@
-"""Слой показа: самодостаточная страница со смотрелкой в браузере.
+"""The presentation layer: a self-contained page with the viewer in a browser.
 
-Один HTML-файл и ничего снаружи: ни библиотек, ни шрифтов, ни картинок, ни запросов. Всё, что
-нужно, чтобы покрутить тело и потянуть ползунки, вложено внутрь - геометрия, морфы, признаки
-раскраски, цели наведения, ракурсы и настройки. Открывается с диска, по file://, и живёт
-столько, сколько живёт файл: страницу можно положить рядом с отчётом о прогоне.
+One HTML file and nothing outside it: no libraries, no fonts, no images, no requests.
+Everything needed to turn a body around and pull the sliders is folded inside - geometry,
+morphs, the keys for colouring, the aim targets, the views and the settings. It opens from
+disk, over file://, and lives as long as the file does: the page can be put next to a report
+of a run.
 
-Ничего не вычисляет сам - в том же смысле, что и растеризатор. Вершины, треугольники, номера
-костей, смещения морфов и растяжение берутся у фасада и упаковываются в один блок JSON;
-двоичные массивы - типизированные массивы в base64. Смещения морфов сжаты в двухбайтные числа
-с одним множителем на пару «часть - морф», как в формате TRIP, растяжение - разреженно, только
-ненулевые вершины. Скрипт страницы повторяет объекты ядра зеркально: у каждой кнопки есть
-метод `MorphBench` с тем же именем, а внизу панели видно текущее состояние в том виде, в каком
-его отдаёт `view_state()`, и командную строку `mb.py render`, которая даст тот же кадр без окна.
+It computes nothing itself - in the same sense as the rasteriser. Vertices, triangles, bone
+numbers, morph offsets and strain are taken from the facade and packed into one block of
+JSON; the binary arrays go as typed arrays in base64. Morph offsets are squeezed into
+two-byte numbers with one multiplier per shape-and-morph pair, as in the TRIP format, strain
+sparsely - only the vertices that are not zero. The page's script mirrors the objects of the
+core: every button has a `MorphBench` method of the same name, and at the bottom of the panel
+the current state is visible in the shape `view_state()` gives it, along with the `mb.py
+render` command line that will yield the same frame without a window.
 
-Палитры перенесены из растеризатора один в один, камера повторяет `ViewState.basis()`
-и `framing()`, свет - `light_vector()` и силы из того же состояния, нормали вершин считаются
-по `vertex_normals` из model.py - поэтому кадр страницы совпадает с PNG.
+The palettes are carried over from the rasteriser one for one, the camera repeats
+`ViewState.basis()` and `framing()`, the light `light_vector()` and the powers from that same
+state, and vertex normals are worked out by `vertex_normals` from model.py - which is why the
+frame of the page matches the PNG.
 
-Капсулы столкновений - если к мешу открыт скелет - вкладываются готовыми треугольниками,
-как их отдаёт `collider_mesh()` и `bumper_mesh()`; страница кладёт их поверх тела так же,
-как растеризатор: полупрозрачно, цветом и прозрачностью из настроек, со своей глубиной
-и не заслоняя тело. Включение слоя - `show_colliders`, тот же метод, что у фасада.
+The collision capsules - when a skeleton is open for the mesh - are folded in as ready
+triangles, just as `collider_mesh()` and `bumper_mesh()` give them; the page lays them over
+the body the way the rasteriser does: translucent, in the colour and opacity from the
+settings, with a depth of their own and without hiding the body. The layer is switched by
+`show_colliders`, the same method as the facade's.
 
-Та же страница умеет приходить и с локального сервера (`mb.py serve`): тогда в блок JSON
-вкладываются ещё список мешей под корнем обзора и окружение, и на панели появляется выбор
-модели. Геометрия в обоих случаях упаковывается одинаково, а страница с сервера обращается
-только к своему серверу - переходом на другой запрос, без единого запроса наружу.
+The same page can also arrive from the local server (`mb.py serve`): then the block of JSON
+carries the meshes under the browse root and the environment as well, and a choice of model
+appears on the panel. The geometry is packed the same way in both cases, and a page from the
+server talks to its own server alone - by going to another request, without a single request
+outside.
 """
 from __future__ import annotations
 
@@ -41,13 +46,14 @@ from .assets import PageAssets
 
 
 class WebPage:
-    """Страница поверх фасада: числа ядра, упакованные в один файл.
+    """The page on top of the facade: the numbers of the core packed into one file.
 
-    Без сервера страница самодостаточна и открывается с диска. С сервера (`server=True`)
-    она получает ещё список мешей `catalog` (как его отдаёт `bench.catalog`), окружение
-    `environment`, корень обзора `root`, признак «и без морфов» и текст ошибки последнего
-    запроса: этого хватает панели, чтобы предложить выбор модели ссылкой на тот же сервер.
-    Меш при этом может быть и не открыт - тогда страница показывает пустой холст и список.
+    Without a server the page is self-contained and opens from disk. From a server
+    (`server=True`) it gets the list of meshes `catalog` as well (as `bench.catalog` gives
+    it), the environment `environment`, the browse root `root`, the "meshes without morphs
+    too" flag and the text of the last request's refusal: that is enough for the panel to
+    offer a choice of model as a link to the same server. The mesh need not even be open -
+    then the page shows an empty canvas and the list.
     """
 
     def __init__(self, bench, server: bool = False, catalog=None, environment=None,
@@ -62,24 +68,24 @@ class WebPage:
         self.error = None if error is None else str(error)
         self.assets = PageAssets()
 
-    # ---- упаковка массивов ------------------------------------------------------------
+    # ---- packing the arrays -----------------------------------------------------------
     @staticmethod
     def _b64(arr, dtype) -> str:
-        """Байты массива в base64; порядок байтов - little-endian, как читает JS."""
+        """The bytes of an array in base64; byte order little-endian, as JS reads them."""
         return base64.b64encode(np.ascontiguousarray(arr, dtype=dtype).tobytes()).decode("ascii")
 
     @staticmethod
     def _index_type(vertex_count: int) -> str:
-        """Номера вершин: два байта, пока вершин меньше 65536, иначе четыре."""
+        """Vertex numbers: two bytes while there are fewer than 65536, four otherwise."""
         return "u16" if vertex_count < 65536 else "u32"
 
     @classmethod
     def _indices(cls, idx, vertex_count: int) -> str:
         return cls._b64(idx, "<u2" if cls._index_type(vertex_count) == "u16" else "<u4")
 
-    # ---- части меша -------------------------------------------------------------------
+    # ---- parts of the mesh ------------------------------------------------------------
     def _shape(self, name: str) -> dict:
-        """Одна часть: вершины, треугольники, признак главной кости и имена костей."""
+        """One part: vertices, triangles, the key of the leading bone and the bone names."""
         shape = self.bench.model.shape(name)
         count = shape.vertex_count
         return {
@@ -90,16 +96,18 @@ class WebPage:
             "triangles": self._indices(shape.tris, count),
             "boneKey": self._b64(self.bench.bone_key(name), "<i2"),
             "boneNames": self.bench.shape_bone_names(name),
-            # Кости с непустыми весами - по ним ядро решает, чья капсула видна вместе
-            # с частью (visible_collider_bones); boneNames может нести и пустые.
+            # Bones with weights that are not empty - the core decides by them whose capsule
+            # is shown together with the part (visible_collider_bones); boneNames may carry
+            # empty ones as well.
             "heldBones": self.bench.held_bones(name),
         }
 
-    # ---- капсулы столкновений ---------------------------------------------------------
+    # ---- collision capsules -----------------------------------------------------------
     @classmethod
     def _chunk(cls, verts, tris) -> dict | None:
-        """Кусок геометрии без костей и морфов - в том же виде, что часть меша: вершины
-        `<f4`, тип номера и треугольники. Пустой кусок - None: рисовать нечего."""
+        """A piece of geometry without bones or morphs - in the same shape as a part of the
+        mesh: `<f4` vertices, the type of the number and the triangles. An empty piece is
+        None: there is nothing to draw."""
         tris = np.asarray(tris)
         if tris.shape[0] == 0:
             return None
@@ -111,9 +119,10 @@ class WebPage:
                 "triangles": cls._indices(tris, count)}
 
     def _colliders(self) -> dict | None:
-        """Капсулы тел кусками по костям (`collider_meshes` фасада) и бампер отдельно,
-        в мировых координатах. По костям - чтобы страница прятала капсулу вместе с частью
-        меша, не спрашивая ядро. Без скелета - None: раздел на панели не строится."""
+        """The capsules of the bodies in pieces by bone (the facade's `collider_meshes`) and
+        the bumper apart, in world coordinates. By bone - so that the page hides a capsule
+        together with a part of the mesh without asking the core. Without a skeleton - None:
+        the section on the panel is not built at all."""
         bench = self.bench
         if not bench.has_skeleton():
             return None
@@ -124,9 +133,10 @@ class WebPage:
                 bodies.append({"bone": piece["bone"], **chunk})
         return {"bodies": bodies, "bumper": self._chunk(*bench.bumper_mesh())}
 
-    # ---- морфы ------------------------------------------------------------------------
+    # ---- morphs -----------------------------------------------------------------------
     def _deltas(self, shape_name: str, morph: str, vertex_count: int) -> dict | None:
-        """Смещения морфа на части, сжатые в int16 с одним множителем: max|сдвиг|/32767."""
+        """The offsets of a morph on a part, squeezed into int16 with one multiplier:
+        max|offset|/32767."""
         raw = self.bench.morph_deltas(shape_name, morph)
         if raw is None:
             return None
@@ -146,7 +156,8 @@ class WebPage:
                 "offsets": self._b64(q, "<i2")}
 
     def _strain(self, shape_name: str, morph: str, vertex_count: int) -> dict | None:
-        """Растяжение у вершин - разреженно: ненулевые вершины, uint8 от максимума и сам максимум."""
+        """Strain at the vertices - sparsely: the vertices that are not zero, uint8 of the
+        maximum, and the maximum itself."""
         key = np.asarray(self.bench.strain_key(shape_name, morph), dtype=np.float32)
         top = float(key.max()) if key.size else 0.0
         if top <= 1e-6:
@@ -158,9 +169,9 @@ class WebPage:
                 "indices": self._indices(idx, vertex_count),
                 "values": self._b64(values, "u1")}
 
-    # ---- настройки, которые нужны показу ----------------------------------------------
+    # ---- the settings the page needs --------------------------------------------------
     def _settings(self) -> dict:
-        """Единственный источник чисел для страницы: ни одно из них в скрипте не зашито."""
+        """The only source of numbers for the page: not one of them is fixed in the script."""
         cfg = self.cfg
         return {
             "background": [float(x) for x in cfg["background"]],
@@ -180,26 +191,28 @@ class WebPage:
             "sliderStep": float(cfg["sliderStep"]),
             "orbitSensitivity": float(cfg["orbitSensitivity"]),
             "wheelZoomRate": float(cfg["wheelZoomRate"]),
-            # Слой капсул: цвет 0..255 и прозрачность 0..1 - те же ключи, что у растеризатора.
+            # The capsule layer: colour 0..255 and opacity 0..1 - the same keys as the
+            # rasteriser's.
             "colliderColour": [float(x) for x in cfg["colliderColour"]],
             "colliderOpacity": float(cfg["colliderOpacity"]),
             "collidersFollowParts": bool(cfg["collidersFollowParts"]),
         }
 
-    # ---- сервер: то, что страница знает о нём -----------------------------------------
+    # ---- the server: what the page knows about it -------------------------------------
     def _server(self) -> dict | None:
-        """Список мешей, окружение и корень - только когда страницу отдаёт сервер.
-        В файле с диска здесь None, и панель не предлагает того, чего сделать не может."""
+        """The list of meshes, the environment and the root - only when a server hands the
+        page out. In a file on disk this is None, and the panel does not offer what it
+        cannot do."""
         if not self.server:
             return None
         return {"root": self.root, "withMorphs": self.with_morphs,
                 "catalog": self.catalog, "environment": self.environment,
                 "error": self.error}
 
-    # ---- тело: геометрия, морфы, цели -------------------------------------------------
+    # ---- the body: geometry, morphs, targets ------------------------------------------
     def _body(self) -> dict:
-        """Всё про открытый меш. Здесь нет ни одного вычисления - только вопросы
-        к фасаду и упаковка ответов."""
+        """Everything about the open mesh. There is not one computation here - only
+        questions to the facade and the packing of its answers."""
         bench = self.bench
         summary = bench.summary()
         names = bench.model.shape_names()
@@ -218,15 +231,16 @@ class WebPage:
                 if s is not None:
                     strain.setdefault(morph, {})[n] = s
 
-        # Цели наведения - без округления, чтобы кадр страницы сошёлся с PNG. Наведение,
-        # заданное из командной строки подстрокой («Finger»), среди целей отсутствует -
-        # ядро уже сосчитало его сферу, и она добавляется к целям под своим именем.
+        # The aim targets go without rounding, so that the frame of the page matches the PNG.
+        # An aim set from the command line by a substring ("Finger") is not among the targets
+        # - the core has already worked out its sphere, and it is added to the targets under
+        # its own name.
         targets = bench.focus_targets(precise=True)
         view = bench.view
         if view.has_focus and view.focus_name and ":" in view.focus_name:
             kind, _, name = view.focus_name.partition(":")
             group = targets.get(kind + "s")
-            if group is not None and not any(t["name"] == name for t in group):
+            if group is not None and not any(aim["name"] == name for aim in group):
                 group.append({"name": name, "centre": [float(x) for x in view.focus_centre],
                               "radius": float(view.focus_radius)})
 
@@ -245,15 +259,17 @@ class WebPage:
 
     @staticmethod
     def _no_body() -> dict:
-        """Меш не открыт: пустой холст, но та же форма данных, чтобы скрипт не ветвился."""
+        """The mesh is not open: an empty canvas, but the same shape of data, so that the
+        script does not have to branch."""
         return {"summary": None, "names": {"nif": None, "tri": None, "skeleton": None},
                 "shapes": [], "morphs": [], "deltas": {}, "strain": {},
                 "targets": {"bones": [], "morphs": [], "shapes": []},
                 "colliders": None}
 
-    # ---- всё вместе -------------------------------------------------------------------
+    # ---- all of it together -----------------------------------------------------------
     def payload(self) -> dict:
-        """Всё, что страница знает о меше, настройках и - если есть - сервере, одним словарём."""
+        """Everything the page knows about the mesh, the settings and - if there is one -
+        the server, in one dictionary."""
         bench = self.bench
         data = self._body() if bench.is_open() else self._no_body()
         data.update({
@@ -262,19 +278,21 @@ class WebPage:
             "view": bench.view_state(precise=True),
             "sliders": bench.sliders(),
             "server": self._server(),
-            # Надписи страницы едут готовыми: скрипт в браузере словаря языка не видит.
+            # The page's labels travel ready-made: a script in the browser cannot reach
+            # the language catalogue.
             "texts": section("page."),
         })
         return data
 
     def html(self, linked: bool = False) -> str:
-        """Готовая страница строкой.
+        """The finished page as a string.
 
-        `linked` решает, откуда страница берёт свои файлы: сервер раздаёт их по одному,
-        а файлу на диске их надо нести внутри. Всё остальное в обоих случаях одинаково.
+        `linked` decides where the page takes its files from: a server hands them out one by
+        one, and a file on disk has to carry them inside. Everything else is the same in
+        both cases.
 
-        Данные лежат в блоке <script type="application/json">; последовательность `</`
-        внутри строк экранируется, чтобы имя части не закрыло блок.
+        The data sits in a <script type="application/json"> block; the sequence `</` inside
+        the strings is escaped, so that the name of a part cannot close the block.
         """
         data = json.dumps(self.payload(), ensure_ascii=False, separators=(",", ":"))
         data = data.replace("</", "<\\/")
@@ -283,16 +301,17 @@ class WebPage:
         return self.assets.page({
             "__MB_LANG__": _escape(language()),
             "__MB_TITLE__": _escape("morphbench — %s" % name),
-            # Две надписи стоят прямо в разметке, до запуска скрипта: подсказка о мыши
-            # и слово для браузера без WebGL2 - его читают именно тогда, когда скрипт
-            # не пошёл.
+            # Two labels stand in the markup itself, before the script runs: the hint about
+            # the mouse and the word for a browser without WebGL2 - which is read exactly
+            # when the script did not go.
             "__MB_HINT__": _escape(t("page.hint")),
             "__MB_NOGL__": _escape(t("page.noWebGL")),
             "__MB_DATA__": data,
         }, linked=linked)
 
     def save(self, path) -> Path:
-        """Страница одним файлом: всё внутри, открывается с диска и живёт без сервера."""
+        """The page as one file: everything inside, opens from disk and lives without a
+        server."""
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(self.html(), encoding="utf-8")
@@ -302,6 +321,3 @@ class WebPage:
 def _escape(text: str) -> str:
     return (text.replace("&", "&amp;").replace("<", "&lt;")
             .replace(">", "&gt;").replace('"', "&quot;"))
-
-
-

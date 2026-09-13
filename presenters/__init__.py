@@ -1,1 +1,1 @@
-"""Слои показа поверх готового ядра. Ядро о них не знает."""
+"""Presentation layers on top of a finished core. The core knows nothing about them."""

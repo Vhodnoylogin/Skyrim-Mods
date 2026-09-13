@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
-"""Морфы в памяти: пустой ползунок, объявленный-но-отсутствующий, применение с долей
-и с номерами вершин за пределами меша.
+"""Morphs in memory: the empty slider, the declared-but-absent one, applying with an amount
+and with vertex numbers past the end of the mesh.
 
-Пустой морф — тихая поломка: он есть в файле, принимает значение и читается обратно тем же
-числом, но не двигает ни одной вершины. Здесь проверяется, что верстак его видит, отличает
-от отсутствующего вовсе и что ни один расчёт на нём не падает. Номера вершин за пределами
-меша — вторая тихая поломка: файл морфов собран под другой меш; верстак обязан обрезать
-такие номера, а не падать посреди отчёта.
+An empty morph is a quiet breakage: it is in the file, it takes a value and reads back by
+the same number - and yet it moves not a single vertex. What is checked here is that the tool
+sees it, tells it apart from one that is not there at all, and that no calculation falls
+over on it. Vertex numbers past the end of the mesh are the second quiet breakage: the morph
+file was built against another mesh, and the tool has to clip such numbers rather than fall
+over in the middle of a report.
 """
 import os
 import sys
@@ -22,7 +23,7 @@ from morphbench import Morph  # noqa: E402
 
 
 class TestEmptyMorph(unittest.TestCase):
-    """Морф без единой вершины."""
+    """A morph without a single vertex."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -34,7 +35,7 @@ class TestEmptyMorph(unittest.TestCase):
         self.bench = common.bench(self.tmp.name, common.model(self.body), self.ms)
 
     def test_flags_and_measures(self):
-        """Пустой морф так и представляется: ноль вершин, нулевые сдвиги, нет области."""
+        """An empty morph presents itself as one: no vertices, no shifts, no region."""
         self.assertTrue(self.empty.is_empty)
         self.assertEqual(self.empty.vertex_count, 0)
         self.assertEqual(self.empty.max_shift, 0.0)
@@ -44,13 +45,13 @@ class TestEmptyMorph(unittest.TestCase):
         self.assertFalse(self.up.is_empty)
 
     def test_apply_returns_same_vertices(self):
-        """Применение пустого морфа ничего не меняет и не плодит копий."""
+        """Applying an empty morph changes nothing and makes no copy."""
         out = self.empty.apply(self.body.verts, 1.0)
         self.assertIs(out, self.body.verts)
         self.assertTrue(np.array_equal(out, self.body.verts))
 
     def test_listed_as_empty(self):
-        """Пустой морф попадает в перечень пустых, рабочий — нет."""
+        """The empty morph makes the list of empty ones; the working one does not."""
         self.assertEqual([m.name for m in self.ms.empty()], ["Empty"])
         rows = self.bench.empty_morphs()
         self.assertEqual(rows, [{"shape": "body", "morph": "Empty", "vertices": 0,
@@ -61,8 +62,8 @@ class TestEmptyMorph(unittest.TestCase):
         self.assertEqual(stats["Up"]["bounds"], {"min": [1.0, 1.0, 0.0], "max": [1.0, 1.0, 0.0]})
 
     def test_nothing_crashes_on_empty(self):
-        """Ни один разбор не падает на пустом морфе: растяжение и наведение его не считают,
-        раскраска даёт нули, слои — отсутствие."""
+        """Not one reading falls over on an empty morph: strain and focus do not count it,
+        the colouring comes out zero, the layers come out absent."""
         self.assertIsNone(self.bench.analyzer.edge_strain("body", "Empty"))
         self.assertIsNone(self.bench.analyzer.strain("body", "Empty"))
         self.assertEqual([r["morph"] for r in self.bench.strain()], ["Up"])
@@ -72,11 +73,12 @@ class TestEmptyMorph(unittest.TestCase):
         self.assertEqual(self.bench.bones_left_behind("body", "Empty"), [])
         with self.assertRaises(KeyError):
             self.bench.focus_morph("Empty")
-        self.assertEqual([t["name"] for t in self.bench.focus_targets()["morphs"]], ["Up"])
+        self.assertEqual([target["name"] for target in self.bench.focus_targets()["morphs"]],
+                         ["Up"])
 
     def test_missing_morphs(self):
-        """Объявленный, но отсутствующий ползунок называется по имени; существующие — даже
-        пустые — не трогаются; порядок запроса сохраняется."""
+        """A slider that is declared but absent is named; the ones that exist - even the
+        empty ones - are left alone; the order asked for is kept."""
         self.assertEqual(self.bench.missing_morphs(["Up", "Ghost", "Empty", "Other"]),
                          ["Ghost", "Other"])
         self.assertEqual(self.bench.missing_morphs([]), [])
@@ -84,14 +86,14 @@ class TestEmptyMorph(unittest.TestCase):
 
 
 class TestApply(unittest.TestCase):
-    """Morph.apply: доля, неприкосновенность исходника, номера за пределами меша."""
+    """Morph.apply: the amount, the source left untouched, numbers past the end of the mesh."""
 
     def setUp(self):
         self.verts = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=np.float32)
         self.m = common.morph("Up", "body", [1, 3], [(0.0, 0.0, 2.0), (1.0, 0.0, 0.0)])
 
     def test_amount(self):
-        """Смещение умножается на долю; нетронутые вершины остаются на месте."""
+        """The offset is multiplied by the amount; untouched vertices stay where they were."""
         out = self.m.apply(self.verts, 0.5)
         self.assertTrue(np.allclose(out[1], [1, 0, 1]))
         self.assertTrue(np.allclose(out[3], [1.5, 1, 0]))
@@ -100,18 +102,19 @@ class TestApply(unittest.TestCase):
         self.assertTrue(np.allclose(back[1], [1, 0, -2]))
 
     def test_source_untouched(self):
-        """Исходное облако не меняется: apply возвращает копию."""
+        """The cloud passed in does not change: apply hands back a copy."""
         before = self.verts.copy()
         out = self.m.apply(self.verts, 1.0)
         self.assertIsNot(out, self.verts)
         self.assertTrue(np.array_equal(self.verts, before))
 
     def test_zero_amount(self):
-        """Нулевая доля — те же вершины без копирования."""
+        """An amount of zero - the same vertices, with no copy made."""
         self.assertIs(self.m.apply(self.verts, 0.0), self.verts)
 
     def test_indices_beyond_mesh_are_clipped(self):
-        """Морф, собранный под меш побольше: лишние номера обрезаются, остальные работают."""
+        """A morph built against a bigger mesh: the numbers over the end are dropped, the
+        rest still work."""
         m = common.morph("Big", "body", [1, 99, 7], [(0.0, 0.0, 1.0)])
         out = m.apply(self.verts, 1.0)
         self.assertEqual(out.shape, self.verts.shape)
@@ -120,8 +123,9 @@ class TestApply(unittest.TestCase):
 
 
 class TestOutOfRangeAcrossFacade(unittest.TestCase):
-    """Файл морфов под другой меш: номера вершин за пределами части. Все разборы обязаны
-    обрезать их, как это делает apply, — падение посреди отчёта хуже неверной строки."""
+    """A morph file built for another mesh: vertex numbers past the end of the shape. Every
+    reading has to clip them the way apply does - falling over in the middle of a report is
+    worse than a wrong row."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -131,7 +135,7 @@ class TestOutOfRangeAcrossFacade(unittest.TestCase):
             "Hand": common.bone("Hand", common.columns(nx, ny, (0, 1))),
             "Finger": common.bone("Finger", common.columns(nx, ny, (2, 3)))})
         fur = common.grid("fur", nx, ny, z=1.0)
-        # Вершины 2, 3 существуют, 40 и 99 — нет.
+        # Vertices 2 and 3 exist; 40 and 99 do not.
         self.m = common.morph("Up", "body", [2, 3, 40, 99], [(0.0, 0.0, 1.0)])
         self.bench = common.bench(self.tmp.name, common.model(body, fur), common.morph_set(self.m))
 
@@ -152,23 +156,24 @@ class TestOutOfRangeAcrossFacade(unittest.TestCase):
         self.assertEqual(rows["fur"]["contact"], 0.125)
         self.bench.focus_morph("Up")
         self.assertEqual(self.bench.view_state()["focus"]["centre"], [2.5, 0.0, 0.0])
-        self.assertEqual([t["name"] for t in self.bench.focus_targets()["morphs"]], ["Up"])
+        self.assertEqual([target["name"] for target in self.bench.focus_targets()["morphs"]],
+                         ["Up"])
         self.bench.set_slider("Up", 1.0)
         self.assertTrue(np.allclose(self.bench.deformed("body")[[2, 3], 2], 1.0))
 
     def test_morph_stats_survive(self):
-        """Карточка морфа — первое, что спрашивают о паре «меш + морфы». Она обязана
-        показать морф с лишними номерами, а не упасть с IndexError."""
+        """The card of a morph is the first thing asked about a mesh and its morphs. It has
+        to show a morph with numbers over the end, not fall over with an IndexError."""
         try:
             rows = self.bench.morph_stats()
         except IndexError as e:
-            self.fail("morph_stats упал на номере вершины за пределами меша: %s" % e)
+            self.fail("morph_stats fell over on a vertex number beyond the mesh: %s" % e)
         self.assertEqual(rows[0]["morph"], "Up")
         self.assertEqual(rows[0]["bounds"], {"min": [2.0, 0.0, 0.0], "max": [3.0, 0.0, 0.0]})
 
 
 class TestMorphSetLookup(unittest.TestCase):
-    """Справочные методы набора: имена, части, поиск."""
+    """The lookup methods of a set: names, shapes, search."""
 
     def test_names_and_lookup(self):
         ms = common.morph_set(

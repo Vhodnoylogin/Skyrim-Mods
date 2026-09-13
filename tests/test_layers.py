@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Слои и смежность: следует ли оболочка за кожей, и обязана ли она следовать вообще.
+"""Layers and adjacency: does a cover follow the skin, and does it have to follow at all.
 
-Кожа — плоская сетка 6×4; морф поднимает её правую половину (столбцы 3-5) на 2, а один
-угол — на 3. Над сдвигаемой половиной в одной единице лежит оболочка A, над несдвигаемой —
-B, далеко вверху (за пределами contactRadius) — C. Отсюда все ожидания считаются в уме:
-у A каждая вершина стоит ровно над своей вершиной кожи на расстоянии 1; у B под ногами
-ничего не двигается; у C под ногами вообще ничего нет.
+The skin is a flat 6x4 grid; the morph lifts its right half (columns 3-5) by 2, and one corner
+by 3. Cover A lies one unit above the moved half, B above the half that stays, and C far above
+it, past contactRadius. From that, every expectation can be worked out in the head: every
+vertex of A stands exactly over its own skin vertex at a distance of 1; nothing under B moves;
+under C there is nothing at all.
 """
 import os
 import sys
@@ -21,22 +21,22 @@ from morphbench.analysis import Analyzer, Proximity  # noqa: E402
 
 NX, NY = 6, 4
 MOVED_COLS = (3, 4, 5)
-CORNER = 3 * NX + 5          # вершина (5, 3): единственная со сдвигом 3
+CORNER = 3 * NX + 5          # vertex (5, 3): the only one shifted by 3
 
 
 def body_offsets(indices):
-    """Сдвиг (0, 0, 2) у всех сдвигаемых вершин кожи, у угла — (0, 0, 3)."""
+    """A shift of (0, 0, 2) on every moved vertex of the skin, and (0, 0, 3) on the corner."""
     return [(0.0, 0.0, 3.0 if int(i) == CORNER else 2.0) for i in indices]
 
 
 def shell(name, cols, z):
-    """Копия столбцов cols сетки кожи, поднятая на высоту z."""
+    """A copy of the skin grid columns `cols`, raised to the height z."""
     return common.grid(name, len(cols), NY, z=z, x0=float(cols[0]))
 
 
 def under(cols):
-    """Для вершин оболочки над столбцами cols — номера вершин кожи прямо под ними,
-    в порядке вершин оболочки."""
+    """For the cover vertices above the columns `cols` - the numbers of the skin vertices
+    right under them, in the order of the cover's vertices."""
     return np.array([iy * NX + c for iy in range(NY) for c in cols], dtype=np.int32)
 
 
@@ -45,8 +45,8 @@ def build(tmpdir, **overrides):
     moved = common.columns(NX, NY, MOVED_COLS)
     fur_a, fur_b, fur_c = (shell("furA", MOVED_COLS, 1.0), shell("furB", (0, 1, 2), 1.0),
                            shell("furC", MOVED_COLS, 100.0))
-    # У furA под каждой вершиной j лежит вершина кожи under(MOVED_COLS)[j]; копия морфа
-    # повторяет сдвиг кожи в тех же местах.
+    # Under every vertex j of furA lies the skin vertex under(MOVED_COLS)[j]; the copy of the
+    # morph repeats the shift of the skin in the same places.
     a_copy = [(0.0, 0.0, 3.0 if int(b) == CORNER else 2.0) for b in under(MOVED_COLS)]
     ms = common.morph_set(
         common.morph("Bulge", "body", moved, body_offsets(moved)),
@@ -58,7 +58,7 @@ def build(tmpdir, **overrides):
 
 
 class TestProximity(unittest.TestCase):
-    """Кто под кем лежит — на примерах, где ответ виден глазом."""
+    """Who lies under whom - on examples where the answer can be seen by eye."""
 
     def test_small_example(self):
         base = [(0, 0, 0), (1, 0, 0), (-3, -3, -3)]
@@ -70,8 +70,8 @@ class TestProximity(unittest.TestCase):
         self.assertEqual(p.covered.tolist(), [True, False, True, True, True])
 
     def test_neighbour_across_cell_boundary(self):
-        """Поиск идёт по ячейкам в радиус; пара по разные стороны границы ячейки обязана
-        находиться, иначе смежность зависела бы от того, где прошла сетка."""
+        """The search runs over cells the size of the radius; a pair on opposite sides of a
+        cell boundary must still be found, or adjacency would depend on where the grid fell."""
         p = Proximity(np.array([[1.05, 0, 0]], np.float32), np.array([[0.95, 0, 0]], np.float32), 1.0)
         self.assertEqual(p.nearest.tolist(), [0])
         self.assertAlmostEqual(float(p.distance[0]), 0.1, places=5)
@@ -100,7 +100,7 @@ class TestLayers(unittest.TestCase):
         self.an = self.bench.analyzer
 
     def test_proximity_under_shells(self):
-        """Под каждой вершиной A — своя вершина кожи на расстоянии ровно 1; под C нет ничего."""
+        """Under every vertex of A is its own skin vertex exactly 1 away; under C, nothing."""
         p = self.an.proximity("furA", "body")
         self.assertEqual(p.nearest.tolist(), under(MOVED_COLS).tolist())
         self.assertTrue(np.all(p.distance == 1.0))
@@ -111,8 +111,8 @@ class TestLayers(unittest.TestCase):
         self.assertIs(p, self.an.proximity("furA", "body"))
 
     def test_shell_over_moved_half(self):
-        """A лежит над сдвигом целиком: contact 1, смежна, должна сдвинуться на 3 (под ней
-        и угол), своя копия морфа даёт ratio 1 и missing False."""
+        """A lies over the moved half entirely: contact 1, adjacent, and it has to move by 3
+        (the corner is under it too); its own copy gives ratio 1 and missing False."""
         row = common.by_key(self.bench.layers("Bulge"), "follower")["furA"]
         self.assertEqual(row["contact"], 1.0)
         self.assertTrue(row["adjacent"])
@@ -125,7 +125,7 @@ class TestLayers(unittest.TestCase):
         self.assertEqual(row["morph"], "Bulge")
 
     def test_shell_over_still_half(self):
-        """B стоит над несдвигаемой половиной: под ногами кожа есть, но не двигается."""
+        """B stands over the half that does not move: there is skin under it, and it stays."""
         row = common.by_key(self.bench.layers("Bulge"), "follower")["furB"]
         self.assertEqual(row["contact"], 0.0)
         self.assertFalse(row["adjacent"])
@@ -133,14 +133,14 @@ class TestLayers(unittest.TestCase):
         self.assertTrue(row["missing"])
 
     def test_shell_far_away(self):
-        """C дальше contactRadius от кожи: ни одной вершины над сдвигом."""
+        """C is farther from the skin than contactRadius: not one vertex over the moved area."""
         row = common.by_key(self.bench.layers("Bulge"), "follower")["furC"]
         self.assertEqual(row["contact"], 0.0)
         self.assertFalse(row["adjacent"])
         self.assertTrue(row["missing"])
 
     def test_shell_without_own_copy(self):
-        """Lone есть у кожи и нет у A: A смежна и обязана следовать, но не следует."""
+        """Lone is on the skin and not on A: A is adjacent and has to follow, and does not."""
         row = common.by_key(self.bench.layers("Lone"), "follower")["furA"]
         self.assertTrue(row["adjacent"])
         self.assertTrue(row["missing"])
@@ -149,20 +149,20 @@ class TestLayers(unittest.TestCase):
         self.assertEqual(row["expectedMax"], 3.0)
 
     def test_empty_follower_copy_counts_as_missing(self):
-        """Пустая копия морфа у оболочки — то же, что её отсутствие."""
+        """An empty copy of the morph on the cover is the same as no copy at all."""
         row = common.by_key(self.bench.layers("Lone"), "follower")["furB"]
         self.assertTrue(row["missing"])
         self.assertEqual(row["followerMax"], 0.0)
 
     def test_only_adjacent(self):
-        """С only_adjacent остаётся одна A; без него перечислены все оболочки, кожа — нет."""
+        """With only_adjacent only A stays; without it all covers are listed, the skin is not."""
         self.assertEqual([r["follower"] for r in self.bench.layers("Bulge", only_adjacent=True)],
                          ["furA"])
         self.assertEqual([r["follower"] for r in self.bench.layers("Bulge")],
                          ["furA", "furB", "furC"])
 
     def test_base_without_morph(self):
-        """Морф есть только у оболочки: у кожи сдвига нет, ничего не двигается, ratio 0."""
+        """The morph is only on the cover: the skin has no shift, nothing moves, ratio 0."""
         rows = common.by_key(self.bench.layers("Own"), "follower")
         self.assertEqual(rows["furA"]["baseMax"], 0.0)
         self.assertEqual(rows["furA"]["followerMax"], 1.0)
@@ -172,7 +172,7 @@ class TestLayers(unittest.TestCase):
         self.assertFalse(rows["furA"]["adjacent"])
 
     def test_base_absent_from_mesh(self):
-        """Базовой части в меше нет: смежность не считалась — None, а не ложь."""
+        """The base shape is not in the mesh: adjacency was not computed - None, not false."""
         rows = self.bench.layers("Bulge", base="skin")
         self.assertEqual([r["follower"] for r in rows], ["body", "furA", "furB", "furC"])
         for r in rows:
@@ -182,7 +182,8 @@ class TestLayers(unittest.TestCase):
         self.assertEqual(self.bench.layers("Bulge", base="skin", only_adjacent=True), [])
 
     def test_facade_matches_analyzer(self):
-        """Фасад отдаёт as_dict() тех же LayerStat, что даёт Analyzer с настройками из Config."""
+        """The facade hands out as_dict() of the same LayerStat the Analyzer gives with the
+        settings from Config."""
         an = Analyzer(self.bench.model, self.bench.morph_set, 6.0, 0.02)
         for morph in ("Bulge", "Lone"):
             for adj in (False, True):
@@ -191,13 +192,14 @@ class TestLayers(unittest.TestCase):
 
 
 class TestExpectedMaxIsUnderTheShell(unittest.TestCase):
-    """expectedMax — сдвиг кожи прямо под оболочкой, а не наибольший сдвиг всей кожи."""
+    """expectedMax is the shift of the skin right under the cover, not the largest shift of
+    the whole skin."""
 
     def test_partial_cover(self):
         with tempfile.TemporaryDirectory() as tmp:
             body = common.grid("body", NX, NY)
             moved = common.columns(NX, NY, MOVED_COLS)
-            narrow = shell("furN", (3, 4), 1.0)       # угол со сдвигом 3 — не под ней
+            narrow = shell("furN", (3, 4), 1.0)       # the corner shifted by 3 is not under it
             ms = common.morph_set(common.morph("Bulge", "body", moved, body_offsets(moved)))
             row = common.bench(tmp, common.model(body, narrow), ms).layers("Bulge")[0]
             self.assertEqual(row["contact"], 1.0)
@@ -206,10 +208,10 @@ class TestExpectedMaxIsUnderTheShell(unittest.TestCase):
 
 
 class TestConfigReachesAnalyzer(unittest.TestCase):
-    """contactRadius и minContact из morphbench.json доезжают до Analyzer через фасад."""
+    """contactRadius and minContact from morphbench.json reach the Analyzer via the facade."""
 
     def test_contact_radius(self):
-        """Радиус 0.5 меньше расстояния до кожи (1): A перестаёт быть смежной."""
+        """A radius of 0.5 is less than the distance to the skin (1): A stops being adjacent."""
         with tempfile.TemporaryDirectory() as tmp:
             bench = build(tmp, contactRadius=0.5)
             self.assertEqual(bench.analyzer.contact_radius, 0.5)
@@ -223,8 +225,8 @@ class TestConfigReachesAnalyzer(unittest.TestCase):
             self.assertEqual(common.by_key(bench.layers("Bulge"), "follower")["furA"]["contact"], 1.0)
 
     def test_min_contact(self):
-        """Оболочка над столбцами 2-3 стоит над сдвигом наполовину: contact 0.5. Порог 0.6
-        делает её несмежной, порог 0.4 — смежной."""
+        """The cover over columns 2-3 stands over the moved area halfway: contact 0.5. A
+        threshold of 0.6 makes it non-adjacent, a threshold of 0.4 - adjacent."""
         for min_contact, adjacent in ((0.6, False), (0.4, True), (0.5, True)):
             with tempfile.TemporaryDirectory() as tmp:
                 body = common.grid("body", NX, NY)
