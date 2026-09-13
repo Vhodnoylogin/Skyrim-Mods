@@ -18,6 +18,7 @@ if not exist "%CSC%" (
 "%CSC%" /nologo /optimize+ /codepage:65001 /target:winexe /platform:anycpu ^
     /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll ^
     /win32manifest:"%~dp0morphbench.manifest" ^
+    /resource:"%~dp0morphbench.ico",morphbench.ico ^
     /win32icon:"%~dp0morphbench.ico" ^
     /out:"%~dp0..\morphbench.exe" "%~dp0morphbench.cs"
 if errorlevel 1 exit /b %errorlevel%

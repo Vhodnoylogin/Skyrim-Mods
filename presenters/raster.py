@@ -18,6 +18,7 @@ import numpy as np
 from PIL import Image
 
 from morphbench.model import vertex_normals
+from morphbench.i18n import t
 
 
 class Raster:
@@ -45,11 +46,11 @@ class Raster:
         """Серое - ноль, дальше жёлтое и красное. Для величины сдвига и растяжения."""
         v = np.asarray(values, dtype=np.float32)
         top = float(v.max()) if v.size else 0.0
-        t = np.zeros_like(v) if top <= 1e-6 else np.clip(v / top, 0.0, 1.0)
+        share = np.zeros_like(v) if top <= 1e-6 else np.clip(v / top, 0.0, 1.0)
         rgb = np.zeros((v.shape[0], 3), dtype=np.float32)
-        rgb[:, 0] = 0.35 + 0.65 * t
-        rgb[:, 1] = 0.35 + 0.55 * np.clip(1.6 * t, 0, 1) * (1.0 - 0.85 * t)
-        rgb[:, 2] = 0.35 * (1.0 - t)
+        rgb[:, 0] = 0.35 + 0.65 * share
+        rgb[:, 1] = 0.35 + 0.55 * np.clip(1.6 * share, 0, 1) * (1.0 - 0.85 * share)
+        rgb[:, 2] = 0.35 * (1.0 - share)
         return rgb
 
     def _vertex_colours(self, shape_name: str, count: int) -> np.ndarray | None:
@@ -82,7 +83,7 @@ class Raster:
             cols.append(np.full((shape.vertex_count, 3), 0.72, np.float32) if c is None else c)
             base += shape.vertex_count
         if not verts:
-            raise RuntimeError("нечего рисовать: все части меша скрыты")
+            raise RuntimeError(t("core.nothingToDraw"))
         return (np.vstack(verts), np.vstack(norms), np.vstack(tris), np.vstack(cols))
 
     # ---- свет -------------------------------------------------------------------------
@@ -144,24 +145,24 @@ class Raster:
         y1 = np.clip(np.ceil(np.maximum(np.maximum(ay, by), cy)).astype(np.int32), 0, h - 1)
         blend = float(alpha) < 1.0
 
-        for t in order:
-            xa, xb = x0[t], x1[t]
-            ya, yb = y0[t], y1[t]
+        for tri in order:
+            xa, xb = x0[tri], x1[tri]
+            ya, yb = y0[tri], y1[tri]
             if xb < xa or yb < ya:
                 continue
             xs = np.arange(xa, xb + 1, dtype=np.float32) + 0.5
             ys = np.arange(ya, yb + 1, dtype=np.float32) + 0.5
             gx, gy = np.meshgrid(xs, ys)
-            inv = 1.0 / area[t]
-            w0 = ((bx[t] - ax[t]) * (gy - ay[t]) - (by[t] - ay[t]) * (gx - ax[t])) * inv
-            w1 = ((gx - ax[t]) * (cy[t] - ay[t]) - (gy - ay[t]) * (cx[t] - ax[t])) * inv
+            inv = 1.0 / area[tri]
+            w0 = ((bx[tri] - ax[tri]) * (gy - ay[tri]) - (by[tri] - ay[tri]) * (gx - ax[tri])) * inv
+            w1 = ((gx - ax[tri]) * (cy[tri] - ay[tri]) - (gy - ay[tri]) * (cx[tri] - ax[tri])) * inv
             inside = (w0 >= 0) & (w1 >= 0) & (w0 + w1 <= 1.0)
             if not inside.any():
                 continue
             u = w1[inside]
             v = w0[inside]
             s = 1.0 - u - v
-            z = s * depth[a[t]] + u * depth[b[t]] + v * depth[c[t]]
+            z = s * depth[a[tri]] + u * depth[b[tri]] + v * depth[c[tri]]
             sub = zbuf[ya:yb + 1, xa:xb + 1]
             mask = np.zeros_like(inside)
             mask[inside] = z < sub[inside]
@@ -170,9 +171,9 @@ class Raster:
             u = w1[mask]
             v = w0[mask]
             s = 1.0 - u - v
-            z = s * depth[a[t]] + u * depth[b[t]] + v * depth[c[t]]
-            base = (s[:, None] * vcols[a[t]] + u[:, None] * vcols[b[t]] + v[:, None] * vcols[c[t]])
-            rgb = np.clip(base * shade[t], 0.0, 1.0)
+            z = s * depth[a[tri]] + u * depth[b[tri]] + v * depth[c[tri]]
+            base = (s[:, None] * vcols[a[tri]] + u[:, None] * vcols[b[tri]] + v[:, None] * vcols[c[tri]])
+            rgb = np.clip(base * shade[tri], 0.0, 1.0)
             sub[mask] = z
             csub = colour[ya:yb + 1, xa:xb + 1]
             csub[mask] = csub[mask] * (1.0 - alpha) + rgb * alpha if blend else rgb
