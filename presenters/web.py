@@ -35,6 +35,8 @@ from pathlib import Path
 
 import numpy as np
 
+from morphbench.i18n import section, t
+
 
 class WebPage:
     """Страница поверх фасада: числа ядра, упакованные в один файл.
@@ -257,6 +259,8 @@ class WebPage:
             "view": bench.view_state(precise=True),
             "sliders": bench.sliders(),
             "server": self._server(),
+            # Надписи страницы едут готовыми: скрипт в браузере словаря языка не видит.
+            "texts": section("page."),
         })
         return data
 
@@ -265,9 +269,15 @@ class WebPage:
         последовательность `</` внутри строк экранируется, чтобы имя части не закрыло блок."""
         data = json.dumps(self.payload(), ensure_ascii=False, separators=(",", ":"))
         data = data.replace("</", "<\\/")
-        name = Path(self.bench.summary()["nif"]).name if self.bench.is_open() else "меш не открыт"
+        name = (Path(self.bench.summary()["nif"]).name if self.bench.is_open()
+                else t("page.noMesh"))
         title = "morphbench — %s" % name
-        return _PAGE.replace("__MB_TITLE__", _escape(title)).replace("__MB_DATA__", data)
+        # Две надписи стоят прямо в разметке, до запуска скрипта: подсказка о мыши и слово
+        # для браузера без WebGL2 - его читают именно тогда, когда скрипт не пошёл.
+        page = (_PAGE.replace("__MB_TITLE__", _escape(title))
+                .replace("__MB_HINT__", _escape(t("page.hint")))
+                .replace("__MB_NOGL__", _escape(t("page.noWebGL"))))
+        return page.replace("__MB_DATA__", data)
 
     def save(self, path) -> Path:
         path = Path(path)
@@ -349,8 +359,8 @@ _PAGE = r"""<!DOCTYPE html>
 </header>
 <main>
   <canvas id="canvas"></canvas>
-  <div id="hint">левая кнопка — орбита · колесо — масштаб к курсору · правая кнопка — панорама · двойной щелчок — сброс</div>
-  <div id="nogl">В этом браузере нет WebGL2 — нарисовать тело нечем.</div>
+  <div id="hint">__MB_HINT__</div>
+  <div id="nogl">__MB_NOGL__</div>
 </main>
 <aside id="panel"></aside>
 <script id="mb-data" type="application/json">__MB_DATA__</script>
@@ -584,7 +594,7 @@ class ViewMirror {
   orbit(dYaw, dPitch) { this.yaw = mod360(this.yaw + dYaw); this.pitch = clamp(this.pitch + dPitch, -89, 89); return this; }
   look(yaw, pitch) { this.yaw = mod360(yaw); this.pitch = clamp(pitch, -89, 89); return this; }
   preset(name) {
-    if (!(name in this.presets)) throw new Error("нет ракурса " + name);
+    if (!(name in this.presets)) throw new Error(say(T.errNoPreset, { name }));
     return this.look(this.presets[name][0], this.presets[name][1]);
   }
   preset_names() { return Object.keys(this.presets).sort(); }
@@ -635,7 +645,7 @@ class ViewMirror {
   light_follow_camera(on) { this.lightFollow = !!on; return this; }
   light_direction(x, y, z) {
     const v = [Number(x), Number(y), Number(z)];
-    if (norm(v) < 1e-6) throw new Error("направление света не может быть нулевым");
+    if (norm(v) < 1e-6) throw new Error(T.errZeroLight);
     if (this.lightFollow) this.lightCameraDir = v; else this.lightWorldDir = v;
     return this;
   }
@@ -689,7 +699,7 @@ class ViewMirror {
   is_visible(name) { return this.visible === null || this.visible.has(name); }
   // раскраска
   colour_by(mode, morph) {
-    if (!["shade", "bone", "morph", "strain"].includes(mode)) throw new Error("раскраска бывает shade, bone, morph, strain");
+    if (!["shade", "bone", "morph", "strain"].includes(mode)) throw new Error(T.errColourMode);
     this.colouring = mode; this.highlightMorph = morph === undefined ? null : morph; return this;
   }
   // три оси камеры: вправо, вверх, от зрителя к модели. Персонаж смотрит вдоль +Y,
@@ -777,14 +787,14 @@ class BenchMirror {
   bumper_mesh() { return this._bumperMesh; }
   show_colliders(on, bumper) { return this.view.show_colliders(on, bumper); }
   shape_names() { return Array.from(this.shapes.keys()).sort(); }
-  shape(name) { const s = this.shapes.get(name); if (!s) throw new Error("в меше нет части " + name); return s; }
+  shape(name) { const s = this.shapes.get(name); if (!s) throw new Error(say(T.errNoShape, { name })); return s; }
   morphs() { return this.morphList.slice(); }
   presets() { return this.view.presets; }
   visible_shapes() { return this.shape_names().filter((n) => this.view.is_visible(n)); }
 
   // ползунки
   set_slider(name, value) {
-    if (!this.morphList.includes(name)) throw new Error("нет ползунка " + name);
+    if (!this.morphList.includes(name)) throw new Error(say(T.errNoSlider, { name }));
     value = Number(value);
     if (value === 0.0) this._sliders.delete(name); else this._sliders.set(name, value);
     return this.sliders();
@@ -813,7 +823,7 @@ class BenchMirror {
   // и масштаб к точке знает, какой кадр был на экране.
   framing() {
     const shapes = this.visible_shapes().map((n) => this.shape(n)).filter((s) => s.triCount > 0);
-    if (!shapes.length) throw new Error("нечего показывать: все части меша скрыты");
+    if (!shapes.length) throw new Error(T.errAllHidden);
     const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
     for (const s of shapes) {
       const p = this.deformed(s.name);
@@ -892,7 +902,7 @@ class BenchMirror {
   // наведение: центры и радиусы уже посчитаны ядром и лежат в focus_targets
   _target(kind, name) {
     const hit = this.targets[kind].find((t) => t.name === name);
-    if (!hit) throw new Error("нет цели наведения " + kind + ":" + name);
+    if (!hit) throw new Error(say(T.errNoTarget, { kind, name }));
     return hit;
   }
   focus_bone(name) { const t = this._target("bones", name); return this.view.focus_on(t.centre, t.radius, "bone:" + name).as_dict(); }
@@ -960,7 +970,7 @@ class Renderer {
     this.canvas = canvas;
     this.settings = settings;
     const gl = canvas.getContext("webgl2", { antialias: true, preserveDrawingBuffer: true });
-    if (!gl) throw new Error("нет WebGL2");
+    if (!gl) throw new Error(T.errNoWebGL);
     this.gl = gl;
     this.program = this._program(VERTEX_SHADER, FRAGMENT_SHADER);
     this.attr = { pos: gl.getAttribLocation(this.program, "aPos"), nrm: gl.getAttribLocation(this.program, "aNrm"),
@@ -979,7 +989,7 @@ class Renderer {
   _shader(type, src) {
     const gl = this.gl, sh = gl.createShader(type);
     gl.shaderSource(sh, src); gl.compileShader(sh);
-    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error("шейдер: " + gl.getShaderInfoLog(sh));
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(say(T.errShader, { log: gl.getShaderInfoLog(sh) }));
     return sh;
   }
   _program(vs, fs) {
@@ -987,7 +997,7 @@ class Renderer {
     gl.attachShader(p, this._shader(gl.VERTEX_SHADER, vs));
     gl.attachShader(p, this._shader(gl.FRAGMENT_SHADER, fs));
     gl.linkProgram(p);
-    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error("программа: " + gl.getProgramInfoLog(p));
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(say(T.errProgram, { log: gl.getProgramInfoLog(p) }));
     return p;
   }
   _attribute(buffer, data, location, usage) {
@@ -1156,17 +1166,17 @@ class Panel {
       this.presetButtons.set(name, b);
       presetRow.appendChild(b);
     }
-    root.appendChild(el("section", null, [el("h2", { text: "Ракурс" }), presetRow,
+    root.appendChild(el("section", null, [el("h2", { text: T.secView }), presetRow,
       el("div", { class: "row", style: "margin-top:6px" }, [
-        el("button", { text: "масштаб 1:1", on: { click: () => { app.invoke("zoom", 1.0); } } }),
-        el("button", { text: "сбросить панораму", on: { click: () => app.invoke("pan", 0, 0) } }),
+        el("button", { text: T.btnZoom11, on: { click: () => { app.invoke("zoom", 1.0); } } }),
+        el("button", { text: T.btnResetPan, on: { click: () => app.invoke("pan", 0, 0) } }),
       ])]));
 
     // наведение
     const targets = bench.focus_targets();
     this.focusSelect = el("select", { on: { change: () => this.onFocus() } });
-    this.focusSelect.appendChild(el("option", { value: "", text: "вся модель" }));
-    const groups = [["shapes", "части меша", "shape"], ["bones", "кости", "bone"], ["morphs", "морфы", "morph"]];
+    this.focusSelect.appendChild(el("option", { value: "", text: T.optWholeModel }));
+    const groups = [["shapes", T.grpShapes, "shape"], ["bones", T.grpBones, "bone"], ["morphs", T.grpMorphs, "morph"]];
     for (const [key, title, kind] of groups) {
       if (!targets[key].length) continue;
       const g = el("optgroup", { label: title });
@@ -1174,7 +1184,7 @@ class Panel {
       this.focusSelect.appendChild(g);
     }
     this.focusInfo = el("div", { class: "muted" });
-    root.appendChild(el("section", null, [el("h2", { text: "Наведение" }), this.focusSelect, this.focusInfo]));
+    root.appendChild(el("section", null, [el("h2", { text: T.secFocus }), this.focusSelect, this.focusInfo]));
 
     // части меша
     this.partBoxes = new Map();
@@ -1184,13 +1194,13 @@ class Panel {
       this.partBoxes.set(name, box);
       const s = bench.shape(name);
       parts.appendChild(el("div", { class: "part" }, [
-        el("label", null, [box, el("span", { text: name }), el("span", { class: "muted", text: s.count + " в." })]),
-        el("span", { class: "only", text: "только", on: { click: () => app.invoke("only", [name]) } })]));
+        el("label", null, [box, el("span", { text: name }), el("span", { class: "muted", text: s.count + T.lblVerts })]),
+        el("span", { class: "only", text: T.btnOnly, on: { click: () => app.invoke("only", [name]) } })]));
     }
-    root.appendChild(el("section", null, [el("h2", { text: "Части меша" }),
-      bench.shape_names().length ? parts : el("div", { class: "muted", text: "меш не открыт" }),
+    root.appendChild(el("section", null, [el("h2", { text: T.secShapes }),
+      bench.shape_names().length ? parts : el("div", { class: "muted", text: T.noMesh }),
       el("div", { class: "row", style: "margin-top:6px" }, [
-        el("button", { text: "показать все", on: { click: () => app.invoke("show_all") } })])]));
+        el("button", { text: T.btnShowAll, on: { click: () => app.invoke("show_all") } })])]));
 
     // капсулы столкновений - раздел есть только при открытом скелете: без него слоя нет
     // и в ядре. Обе галочки - один метод фасада show_colliders(on, bumper); галочка
@@ -1201,19 +1211,19 @@ class Panel {
         on: { change: () => app.invoke("show_colliders", this.colliderBox.checked, null) } });
       this.bumperBox = el("input", { type: "checkbox",
         on: { change: () => app.invoke("show_colliders", bench.view.colliders, this.bumperBox.checked) } });
-      if (!bench.bumper_mesh()) { this.bumperBox.disabled = true; this.bumperBox.title = "в скелете нет цилиндра перемещения"; }
-      root.appendChild(el("section", null, [el("h2", { text: "Капсулы" }),
+      if (!bench.bumper_mesh()) { this.bumperBox.disabled = true; this.bumperBox.title = T.noBumper; }
+      root.appendChild(el("section", null, [el("h2", { text: T.secCapsules }),
         el("div", { class: "current" }, [el("span", { text: bench.names.skeleton }),
-          el("span", { class: "muted", text: " · капсул " + bench.summary.colliders })]),
+          el("span", { class: "muted", text: T.summaryCapsules + bench.summary.colliders })]),
         el("div", { class: "row", style: "margin-top:6px" }, [
-          el("label", null, [this.colliderBox, " капсулы"]),
-          el("label", null, [this.bumperBox, " бампер"])]),
-        el("div", { class: "muted", text: "полупрозрачно поверх тела; цвет и прозрачность — colliderColour и colliderOpacity из настроек" })]));
+          el("label", null, [this.colliderBox, T.lblCapsules]),
+          el("label", null, [this.bumperBox, T.lblBumper])]),
+        el("div", { class: "muted", text: T.capsulesNote })]));
     }
 
     // раскраска
     this.colourRadios = new Map();
-    const modes = [["shade", "затенение"], ["bone", "кости"], ["morph", "морф"], ["strain", "растяжение"]];
+    const modes = [["shade", T.modeShade], ["bone", T.modeBone], ["morph", T.modeMorph], ["strain", T.modeStrain]];
     const modeRow = el("div", { class: "row" });
     for (const [mode, title] of modes) {
       const r = el("input", { type: "radio", name: "colouring", value: mode, on: { change: () => this.onColour() } });
@@ -1221,10 +1231,10 @@ class Panel {
       modeRow.appendChild(el("label", null, [r, " " + title]));
     }
     this.morphSelect = el("select", { on: { change: () => this.onColour() } });
-    this.morphSelect.appendChild(el("option", { value: "", text: "— морф не выбран —" }));
+    this.morphSelect.appendChild(el("option", { value: "", text: T.optNoMorph }));
     for (const m of bench.morphs()) this.morphSelect.appendChild(el("option", { value: m, text: m }));
-    root.appendChild(el("section", null, [el("h2", { text: "Раскраска" }), modeRow,
-      el("div", { class: "row", style: "margin-top:6px" }, [el("span", { class: "muted", text: "морф для режимов «морф» и «растяжение»:" })]),
+    root.appendChild(el("section", null, [el("h2", { text: T.secColour }), modeRow,
+      el("div", { class: "row", style: "margin-top:6px" }, [el("span", { class: "muted", text: T.colourMorphNote })]),
       this.morphSelect]));
 
     // свет: за камерой или мировой, направление на источник, три силы
@@ -1235,18 +1245,18 @@ class Panel {
       on: { change: () => this.onLightDir() } }));
     this.lightPowerInputs = {};
     const powerRow = el("div", { class: "row" });
-    for (const [key, title] of [["ambient", "рассеянный"], ["diffuse", "направленный"], ["fill", "встречный"]]) {
+    for (const [key, title] of [["ambient", T.lightAmbient], ["diffuse", T.lightDiffuse], ["fill", T.lightFill]]) {
       const inp = el("input", { type: "number", step: "any", min: "0", class: "short", on: { change: () => this.onLightPower() } });
       this.lightPowerInputs[key] = inp;
       powerRow.appendChild(el("label", null, [title + " ", inp]));
     }
-    root.appendChild(el("section", null, [el("h2", { text: "Свет" }),
-      el("div", { class: "row" }, [el("label", null, [this.lightFollowBox, " за камерой"])]),
+    root.appendChild(el("section", null, [el("h2", { text: T.secLight }),
+      el("div", { class: "row" }, [el("label", null, [this.lightFollowBox, T.lblBehindCamera])]),
       el("div", { class: "row", style: "margin-top:6px" }, [this.lightDirLabel].concat(this.lightDirInputs)),
-      el("div", { class: "muted", style: "margin-top:6px", text: "силы света:" }), powerRow,
+      el("div", { class: "muted", style: "margin-top:6px", text: T.lightPowers }), powerRow,
       el("div", { class: "row", style: "margin-top:6px" }, [
-        el("button", { text: "как в настройках", on: { click: () => this.resetLight() } }),
-        el("span", { class: "muted", text: "затенение: " + st.shading })])]));
+        el("button", { text: T.btnLightDefaults, on: { click: () => this.resetLight() } }),
+        el("span", { class: "muted", text: T.shadingIs + st.shading })])]));
 
     // ползунки
     this.sliderRows = new Map();
@@ -1261,18 +1271,18 @@ class Panel {
       this.sliderRows.set(name, { row, rng, num });
       sliders.appendChild(row);
     }
-    root.appendChild(el("section", null, [el("h2", { text: "Ползунки" }),
-      bench.morphs().length ? sliders : el("div", { class: "muted", text: bench.is_open() ? "к мешу не открыт файл морфов" : "меш не открыт" }),
+    root.appendChild(el("section", null, [el("h2", { text: T.secSliders }),
+      bench.morphs().length ? sliders : el("div", { class: "muted", text: bench.is_open() ? T.noMorphFile : T.noMesh }),
       el("div", { class: "row", style: "margin-top:6px" }, [
-        el("button", { text: "сбросить", on: { click: () => app.invoke("reset_sliders") } }),
-        el("span", { class: "muted", text: "пределы " + range[0] + " … " + range[1] + " из настроек" })])]));
+        el("button", { text: T.btnResetSliders, on: { click: () => app.invoke("reset_sliders") } }),
+        el("span", { class: "muted", text: T.sliderRange + range[0] + " … " + range[1] + T.fromSettings })])]));
 
     // легенда костей
     this.legendSelect = el("select", { on: { change: () => this.refreshLegend() } });
     for (const name of bench.shape_names()) this.legendSelect.appendChild(el("option", { value: name, text: name }));
     if (bench.shapes.has(st.baseShape)) this.legendSelect.value = st.baseShape;
     this.legend = el("div", { class: "legend" });
-    this.legendSection = el("section", null, [el("h2", { text: "Легенда костей" }), this.legendSelect, this.legend]);
+    this.legendSection = el("section", null, [el("h2", { text: T.secLegend }), this.legendSelect, this.legend]);
     root.appendChild(this.legendSection);
 
     // состояние
@@ -1281,10 +1291,10 @@ class Panel {
     this.command = el("pre");
     this.note = el("div", { class: "muted" });
     this.error = el("div", { class: "err" });
-    root.appendChild(el("section", null, [el("h2", { text: "Состояние" }),
-      el("div", { class: "muted", text: "последний вызов фасада:" }), this.lastCall,
-      el("div", { class: "muted", text: "view_state() и sliders():" }), this.state,
-      el("div", { class: "muted", text: "тот же кадр без окна:" }), this.command, this.note, this.error]));
+    root.appendChild(el("section", null, [el("h2", { text: T.secState }),
+      el("div", { class: "muted", text: T.lastCall }), this.lastCall,
+      el("div", { class: "muted", text: T.stateLine }), this.state,
+      el("div", { class: "muted", text: T.sameFrame }), this.command, this.note, this.error]));
   }
 
   // Раздел «Модель». В файле с диска - только имя открытого меша: выбирать не из чего, и
@@ -1293,37 +1303,37 @@ class Panel {
   buildModel() {
     const bench = this.bench, names = bench.names, srv = bench.server;
     const current = el("div", { class: "current" }, [
-      el("span", { text: names.nif || "меш не открыт" }),
-      names.tri ? el("span", { class: "muted", text: " · морфы: " + names.tri + " (" + bench.summary.triKind + ")" }) : null]);
+      el("span", { text: names.nif || T.noMesh }),
+      names.tri ? el("span", { class: "muted", text: T.morphsOf + names.tri + " (" + bench.summary.triKind + ")" }) : null]);
     if (!srv) {
-      return el("section", null, [el("h2", { text: "Модель" }), current,
-        el("div", { class: "muted", text: "выбор модели — в mb.py serve" })]);
+      return el("section", null, [el("h2", { text: T.secModel }), current,
+        el("div", { class: "muted", text: T.modelInServe })]);
     }
     const env = srv.environment || {};
     const envLine = el("div", { class: "muted", text:
-      "под MO2: " + (env.insideMo2 ? "да" : "нет") + " · корень: " + (srv.root || "не задан") });
+      T.underMo2 + (env.insideMo2 ? T.yes : T.no) + T.rootIs + (srv.root || T.rootUnset) });
     // список мешей: группы по папке от корня, в строке - файл и формат морфов
     this.modelSelect = el("select", { on: { change: () => this.onModel() } });
     this.modelSelect.appendChild(el("option", { value: "",
-      text: srv.catalog.length ? "— выбрать меш (" + srv.catalog.length + ") —" : "— мешей под корнем нет —" }));
+      text: srv.catalog.length ? T.pickMesh + srv.catalog.length + T.pickMeshEnd : T.noMeshesUnderRoot }));
     const groups = new Map();
     const same = (a, b) => !!a && !!b && a.replace(/\\/g, "/").toLowerCase() === b.replace(/\\/g, "/").toLowerCase();
     let currentName = "";
     for (const e of srv.catalog) {
       let g = groups.get(e.folder);
       if (!g) { g = el("optgroup", { label: e.folder || "." }); groups.set(e.folder, g); this.modelSelect.appendChild(g); }
-      g.appendChild(el("option", { value: e.name, text: e.file + " · " + (e.kind || "без морфов") }));
+      g.appendChild(el("option", { value: e.name, text: e.file + " · " + (e.kind || T.withoutMorphs) }));
       if (bench.summary && same(e.nif, bench.summary.nif)) currentName = e.name;
     }
     this.modelSelect.value = currentName;
     // папка обзора и обход без морфов
-    this.rootInput = el("input", { type: "text", class: "wide", value: srv.root || "", title: "папка обзора" });
+    this.rootInput = el("input", { type: "text", class: "wide", value: srv.root || "", title: T.browseFolder });
     this.allBox = el("input", { type: "checkbox", on: { change: () => this.go({ root: this.rootInput.value }) } });
     this.allBox.checked = !srv.withMorphs;
-    return el("section", null, [el("h2", { text: "Модель" }), current, this.modelSelect,
+    return el("section", null, [el("h2", { text: T.secModel }), current, this.modelSelect,
       el("div", { class: "row", style: "margin-top:6px" }, [this.rootInput,
-        el("button", { text: "обзор", on: { click: () => this.go({ root: this.rootInput.value }) } })]),
-      el("div", { class: "row" }, [el("label", null, [this.allBox, " и без морфов"])]),
+        el("button", { text: T.btnBrowse, on: { click: () => this.go({ root: this.rootInput.value }) } })]),
+      el("div", { class: "row" }, [el("label", null, [this.allBox, T.lblWithoutMorphs])]),
       envLine, el("div", { class: "err", text: srv.error || "" })]);
   }
   // Переход на тот же сервер с другим телом или корнем: страница держит одно тело, поэтому
@@ -1378,7 +1388,7 @@ class Panel {
   // --- отражение состояния ---
   showLight(light, force) {
     this.lightFollowBox.checked = light.follow;
-    this.lightDirLabel.textContent = light.follow ? "вправо, вверх, к зрителю:" : "X, Y, Z мировые:";
+    this.lightDirLabel.textContent = light.follow ? T.lightAxesCamera : T.lightAxesWorld;
     light.direction.forEach((v, i) => {
       const inp = this.lightDirInputs[i];
       if (force || document.activeElement !== inp) inp.value = v;
@@ -1397,12 +1407,12 @@ class Panel {
     const focusValue = state.focus ? state.focus.name : "";
     if (focusValue && !Array.from(this.focusSelect.options).some((o) => o.value === focusValue)) {
       // цель задана из командной строки по подстроке - ядро уже сосчитало сферу, покажем её как есть
-      this.focusSelect.appendChild(el("option", { value: focusValue, text: focusValue + " (из командной строки)" }));
+      this.focusSelect.appendChild(el("option", { value: focusValue, text: focusValue + T.focusFromCli }));
     }
     this.focusSelect.value = focusValue;
     this.focusInfo.textContent = state.focus
-      ? "центр " + state.focus.centre.join(" ") + ", радиус " + state.focus.radius + " × запас " + bench.settings.focusPadding
-      : "кадр охватывает видимые части";
+      ? T.focusCentre + state.focus.centre.join(" ") + T.focusRadius + state.focus.radius + T.focusPadding + bench.settings.focusPadding
+      : T.frameCoversAll;
 
     // части
     for (const [name, box] of this.partBoxes) box.checked = view.is_visible(name);
@@ -1433,7 +1443,7 @@ class Panel {
     this.state.textContent = JSON.stringify({ view: state, sliders: sliders }, null, 2);
     this.command.textContent = this.buildCommand(preset);
     const notes = [];
-    if (state.visible !== null && state.visible.length === 0) notes.push("скрыты все части - растеризатору нечего рисовать.");
+    if (state.visible !== null && state.visible.length === 0) notes.push(T.allHidden);
     this.note.textContent = notes.join(" ");
   }
   refreshLegend() {
@@ -1446,7 +1456,7 @@ class Panel {
       this.legend.appendChild(el("div", { title: name }, [el("span", { class: "swatch", style: "background:rgb(" + c.join(",") + ")" }), name]));
     });
     const g = Palette.NO_BONE.map((x) => Math.round(x * 255));
-    this.legend.appendChild(el("div", null, [el("span", { class: "swatch", style: "background:rgb(" + g.join(",") + ")" }), "без кости"]));
+    this.legend.appendChild(el("div", null, [el("span", { class: "swatch", style: "background:rgb(" + g.join(",") + ")" }), T.noBone]));
   }
   // Командная строка mb.py render с теми же ключами, что принимает cmd_render: всё, что
   // нажато на странице, можно повторить без окна. Пары чисел идут через знак равенства,
@@ -1454,9 +1464,9 @@ class Panel {
   // там, где отличается от настроек: без ключей render светит так же, как настройки.
   buildCommand(preset) {
     const bench = this.bench, st = bench.settings, state = bench.view.as_dict(), sliders = bench.sliders();
-    if (!bench.summary) return "меш не открыт — кадр брать не с чего";
+    if (!bench.summary) return T.noFrameSource;
     const q = (s) => /[^\w.\-=:\\\/]/.test(s) ? '"' + s.replace(/"/g, '\\"') + '"' : s;
-    const parts = ["python", "mb.py", "render", q(bench.summary.nif), "--out", "кадр.png"];
+    const parts = ["python", "mb.py", "render", q(bench.summary.nif), "--out", T.frameFile];
     if (bench.summary.tri) parts.push("--tri", q(bench.summary.tri));
     if (preset) parts.push("--view", preset); else parts.push("--look=" + state.yaw + "," + state.pitch);
     for (const name in sliders) parts.push("--slider", q(name + "=" + fmt(sliders[name])));
@@ -1612,19 +1622,26 @@ class App {
 
 // ---- запуск ---------------------------------------------------------------------------------
 const DATA = JSON.parse(document.getElementById("mb-data").textContent);
+// Надписи страницы приходят готовыми из словаря языка: в скрипте их нет, как и в ядре.
+const T = DATA.texts;
+// Подстановка ИМЕНАМИ, а не по месту: в другом языке порядок слов другой.
+function say(text, values) {
+  return String(text).replace(/%\((\w+)\)s/g, (whole, name) =>
+    name in values ? String(values[name]) : whole);
+}
 const s = DATA.summary;
-document.getElementById("title").textContent = "morphbench — " + (DATA.names.nif || "меш не открыт");
+document.getElementById("title").textContent = "morphbench — " + (DATA.names.nif || T.noMesh);
 document.getElementById("subtitle").textContent = s
-  ? "морфы: " + (DATA.names.tri ? DATA.names.tri + " (" + s.triKind + ")" : "нет") +
-    " · частей " + s.shapes + " · вершин " + s.vertices + " · костей " + s.bones + " · ползунков " + s.morphs +
-    (DATA.names.skeleton ? " · скелет " + DATA.names.skeleton + " · капсул " + s.colliders : "")
-  : (DATA.server ? "выберите меш в списке на панели" : "");
+  ? T.summaryMorphs + (DATA.names.tri ? DATA.names.tri + " (" + s.triKind + ")" : T.noTri) +
+    T.summaryShapes + s.shapes + T.summaryVerts + s.vertices + T.summaryBones + s.bones + T.summarySliders + s.morphs +
+    (DATA.names.skeleton ? T.summarySkeleton + DATA.names.skeleton + T.summaryCapsules + s.colliders : "")
+  : (DATA.server ? T.chooseMesh : "");
 try {
   window.mb = new App(DATA);
 } catch (e) {
   const box = document.getElementById("nogl");
   box.style.display = "flex";
-  box.textContent = "Не удалось запустить смотрелку: " + (e.message || e);
+  box.textContent = T.cannotStart + (e.message || e);
   console.error(e);
 }
 })();

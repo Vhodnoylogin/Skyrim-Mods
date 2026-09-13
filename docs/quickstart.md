@@ -270,6 +270,7 @@
 | `colliderColour`, `colliderOpacity`, `colliderSegments` | цвет и прозрачность слоя капсул, число долек окружности | `[90, 200, 255]`, 0.45, 14 |
 | `catalogRoot`, `catalogSubdirs` | корень обзора вне MO2 и подпапки, где искать | пусто, `["meshes"]` |
 | `serveHost`, `servePort` | адрес и порт страницы со списком | `127.0.0.1`, 8767 |
+| `language` | язык сообщений: `auto` (язык системы) либо папка из `locale\` — `en`, `ru` | `auto` |
 | `logLevel` | что сервер пишет тому, кто его запустил: `debug`, `info`, `warn`, `error` | `info` |
 | `logFile`, `logFileLevel` | файл журнала рядом с настройками и его порог; пусто — файл не вести | `morphbench.log`, `debug` |
 | `python` | путь к `python.exe` для `morphbench.exe`, если его не найти по `PATH` | нет |
