@@ -1,6 +1,9 @@
 "use strict";
 
-// ---- зеркало morphbench/view.py: ViewState -----------------------------------------------
+// ---- mirror of morphbench/view.py: ViewState ----------------------------------------------
+// The method names are the core's own, underscores and all. They look wrong for JavaScript on
+// purpose: a button on the page runs the same call a person would type on the command line,
+// and renaming one here would quietly break that promise.
 class ViewMirror {
   constructor(settings, presets, init) {
     this.settings = settings;
@@ -9,17 +12,17 @@ class ViewMirror {
     this.pan = init.pan ? init.pan.slice() : [0, 0];
     this.visible = init.visible === null ? null : new Set(init.visible);
     this.colouring = init.colouring;
-    // Слой капсул поверх тела и бампер отдельно - числами, как в ядре; старое состояние
-    // без этих ключей означает «выключено».
+    // The capsule layer over the body and the bumper are two separate flags, as in the core;
+    // a saved state from before these keys existed means "off".
     this.colliders = !!init.colliders;
     this.bumper = !!init.bumper;
     this.highlightMorph = init.highlightMorph;
     this.width = init.width; this.height = init.height;
     this.focus = init.focus ? { name: init.focus.name, centre: init.focus.centre.slice(),
                                 radius: init.focus.radius } : null;
-    // Свет: за камерой (направление в осях камеры - вправо, вверх, к зрителю) либо отдельно
-    // (мировое направление). Ядро отдаёт оба направления; настройки - лишь запас
-    // на случай старого состояния без них.
+    // Light: either behind the camera (a direction in camera axes - right, up, towards the
+    // viewer) or on its own (a world direction). The core hands over both directions; the
+    // settings are only a fallback for an old state that carries neither.
     const light = init.light;
     this.lightFollow = !!light.follow;
     this.lightCameraDir = (light.cameraDirection
@@ -27,10 +30,11 @@ class ViewMirror {
     this.lightWorldDir = (light.worldDirection
       || (light.follow ? settings.lightDirection : light.direction)).slice();
     this.ambient = light.ambient; this.diffuse = light.diffuse; this.fill = light.fill;
-    // Полуразмах последнего кадра: по нему масштаб к точке переводит доли кадра в единицы.
+    // Half-span of the last frame: zooming to a point uses it to turn fractions of the frame
+    // into model units.
     this.frameHalf = null;
   }
-  // камера
+  // camera
   orbit(dYaw, dPitch) { this.yaw = mod360(this.yaw + dYaw); this.pitch = clamp(this.pitch + dPitch, -89, 89); return this; }
   look(yaw, pitch) { this.yaw = mod360(yaw); this.pitch = clamp(pitch, -89, 89); return this; }
   preset(name) {
@@ -47,9 +51,10 @@ class ViewMirror {
     return null;
   }
   set_zoom(factor) { this.zoom = Math.max(0.05, Number(factor)); return this; }
-  // Масштаб к точке: точка сцены под курсором остаётся на месте. fx, fy - положение курсора
-  // от центра кадра в долях половины меньшей стороны холста, вправо и вверх. Без полуразмаха
-  // последнего кадра точка неизвестна, и масштаб идёт от центра - как в ядре.
+  // Zoom to a point: the point of the scene under the cursor stays where it is. fx, fy are the
+  // cursor's offset from the centre of the frame, in fractions of half the shorter side of the
+  // canvas, right and up. Without the half-span of the last frame that point is unknown, and
+  // the zoom runs from the centre instead - as it does in the core.
   zoom_at(factor, fx, fy) {
     const old = this.zoom, next = Math.max(0.05, Number(factor));
     if (this.frameHalf !== null && old > 0.0 && next !== old) {
@@ -63,14 +68,15 @@ class ViewMirror {
     return this;
   }
   resize(width, height) { this.width = Math.trunc(width); this.height = Math.trunc(height); return this; }
-  // панорама: сдвиг кадра вдоль осей экрана - вправо и вверх - в единицах модели
+  // pan: the frame slides along the screen axes - right and up - in model units
   set_pan(dx, dy) { this.pan = [Number(dx), Number(dy)]; return this; }
   pan_by(dx, dy) { return this.set_pan(this.pan[0] + dx, this.pan[1] + dy); }
-  // наведение
+  // aim
   focus_on(centre, radius, name) { this.focus = { name: name, centre: centre.slice(), radius: Math.max(radius, 1e-3) }; return this; }
   focus_all() { this.focus = null; return this; }
-  // Кадр: сфера наведения с запасом либо переданный охват; панорама сдвигает центр - то же
-  // правило, что у ViewState.framing() в ядре. Полуразмах запоминается для zoom_at.
+  // The frame: the aim sphere with its padding, or else the extent passed in; the pan shifts
+  // the centre - the same rule ViewState.framing() follows in the core. The half-span is kept
+  // for zoom_at.
   framing(centre, halfSpan) {
     let c = centre, half = halfSpan;
     if (this.focus !== null) { c = this.focus.centre; half = this.focus.radius * this.settings.focusPadding; }
@@ -81,7 +87,7 @@ class ViewMirror {
     this.frameHalf = half;
     return [c, half];
   }
-  // свет
+  // light
   light_follow_camera(on) { this.lightFollow = !!on; return this; }
   light_direction(x, y, z) {
     const v = [Number(x), Number(y), Number(z)];
@@ -95,7 +101,8 @@ class ViewMirror {
     if (fill !== undefined && fill !== null) this.fill = Math.max(0.0, Number(fill));
     return this;
   }
-  // Свет как в настройках: режим, оба направления и силы - зеркало ViewState.light_reset.
+  // Light back to what the settings say: the mode, both directions and the powers - a mirror
+  // of ViewState.light_reset.
   light_reset() {
     const st = this.settings;
     this.lightFollow = !!st.lightFollowCamera;
@@ -104,8 +111,9 @@ class ViewMirror {
     this.ambient = Number(st.ambient); this.diffuse = Number(st.diffuse); this.fill = Number(st.fill);
     return this;
   }
-  // Единичный вектор на источник в мировых координатах - то, что нужно рисующему. За камерой
-  // он собирается из осей камеры: right·x + up·y - forward·z, поэтому едет вместе с ракурсом.
+  // A unit vector towards the source in world coordinates - what the renderer needs. Behind
+  // the camera it is built from the camera axes: right·x + up·y - forward·z, so it travels
+  // with the view.
   light_vector() {
     let v;
     if (this.lightFollow) {
@@ -124,26 +132,26 @@ class ViewMirror {
              worldDirection: this.lightWorldDir.map((x) => rnd(x, 3)),
              ambient: rnd(this.ambient, 3), diffuse: rnd(this.diffuse, 3), fill: rnd(this.fill, 3) };
   }
-  // слой капсул: бампер отдельно и по умолчанию выключен; null или undefined - не менять,
-  // как None у ViewState.show_colliders
+  // capsule layer: the bumper is separate and off by default; null or undefined means leave it
+  // as it is, the same as None does in ViewState.show_colliders
   show_colliders(on, bumper) {
     this.colliders = on === undefined ? true : !!on;
     if (bumper !== undefined && bumper !== null) this.bumper = !!bumper;
     return { colliders: this.colliders, bumper: this.bumper };
   }
-  // слои
+  // layers
   show_all() { this.visible = null; return this; }
   only(names) { this.visible = new Set(names); return this; }
   show(name) { if (this.visible !== null) this.visible.add(name); return this; }
   hide(name) { if (this.visible === null) this.visible = new Set(); this.visible.delete(name); return this; }
   is_visible(name) { return this.visible === null || this.visible.has(name); }
-  // раскраска
+  // colouring
   colour_by(mode, morph) {
     if (!["shade", "bone", "morph", "strain"].includes(mode)) throw new Error(T.errColourMode);
     this.colouring = mode; this.highlightMorph = morph === undefined ? null : morph; return this;
   }
-  // три оси камеры: вправо, вверх, от зрителя к модели. Персонаж смотрит вдоль +Y,
-  // поэтому нулевой поворот ставит камеру перед ним, взгляд идёт в сторону -Y.
+  // the three camera axes: right, up, and from the viewer towards the model. The character
+  // faces along +Y, so a yaw of zero puts the camera in front of them, looking towards -Y.
   basis() {
     const ry = this.yaw * Math.PI / 180, rp = this.pitch * Math.PI / 180;
     const forward = [-Math.sin(ry) * Math.cos(rp), -Math.cos(ry) * Math.cos(rp), -Math.sin(rp)];

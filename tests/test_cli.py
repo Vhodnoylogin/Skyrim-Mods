@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
-"""Командная строка: те же ответы, что у фасада, только текстом или JSON.
+"""The command line: the same answers the facade gives, only as text or as JSON.
 
-mb.py создаёт MorphBench() с настройками рядом с программой; здесь он подменяется
-фабрикой с настройками во временной папке, чтобы настоящий morphbench.json не трогать.
-Ловит: --json, не дающий JSON; команду catalog, не принявшую корень; ключи --zoom-at
-и --light-*, не доехавшие до состояния показа; кадр, не записанный на диск. Кадр на
-настоящем NIF рисуется, только если есть PyNifly; иначе — пропуск.
+mb.py builds a MorphBench() with the settings that lie next to the program; here it is
+swapped for a factory with settings in a temporary folder, so that the real
+morphbench.json is never touched. Catches: --json that gives no JSON; a catalog command
+that did not take the root; --zoom-at and --light-* keys that never reached the view
+state; a frame that was not written to disk. The frame on a real NIF is drawn only when
+PyNifly is there - without it the test is skipped.
 """
 import contextlib
 import io
@@ -22,18 +23,19 @@ import common  # noqa: E402
 import solids  # noqa: E402
 from test_catalog import ALL_MESHES, WITH_MORPHS, make_tree, mo2  # noqa: E402
 
-import mb  # noqa: E402 - корень программы в sys.path добавил common
+import mb  # noqa: E402 - common put the program root on sys.path
 from morphbench import MorphBench  # noqa: E402
 
 
 def run(argv, cfg) -> str:
-    """mb.main с настройками cfg вместо файла рядом с программой; вывод — строкой."""
+    """mb.main with the settings cfg instead of the file next to the program; output
+    as a string."""
     out = io.StringIO()
     with mock.patch.object(mb, "MorphBench", lambda: MorphBench(cfg)):
         with contextlib.redirect_stdout(out):
             code = mb.main(list(argv))
     if code != 0:
-        raise AssertionError("mb %s вернул код %r" % (" ".join(argv), code))
+        raise AssertionError("mb %s returned code %r" % (" ".join(argv), code))
     return out.getvalue()
 
 
@@ -46,7 +48,7 @@ class TestEnvAndCatalog(unittest.TestCase):
         self.root = make_tree(Path(self.tmp.name) / "tree")
 
     def test_env_json(self):
-        """env --json — JSON с теми же ключами, что у MorphBench.environment()."""
+        """env --json - JSON with the same keys MorphBench.environment() carries."""
         with mo2(False):
             for argv in (["env", "--json"], ["--json", "env"]):
                 data = json.loads(run(argv, self.cfg))
@@ -87,8 +89,8 @@ class TestEnvAndCatalog(unittest.TestCase):
                           run(["catalog", str(self.root), "--find", "zzz"], self.cfg))
 
     def test_catalog_without_root_outside_mo2(self):
-        """Корень не назван и catalogRoot пуст — отказ фасада печатается одной строкой
-        и даёт код 2, а не трассировку."""
+        """No root named and catalogRoot empty - the refusal of the facade is printed as
+        one line and gives code 2, not a traceback."""
         with mo2(False):
             err = io.StringIO()
             with mock.patch.object(mb, "MorphBench", lambda: MorphBench(self.cfg)):
@@ -102,7 +104,7 @@ class TestEnvAndCatalog(unittest.TestCase):
 
 
 class TestServeStatusAndStop(unittest.TestCase):
-    """`serve --status` и `serve --stop` - те же вызовы, что делает окно запуска."""
+    """`serve --status` and `serve --stop` - the same calls the launcher window makes."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -141,7 +143,7 @@ class TestServeStatusAndStop(unittest.TestCase):
                 self.assertEqual((data["state"], data["url"]), ("ours", server.url))
                 text_out = run(["serve", "--status", "--port", str(server.port)], self.cfg)
                 self.assertIn("server: up", text_out)
-                # Отказ поднятого сервера - одной строкой и кодом 2, а не трассировкой.
+                # A refusal from the server that is up - one line and code 2, no traceback.
                 with mock.patch.object(mb, "MorphBench", lambda *a, **k: MorphBench(self.cfg)):
                     with contextlib.redirect_stdout(io.StringIO()), \
                             contextlib.redirect_stderr(io.StringIO()) as err:
@@ -159,7 +161,8 @@ class TestServeStatusAndStop(unittest.TestCase):
 
 
 class TestRender(unittest.TestCase):
-    """render с --zoom-at и --light-*: ключи доезжают до состояния показа, кадр на диске."""
+    """render with --zoom-at and --light-*: the keys reach the view state, the frame
+    lands on disk."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -193,7 +196,8 @@ class TestRender(unittest.TestCase):
         self.assertEqual((light["ambient"], light["diffuse"], light["fill"]), (0.3, 0.7, 0.2))
 
     def test_camera_light_and_partial_power(self):
-        """--light camera с направлением в осях камеры; две силы из трёх — третья прежняя."""
+        """--light camera with a direction in camera axes; two powers of three - the
+        third stays as it was."""
         view = self.render("--light", "camera", "--light-dir=0,0,1", "--light-power=0.5,0.5")
         light = view["light"]
         self.assertTrue(light["follow"])

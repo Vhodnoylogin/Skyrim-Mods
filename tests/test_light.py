@@ -1,13 +1,15 @@
 # -*- coding: utf-8 -*-
-"""Свет: за камерой или отдельно от неё, направление и силы — числами и поведением кадра.
+"""Light: behind the camera or apart from it - direction and powers, by the numbers and by
+how the frame behaves.
 
-ViewState держит два направления на источник: в осях камеры (свет едет с ракурсом) и
-мировое (стоит на месте); действует то, что выбрано режимом. Ловит: режим, не взятый из
-настроек; свет, застрявший в мировых осях при lightFollowCamera; направление, записанное
-не в тот режим; нулевой вектор, принятый молча; отрицательную силу; типы numpy в
-as_dict()['light']. Растеризатор проверяется на кубе: при свете за камерой перед и зад
-одинаково ярки, при мировом свете — нет; встречная подсветка делает тень светлее;
-оба способа затенения из настроек рисуют, и плоское действительно плоское.
+ViewState keeps two directions to the source: one in camera axes (the light rides with the
+view) and one in world axes (it stays put); the mode decides which of them acts. Catches: a
+mode not taken from the settings; light stuck in world axes while lightFollowCamera is on; a
+direction written into the wrong mode; a zero vector taken in silence; a negative power;
+numpy types in as_dict()['light']. The rasteriser is checked on a cube: with the light behind
+the camera the front and the back are equally bright, with world light they are not; the fill
+makes the shadow lighter; both ways of shading from the settings draw, and the flat one
+really is flat.
 """
 import json
 import os
@@ -25,7 +27,7 @@ from morphbench.view import ViewState  # noqa: E402
 
 try:
     from presenters.raster import Raster
-except ImportError as e:  # noqa: N816 - нет PIL либо самого слоя
+except ImportError as e:  # noqa: N816 - no PIL, or no layer at all
     Raster = None
     RASTER_ERROR = e
 
@@ -45,8 +47,8 @@ class TestViewStateLight(unittest.TestCase):
         self.view = ViewState(common.config(self.tmp.name))
 
     def test_mode_from_config(self):
-        """Режим по умолчанию — lightFollowCamera из настроек: True в умолчаниях,
-        False — если так записано в файле."""
+        """The mode comes from lightFollowCamera in the settings: True in the defaults,
+        False when the file says so."""
         self.assertTrue(self.view.light_follow)
         self.assertTrue(self.view.light_state()["follow"])
         view = ViewState(common.config(self.tmp.name, lightFollowCamera=False))
@@ -55,7 +57,8 @@ class TestViewStateLight(unittest.TestCase):
         self.assertEqual(view.light_state()["direction"], list(WORLD))
 
     def test_directions_and_powers_from_config(self):
-        """Оба направления и три силы приезжают из настроек, а не из чисел в коде."""
+        """Both directions and all three powers arrive from the settings, not from numbers
+        in the code."""
         view = ViewState(common.config(self.tmp.name, lightCameraDirection=[0, 0, 1],
                                        lightDirection=[1, 0, 0], ambient=0.1,
                                        diffuse=0.8, fill=0.05))
@@ -64,10 +67,10 @@ class TestViewStateLight(unittest.TestCase):
         self.assertEqual((view.ambient, view.diffuse, view.fill), (0.1, 0.8, 0.05))
 
     def test_vector_rides_with_camera(self):
-        """Свет за камерой, направление (0,0,1) — «к зрителю». При нулевом ракурсе взгляд
-        идёт в -Y, значит источник стоит на +Y и вектор равен (0,1,0); после поворота
-        на 180 — (0,-1,0), на 90 — (1,0,0). Вектор, не меняющийся с ракурсом, — свет,
-        который не поехал."""
+        """Light behind the camera, direction (0,0,1) - "towards the viewer". At a zero view
+        the eye looks along -Y, so the source stands at +Y and the vector is (0,1,0); after
+        a turn of 180 it is (0,-1,0), of 90 - (1,0,0). A vector that does not change with
+        the view is light that did not ride along."""
         self.view.light_direction(0.0, 0.0, 1.0)
         self.view.look(0.0, 0.0)
         self.assertTrue(np.allclose(self.view.light_vector(), [0.0, 1.0, 0.0], atol=1e-6))
@@ -77,8 +80,8 @@ class TestViewStateLight(unittest.TestCase):
         self.assertTrue(np.allclose(self.view.light_vector(), [1.0, 0.0, 0.0], atol=1e-6))
 
     def test_camera_axes_right_and_up(self):
-        """Направление (1,0,0) в осях камеры — справа от зрителя, (0,1,0) — сверху: ровно
-        те оси, что отдаёт basis(). При нулевом ракурсе верх — это +Z."""
+        """Direction (1,0,0) in camera axes is to the right of the viewer, (0,1,0) is above:
+        exactly the axes basis() hands out. At a zero view, up is +Z."""
         self.view.look(0.0, 0.0)
         right, up, _ = self.view.basis()
         self.view.light_direction(1.0, 0.0, 0.0)
@@ -88,8 +91,8 @@ class TestViewStateLight(unittest.TestCase):
         self.assertTrue(np.allclose(up, [0.0, 0.0, 1.0], atol=1e-6))
 
     def test_world_vector_ignores_camera(self):
-        """Отдельный свет: вектор один и тот же с любого ракурса и равен нормированному
-        мировому направлению."""
+        """Light apart from the camera: one and the same vector from any view, equal to the
+        world direction made unit."""
         self.view.light_follow_camera(False)
         self.view.light_direction(*WORLD)
         for yaw, pitch in ((0, 0), (180, 0), (90, 0), (40, 15), (0, -60)):
@@ -99,15 +102,16 @@ class TestViewStateLight(unittest.TestCase):
             self.assertAlmostEqual(float(np.linalg.norm(v)), 1.0, places=6)
 
     def test_direction_goes_to_current_mode_only(self):
-        """light_direction меняет направление текущего режима и не трогает другое;
-        переключение режима возвращает прежнее направление, а не подменяет его."""
+        """light_direction changes the direction of the current mode and leaves the other
+        one alone; switching the mode brings the earlier direction back instead of
+        replacing it."""
         world_before = self.view.light_world_dir.tolist()
-        self.view.light_direction(1.0, 2.0, 3.0)                 # режим: за камерой
+        self.view.light_direction(1.0, 2.0, 3.0)                 # mode: behind the camera
         self.assertEqual(self.view.light_camera_dir.tolist(), [1.0, 2.0, 3.0])
         self.assertEqual(self.view.light_world_dir.tolist(), world_before)
         self.assertEqual(self.view.light_state()["direction"], [1.0, 2.0, 3.0])
         self.view.light_follow_camera(False)
-        self.view.light_direction(4.0, 5.0, 6.0)                 # режим: отдельно
+        self.view.light_direction(4.0, 5.0, 6.0)                 # mode: apart from it
         self.assertEqual(self.view.light_world_dir.tolist(), [4.0, 5.0, 6.0])
         self.assertEqual(self.view.light_camera_dir.tolist(), [1.0, 2.0, 3.0])
         self.assertEqual(self.view.light_state()["direction"], [4.0, 5.0, 6.0])
@@ -115,7 +119,7 @@ class TestViewStateLight(unittest.TestCase):
         self.assertEqual(self.view.light_state()["direction"], [1.0, 2.0, 3.0])
 
     def test_zero_direction_rejected(self):
-        """Нулевой (и почти нулевой) вектор — ValueError, состояние не тронуто."""
+        """A zero vector (and a nearly zero one) is a ValueError, and the state is untouched."""
         before = self.view.light_camera_dir.tolist()
         with self.assertRaises(ValueError):
             self.view.light_direction(0.0, 0.0, 0.0)
@@ -124,14 +128,14 @@ class TestViewStateLight(unittest.TestCase):
         self.assertEqual(self.view.light_camera_dir.tolist(), before)
 
     def test_vector_is_unit_for_any_length(self):
-        """Направление можно задать любой длины — рисующему отдаётся единичный вектор."""
+        """A direction may be given at any length - what the drawing gets is a unit vector."""
         self.view.light_direction(0.0, 0.0, 5.0)
         self.assertAlmostEqual(float(np.linalg.norm(self.view.light_vector())), 1.0, places=6)
         self.view.light_follow_camera(False).light_direction(0.0, 300.0, 0.0)
         self.assertTrue(np.allclose(self.view.light_vector(), [0.0, 1.0, 0.0], atol=1e-6))
 
     def test_power_clamped_below_and_none_keeps(self):
-        """Отрицательная сила становится нулём; None оставляет прежнее значение."""
+        """A negative power becomes zero; None leaves the value as it was."""
         d, f = self.view.diffuse, self.view.fill
         self.view.light_power(ambient=-1.0)
         self.assertEqual(self.view.ambient, 0.0)
@@ -146,15 +150,16 @@ class TestViewStateLight(unittest.TestCase):
         self.assertEqual((self.view.ambient, self.view.diffuse, self.view.fill), (0.5, 0.5, 0.5))
 
     def test_state_is_plain(self):
-        """light_state() и as_dict()['light'] — только числа и bool; JSON их принимает."""
+        """light_state() and as_dict()['light'] hold numbers and bools only; JSON takes them."""
         self.view.light_direction(0.123456, 0.5, 0.25)
         for state in (self.view.light_state(), self.view.as_dict()["light"]):
             self.assertEqual(set(state), {"follow", "direction", "cameraDirection",
                                           "worldDirection", "ambient", "diffuse", "fill"})
             self.assertIs(type(state["follow"]), bool)
             self.assertEqual(state["direction"], [0.123, 0.5, 0.25])
-            # Оба направления отдаются отдельно, чтобы слой показа не достраивал второе
-            # из настроек; направление текущего режима повторяет одно из них.
+            # Both directions are handed out separately, so that the presentation layer does
+            # not have to build the second one out of the settings; the direction of the
+            # current mode repeats one of them.
             current = state["cameraDirection"] if state["follow"] else state["worldDirection"]
             self.assertEqual(state["direction"], current)
             for key in ("ambient", "diffuse", "fill"):
@@ -164,7 +169,7 @@ class TestViewStateLight(unittest.TestCase):
 
 
 class TestFacadeLight(unittest.TestCase):
-    """Методы фасада — те же, что у ViewState, и возвращают as_dict() состояния."""
+    """The facade's methods are the ones ViewState has, and they return as_dict() of the state."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -187,8 +192,8 @@ class TestFacadeLight(unittest.TestCase):
             self.bench.light_direction(0.0, 0.0, 0.0)
 
     def test_light_vector_is_list_of_floats(self):
-        """Фасад отдаёт обычный список из трёх float, совпадающий с вектором ViewState
-        при том же ракурсе."""
+        """The facade hands out a plain list of three floats, the same as ViewState's vector
+        at the same view."""
         v = self.bench.light_vector()
         self.assertEqual(len(v), 3)
         self.assertTrue(all(type(x) is float for x in v), v)
@@ -199,11 +204,12 @@ class TestFacadeLight(unittest.TestCase):
         json.dumps(v)
 
 
-@unittest.skipIf(Raster is None, "presenters.raster недоступен: %s" % (
+@unittest.skipIf(Raster is None, "presenters.raster is not available: %s" % (
     RASTER_ERROR if Raster is None else ""))
 class TestRasterLight(unittest.TestCase):
-    """Поведение света на кадре: куб в кадре 64×64, яркость — среднее серое по пикселям
-    тела (всё, что отличается от фона из настроек)."""
+    """How the light behaves on a frame: a cube in a 64x64 frame, brightness is the mean
+    grey over the pixels of the body (everything that differs from the background in the
+    settings)."""
 
     SIZE = 64
 
@@ -220,7 +226,7 @@ class TestRasterLight(unittest.TestCase):
         img = np.asarray(Raster(bench).image(), dtype=np.float32)
         bg = np.asarray(bench.cfg["background"], dtype=np.float32)
         body = np.any(img != bg, axis=2)
-        assert body.any(), "тело не попало в кадр"
+        assert body.any(), "the body did not land in the frame"
         return img[body]
 
     def brightness(self, bench) -> float:
@@ -234,16 +240,18 @@ class TestRasterLight(unittest.TestCase):
         return front, back
 
     def test_light_behind_camera_lights_what_is_seen(self):
-        """Свет за камерой: перед и зад куба освещены одинаково — средняя яркость
-        отличается меньше чем на 10 %. Иначе свет остался в мировых осях."""
+        """Light behind the camera: the front and the back of the cube are lit the same -
+        the mean brightness differs by less than 10 %. Otherwise the light stayed in the
+        world axes."""
         bench = self.build()
         self.assertTrue(bench.view.light_follow)
         front, back = self.front_back(bench)
         self.assertLess(abs(front - back) / max(front, back), 0.10, (front, back))
 
     def test_world_light_stays_put(self):
-        """Мировой свет (-0.4,-0.7,0.6) стоит со стороны -Y: грань, видимая с ракурса back
-        (y = -1), заметно светлее видимой спереди — кадры отличаются больше чем на 10 %."""
+        """World light (-0.4,-0.7,0.6) stands on the -Y side: the face seen from the back
+        view (y = -1) is visibly lighter than the one seen from the front - the frames
+        differ by more than 10 %."""
         bench = self.build(lightFollowCamera=False, lightDirection=list(WORLD))
         self.assertFalse(bench.view.light_follow)
         front, back = self.front_back(bench)
@@ -251,9 +259,10 @@ class TestRasterLight(unittest.TestCase):
         self.assertGreater(back, front)
 
     def test_shading_modes_render(self):
-        """Оба способа затенения из настроек рисуют кадр нужного размера с телом в нём.
-        Плоское красит каждую грань одним цветом: с ракурса quarter видны три грани —
-        не больше трёх цветов тела; мягкое даёт переход — цветов заметно больше."""
+        """Both ways of shading from the settings draw a frame of the right size with the
+        body in it. The flat one paints every face in one colour: from the quarter view
+        three faces are seen - no more than three colours of the body; the smooth one gives
+        a gradient - visibly more colours."""
         counts = {}
         for shading in ("flat", "smooth"):
             with tempfile.TemporaryDirectory() as tmp:
@@ -268,9 +277,9 @@ class TestRasterLight(unittest.TestCase):
         self.assertGreater(counts["smooth"], 3, counts)
 
     def test_fill_lights_the_shadow_side(self):
-        """Мировой свет из-за куба (источник на -Y, камера на +Y): видна теневая грань.
-        С fill = 0 она освещена только рассеянным светом (ровно ambient × 0.72),
-        с fill = 0.4 — заметно светлее."""
+        """World light from behind the cube (the source at -Y, the camera at +Y): the shadow
+        face is in view. With fill = 0 it is lit by the ambient alone (exactly ambient x
+        0.72), with fill = 0.4 it is visibly lighter."""
         dark = self.build(lightFollowCamera=False, lightDirection=[0, -1, 0], fill=0.0)
         dark.preset("front")
         dark_mean = self.brightness(dark)
@@ -281,8 +290,8 @@ class TestRasterLight(unittest.TestCase):
         self.assertAlmostEqual(dark_mean, 0.72 * dark.view.ambient * 255.0, delta=2.0)
 
     def test_diffuse_zero_leaves_only_ambient(self):
-        """Без направленного и встречного света всё тело — один цвет ambient × 0.72:
-        так видно, что силы из ViewState доезжают до пикселей."""
+        """Without the directional and the fill light the whole body is one colour, ambient
+        x 0.72: that is how the powers from ViewState are seen reaching the pixels."""
         bench = self.build(diffuse=0.0, fill=0.0, ambient=0.5)
         bench.preset("quarter")
         pixels = self.body_pixels(bench)

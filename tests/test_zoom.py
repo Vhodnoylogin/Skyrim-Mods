@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
-"""Масштаб к точке: то, что было под курсором, остаётся под курсором.
+"""Zooming at a point: what was under the cursor stays under the cursor.
 
-Проверка идёт формулами растеризатора, а не картинкой: масштаб
-scale = min(w, h) · frameFill / (2 · half) · zoom, экранное положение точки p —
-((p − centre)·right)·scale + w/2 по горизонтали и h/2 − ((p − centre)·up)·scale по вертикали,
-где centre и half отдаёт framing(). Точка сцены под курсором (fx, fy) берётся с текущего
-кадра, затем zoom_at и новый кадр — и её экранное положение обязано совпасть до 1e-3 px.
-Ловит: знак или ось панорамы, не ту сторону холста (max вместо min), масштаб, взятый
-до или после пересчёта кадра, зажим снизу, забытый пересчёт кадра в фасаде.
+The check goes by the formulas of the rasteriser, not by a picture: the scale is
+scale = min(w, h) · frameFill / (2 · half) · zoom, and a point p of the scene lands on screen
+at ((p − centre)·right)·scale + w/2 across and at h/2 − ((p − centre)·up)·scale down, where
+centre and half come from framing(). The point of the scene under the cursor (fx, fy) is taken
+off the current frame, then zoom_at and a new frame - and its place on screen has to match to
+within 1e-3 px. Catches: the sign or the axis of the pan, the wrong side of the canvas (max
+instead of min), the zoom taken before or after the frame was worked out, the clamp from
+below, and a frame the facade forgot to work out again.
 """
 import math
 import os
@@ -22,7 +23,7 @@ import common  # noqa: E402
 
 from morphbench.view import ViewState  # noqa: E402
 
-W, H = 640, 480          # холст нарочно не квадратный: ловит max вместо min
+W, H = 640, 480          # the canvas is not square on purpose: catches max instead of min
 CURSORS = ((0.4, -0.3), (-0.8, 0.6), (0.95, 0.95), (0.0, 0.0))
 TOLERANCE = 1e-3
 
@@ -33,7 +34,7 @@ def scale_of(view, half: float) -> float:
 
 
 def screen_of(point, centre, half, view) -> tuple[float, float]:
-    """Экранное положение точки сцены по формулам растеризатора."""
+    """Where a point of the scene lands on screen, by the formulas of the rasteriser."""
     right, up, _ = (np.asarray(v, dtype=np.float64) for v in view.basis())
     s = scale_of(view, half)
     d = np.asarray(point, dtype=np.float64) - np.asarray(centre, dtype=np.float64)
@@ -41,8 +42,9 @@ def screen_of(point, centre, half, view) -> tuple[float, float]:
 
 
 def point_under(fx: float, fy: float, centre, half, view) -> np.ndarray:
-    """Точка сцены под курсором: fx, fy — доли половины меньшей стороны от центра кадра,
-    вправо и вверх. Лежит в плоскости кадра, проходящей через центр."""
+    """The point of the scene under the cursor: fx, fy are fractions of half the shorter side
+    away from the centre of the frame, right and up. It lies in the plane of the frame that
+    goes through the centre."""
     right, up, _ = (np.asarray(v, dtype=np.float64) for v in view.basis())
     s = scale_of(view, half)
     px = fx * min(view.width, view.height) / 2.0
@@ -55,8 +57,9 @@ def distance(a, b) -> float:
 
 
 class TestFormulas(unittest.TestCase):
-    """Сами формулы проверки согласованы: точка под курсором проецируется в курсор.
-    Оси камеры ядро считает в float32, поэтому допуск тот же, что и у главной проверки."""
+    """The formulas of the check itself agree: the point under the cursor projects back onto
+    the cursor. The core works the camera axes out in float32, so the tolerance is the one the
+    main check uses."""
 
     def test_point_under_projects_back(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -78,7 +81,8 @@ class TestViewStateZoomAt(unittest.TestCase):
         self.view = ViewState(self.cfg)
 
     def test_without_frame_only_zoom_changes(self):
-        """Пока кадра не было, точка под курсором неизвестна: меняется только масштаб."""
+        """While there has been no frame the point under the cursor is unknown: only the zoom
+        changes."""
         self.assertIsNone(self.view.frame_half)
         state = self.view.zoom_at(2.0, 0.5, -0.5).as_dict()
         self.assertEqual(self.view.zoom, 2.0)
@@ -88,7 +92,8 @@ class TestViewStateZoomAt(unittest.TestCase):
         self.assertEqual(state["pan"], [0.0, 0.0])
 
     def test_framing_remembers_half(self):
-        """framing() оставляет полуразмах кадра — и переданный, и взятый от наведения."""
+        """framing() leaves the half-span of the frame behind - the one passed in as well as
+        the one taken from the aim."""
         self.view.framing((1.0, 2.0, 3.0), 7.5)
         self.assertEqual(self.view.frame_half, 7.5)
         self.view.focus_on((0.0, 0.0, 0.0), 2.0, "x")
@@ -106,8 +111,8 @@ class TestViewStateZoomAt(unittest.TestCase):
                         (view.yaw, view.pitch, factor, fx, fy, before, after))
 
     def test_point_stays_put(self):
-        """С любого ракурса и при любом курсоре точка сцены под ним не сдвигается —
-        ни при увеличении, ни при следующем уменьшении к другой точке."""
+        """From any view and under any cursor the point of the scene beneath it does not move -
+        neither on zooming in, nor on the next zoom out towards another point."""
         for yaw, pitch in ((0, 0), (40, 15), (90, 0), (0, -60), (180, 0)):
             for fx, fy in CURSORS:
                 view = ViewState(self.cfg).look(yaw, pitch)
@@ -116,8 +121,8 @@ class TestViewStateZoomAt(unittest.TestCase):
                 self.assertPointStays(view, (3.0, -2.0, 5.0), 4.0, 3.0, fx, fy)
 
     def test_small_factor_clamped(self):
-        """Масштаб меньше 0.05 зажимается, и панорама считается по зажатому — точка
-        под курсором всё равно на месте."""
+        """A zoom under 0.05 is clamped, and the pan is worked out from the clamped one - the
+        point under the cursor is in its place all the same."""
         self.view.framing((0.0, 0.0, 0.0), 1.0)
         self.view.zoom_at(0.01, 0.3, 0.3)
         self.assertEqual(self.view.zoom, 0.05)
@@ -126,7 +131,7 @@ class TestViewStateZoomAt(unittest.TestCase):
         self.assertEqual(view.zoom, 0.05)
 
     def test_same_factor_moves_nothing(self):
-        """factor, равный текущему масштабу, не трогает ни масштаб, ни панораму."""
+        """A factor equal to the current zoom touches neither the zoom nor the pan."""
         self.view.set_pan(1.5, -2.0)
         self.view.framing((0.0, 0.0, 0.0), 3.0)
         self.view.zoom_at(1.0, 0.9, 0.9)
@@ -137,7 +142,8 @@ class TestViewStateZoomAt(unittest.TestCase):
         self.assertEqual(self.view.pan.tolist(), [1.5, -2.0])
 
     def test_centre_cursor_keeps_pan(self):
-        """Курсор в центре кадра — обычный масштаб от центра: панорама не меняется."""
+        """The cursor in the centre of the frame - an ordinary zoom from the centre: the pan
+        does not change."""
         self.view.set_pan(0.25, 0.75)
         self.view.framing((0.0, 0.0, 0.0), 3.0)
         self.view.zoom_at(4.0, 0.0, 0.0)
@@ -146,7 +152,8 @@ class TestViewStateZoomAt(unittest.TestCase):
 
 
 class TestFacadeZoomAt(unittest.TestCase):
-    """MorphBench.zoom_at считает кадр сам: точка берётся с кадра, который на экране."""
+    """MorphBench.zoom_at works the frame out itself: the point is taken off the frame that is
+    on screen."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -157,8 +164,8 @@ class TestFacadeZoomAt(unittest.TestCase):
                             imageWidth=W, imageHeight=H)
 
     def test_facade_computes_framing_itself(self):
-        """У свежего бенча кадра не было; после zoom_at он есть, панорама сдвинута,
-        а ответ — тот же словарь, что view_state()."""
+        """A fresh bench has had no frame; after zoom_at it has one, the pan is shifted, and
+        the answer is the same dictionary view_state() gives."""
         bench = self.build()
         self.assertIsNone(bench.view.frame_half)
         state = bench.zoom_at(2.0, 0.5, 0.5)
@@ -188,7 +195,8 @@ class TestFacadeZoomAt(unittest.TestCase):
                 self.assertPointStays(bench, 0.5, -fx, -fy)
 
     def test_with_focus_and_sliders(self):
-        """Наведение и ползунки меняют кадр — точка под курсором всё равно на месте."""
+        """An aim and the sliders change the frame - the point under the cursor is in its
+        place all the same."""
         bench = self.build()
         bench.preset("quarter")
         bench.focus_shape("fur")

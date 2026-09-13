@@ -1,26 +1,29 @@
-"""Слой показа: настройки CBPC (Physics with Collisions) для цепочек костей.
+"""Presentation layer: CBPC (Physics with Collisions) settings for bone chains.
 
-CBPC качает кости по группам настроек, и своя кость у него называется прямо: строка
-`Кость=Группа[=Условие]` в разделе `[ConfigMap]` файла `CBPCMasterConfig*.txt` приписывает
-кость к группе, числа группы лежат в `CBPConfig*.txt` строками `Группа.параметр значение`,
-а столкновения - в `CBPCollisionConfig*.txt`: кость перечисляется в `[AffectedNodes]`,
-и под заголовком `[Кость]` идут её фигуры в системе кости, в единицах игры: сфера
-`x,y,z,r | x,y,z,r`, капсула `x,y,z,r & x,y,z,r | x,y,z,r & x,y,z,r` - две половины
-через `|` для веса 0 и 100. Звенья одной цепочки CBPC советует брать в `<` и `>`:
-тогда они считаются по порядку, а не вразнобой.
+CBPC swings bones by groups of settings, and the bone it swings is named outright: a line
+`Bone=Group[=Condition]` in the `[ConfigMap]` section of `CBPCMasterConfig*.txt` puts the bone
+into a group, the numbers of the group live in `CBPConfig*.txt` as `Group.parameter value`
+lines, and the collisions live in `CBPCollisionConfig*.txt`: the bone is listed under
+`[AffectedNodes]`, and beneath a `[Bone]` heading come its shapes in the space of that bone,
+in game units - a sphere `x,y,z,r | x,y,z,r`, a capsule `x,y,z,r & x,y,z,r | x,y,z,r & x,y,z,r`,
+two halves separated by `|`, one for weight 0 and one for weight 100. CBPC advises bracketing
+the links of one chain in `<` and `>`: then they are worked out in order rather than in
+whatever order they happen to fall.
 
-Такой же клиент фасада, как `ppb`: берёт `chain_capsules(engine="cbpc")`, `chains()`
-для шапки и числа из настроек - и только раскладывает их в строки. Цепочки, отданные
-другому движку, сюда не попадают: SMP и CBPC - разные движки, одну кость обоим отдавать
-нельзя; шапка перечисляет, кто кому отдан. Ядро о CBPC не знает.
+The same kind of facade client as `ppb`: it takes `chain_capsules(engine="cbpc")`, `chains()`
+for the header and the numbers from the settings - and only lays them out in lines. Chains
+given to the other engine never reach it: SMP and CBPC are different engines, and one bone
+cannot be handed to both; the header says who was given to whom. The core knows nothing of CBPC.
 """
 from __future__ import annotations
 
 import re
 
+from morphbench.i18n import t
+
 from . import text as _text
 
-#: Как CBPC пишет свои ручки: (имя в файле, ключ настроек). Порядок - как в живом файле.
+#: How CBPC spells its own knobs: (name in the file, settings key). The order is the live file's.
 _GROUP_SCALARS = (
     ("stiffness", "cbpcStiffness"),
     ("stiffness2", "cbpcStiffness2"),
@@ -29,7 +32,7 @@ _GROUP_SCALARS = (
 _COLLISION_SCALARS = (
     ("collisionFriction", "cbpcCollisionFriction"),
     ("collisionPenetration", "cbpcCollisionPenetration"),
-    ("collisionMultipler", "cbpcCollisionMultiplier"),        # так пишет сам CBPC
+    ("collisionMultipler", "cbpcCollisionMultiplier"),        # CBPC itself spells it that way
     ("collisionMultiplerRot", "cbpcCollisionMultiplierRot"),
     ("collisionElastic", "cbpcCollisionElastic"),
 )
@@ -37,13 +40,13 @@ _AXES = "XYZ"
 
 
 def selected(rows: list[dict]) -> list[dict]:
-    """Какие из отданных CBPC цепочек попадают в вывод: годные - с кожей и без обрыва."""
+    """Which of the chains given to CBPC reach the output: the usable ones - skinned, unbroken."""
     return [r for r in rows if r["fit"]]
 
 
 def alias(stem: str) -> str:
-    """Имя группы настроек по стволу цепочки: «NPC EarL [EarL]Bone» -> «MBEarLBone».
-    Метка в скобках у кости может стоять и посреди имени - выбрасывается вся."""
+    """The name of the settings group from the stem of a chain: `NPC EarL [EarL]Bone` -> `MBEarLBone`.
+    The tag in brackets can sit in the middle of a bone name as well - the whole tag is dropped."""
     core = re.sub(r"^\s*NPC\s+", "", re.sub(r"\[[^\]]*\]", "", stem))
     return "MB" + re.sub(r"[^A-Za-z0-9]", "", core)
 
@@ -53,15 +56,15 @@ def _num(value) -> str:
 
 
 def capsule_line(cap: dict) -> str:
-    """Строка капсулы: концы с радиусом через `&`, половины веса 0 и 100 через `|`.
-    Половины одинаковы: капсула посажена по одному телу."""
+    """One capsule line: the ends with the radius separated by `&`, the weight 0 and weight 100
+    halves separated by `|`. The halves are the same: the capsule was fitted to one body."""
     half = "%s & %s" % (",".join(_num(v) for v in (*cap["p1"], cap["radius"])),
                         ",".join(_num(v) for v in (*cap["p2"], cap["radius"])))
     return "%s | %s" % (half, half)
 
 
 def group_lines(name: str, cfg) -> list[str]:
-    """Строки `Группа.параметр значение` для CBPConfig - числа из настроек."""
+    """The `Group.parameter value` lines for CBPConfig - the numbers out of the settings."""
     out = ["%s.%s %g" % (name, key, float(cfg[cfgkey])) for key, cfgkey in _GROUP_SCALARS]
     offset = float(cfg["cbpcMaxOffset"])
     for axis in _AXES:
@@ -91,43 +94,39 @@ def group_lines(name: str, cfg) -> list[str]:
 
 
 def text(rows: list[dict], chains: list[dict], cfg, title: str | None = None) -> str:
-    """Текст настроек CBPC по цепочкам, отданным ему.
+    """The CBPC settings text for the chains given to it.
 
-    `rows` - `MorphBench.chain_capsules("cbpc")`, `chains` - `MorphBench.chains()` целиком
-    (ради шапки: кто кому отдан), `cfg` - настройки с числами `cbpc*`. Три раздела -
-    три файла CBPC; каждый вписывается в свой.
+    `rows` is `MorphBench.chain_capsules("cbpc")`, `chains` is the whole of
+    `MorphBench.chains()` (purely for the header: who was given to whom), `cfg` the
+    settings with the `cbpc*` numbers. Three sections - three CBPC files; each goes into its own.
     """
-    head = ["# morphbench: настройки CBPC%s" % ((" для " + title) if title else ""),
-            "# цепочки:"]
+    head = ["# " + (t("cbpc.titleFor", title=title) if title else t("cbpc.title")),
+            "# " + t("cbpc.chains")]
     head += ["#   " + line for line in _text.assignments(chains, "cbpc")]
-    head += ["# Капсулы посажены по коже каждого звена при нынешних ползунках, в системе своей",
-             "# кости, в единицах игры; обе половины строки (вес 0 | вес 100) одинаковы.",
-             "# Три раздела ниже - три файла CBPC в SKSE\\Plugins\\: каждый раздел вписать в свой.",
-             "# Условие группы (например, IsRaceName(...)) в [ConfigMap] дописывается самому."]
+    head += ["# " + line for line in t("cbpc.note").splitlines()]
     wanted = selected(rows)
     if not wanted:
-        return "\n".join(head + ["# CBPC не отдано ни одной годной цепочки: писать нечего."]) + "\n"
+        return "\n".join(head + ["# " + t("cbpc.nothing")]) + "\n"
 
     out = list(head)
-    out += ["", "# ---- CBPCMasterConfig_*.txt, раздел [ConfigMap]: кость = группа ----",
-            "[ConfigMap]"]
+    out += ["", "# ---- %s ----" % t("cbpc.partMaster"), "[ConfigMap]"]
     for r in wanted:
         out.append("<")
         out += ["%s=%s" % (l["bone"], alias(r["chain"])) for l in r["links"]]
         out.append(">")
 
-    out += ["", "# ---- CBPConfig_*.txt: качание группы ----"]
+    out += ["", "# ---- %s ----" % t("cbpc.partConfig")]
     for r in wanted:
         out.append("# %s" % r["chain"])
         out += group_lines(alias(r["chain"]), cfg)
         out.append("")
 
-    out += ["# ---- CBPCollisionConfig_*.txt: столкновения ----", "[AffectedNodes]"]
+    out += ["# ---- %s ----" % t("cbpc.partCollision"), "[AffectedNodes]"]
     bare = []
     for r in wanted:
         for l in r["links"]:
             if l["capsule"] is None:
-                bare.append("# %s: кожи на капсулу не хватило (%d точек)" % (l["bone"], l["points"]))
+                bare.append("# " + t("cbpc.noCapsule", bone=l["bone"], points=l["points"]))
             else:
                 out.append(l["bone"])
     out += bare
@@ -137,7 +136,7 @@ def text(rows: list[dict], chains: list[dict], cfg, title: str | None = None) ->
                 out += ["", "[%s]" % l["bone"], capsule_line(l["capsule"])]
     return "\n".join(out) + "\n"
 
-# ---- проверка готового файла ------------------------------------------------------------------
+# ---- checking a ready file ---------------------------------------------------------------------
 _KNOWN_SECTIONS = {"options", "settings", "extraoptions", "playernodes", "affectednodes",
                    "collidernodes", "configmap"}
 _HEADER = re.compile(r"^\[(?P<name>.+)\]\s*(?::\s*[\d.]+)?$")
@@ -153,12 +152,13 @@ def _numbers(chunk: str) -> bool:
 
 
 def check(text_in: str, bones) -> list[dict]:
-    """Ссылается ли файл CBPC на кости, которые есть в скелете, и разбираются ли фигуры.
+    """Does the CBPC file point at bones the skeleton has, and do the shapes parse.
 
-    Смотрятся все три файла одним разбором: узлы в `[AffectedNodes]` и `[ColliderNodes]`,
-    заголовки `[Кость]` со сферами и капсулами, строки `Кость=Группа` в `[ConfigMap]`
-    (скобки `<` `>` пропускаются). Сфера - четыре числа на половину, капсула - два раза
-    по четыре через `&`, половины через `|`. По находке на строку: род, имя, где, в чём дело.
+    One pass reads all three files: the nodes under `[AffectedNodes]` and `[ColliderNodes]`,
+    the `[Bone]` headings with their spheres and capsules, the `Bone=Group` lines under
+    `[ConfigMap]` (the `<` and `>` brackets are skipped over). A sphere is four numbers per
+    half, a capsule twice four separated by `&`, the halves separated by `|`. One finding
+    per line: kind, name, where, what is wrong.
     """
     known = set(bones)
     out: list[dict] = []
@@ -169,36 +169,40 @@ def check(text_in: str, bones) -> list[dict]:
             continue
         head = _HEADER.match(line)
         if head:
-            section = head.group("name").strip()        # «[Кость] : 0.5» - с весом
+            section = head.group("name").strip()        # `[Bone] : 0.5` - with a weight
             if section.lower() not in _KNOWN_SECTIONS and section not in known:
-                out.append({"kind": "bone", "name": section, "where": "строка %d, [%s]" % (no, section),
-                            "problem": "такой кости нет в скелете"})
+                out.append({"kind": "bone", "name": section,
+                            "where": t("cbpc.atSection", line=no, section=section),
+                            "problem": t("cbpc.noBone")})
             continue
         low = (section or "").lower()
         if low == "playernodes":
-            known.add(line)                              # узлы игрока - не кости скелета
+            known.add(line)                              # player nodes are not skeleton bones
         elif low in ("affectednodes", "collidernodes"):
             m = _NODE_LINE.match(line)
             names = [m.group("name")] + [r.strip().lstrip("@") for r in (m.group("refs") or "").split(",") if r.strip()]
             for name in names:
                 if name and name not in known:
-                    out.append({"kind": "bone", "name": name, "where": "строка %d, [%s]" % (no, section),
-                                "problem": "такой кости нет в скелете"})
+                    out.append({"kind": "bone", "name": name,
+                                "where": t("cbpc.atSection", line=no, section=section),
+                                "problem": t("cbpc.noBone")})
         elif low == "configmap":
             if "=" not in line:
-                continue                    # строки групп CBPConfig в общем тексте
+                continue                    # CBPConfig group lines inside one common text
             bone = line.split("=", 1)[0].strip()
             if bone not in known:
-                out.append({"kind": "bone", "name": bone, "where": "строка %d, [ConfigMap]" % no,
-                            "problem": "такой кости нет в скелете"})
+                out.append({"kind": "bone", "name": bone,
+                            "where": t("cbpc.atSection", line=no, section="ConfigMap"),
+                            "problem": t("cbpc.noBone")})
         elif section and low not in _KNOWN_SECTIONS:
             if "=" in line and "," not in line:
-                continue                    # строка настроек, а не фигура
+                continue                    # a line of settings, not a shape
             halves = [h.strip() for h in line.split("|")]
             for half in halves:
                 pieces = [p.strip() for p in half.split("&")]
                 if len(pieces) not in (1, 2) or not all(_numbers(p) and p.count(",") == 3 for p in pieces):
-                    out.append({"kind": "shape", "name": section, "where": "строка %d" % no,
-                                "problem": "не сфера (x,y,z,r) и не капсула (x,y,z,r & x,y,z,r): %r" % line})
+                    out.append({"kind": "shape", "name": section,
+                                "where": t("cbpc.atLine", line=no),
+                                "problem": t("cbpc.badShape", line=line)})
                     break
     return out

@@ -1,6 +1,6 @@
 "use strict";
 
-// ---- боковая панель ------------------------------------------------------------------------
+// ---- side panel ----------------------------------------------------------------------------
 class Panel {
   constructor(app, root) {
     this.app = app;
@@ -12,10 +12,10 @@ class Panel {
     const bench = this.bench, app = this.app, view = bench.view, st = bench.settings;
     const root = this.root;
 
-    // модель: что открыто и, с сервера, из чего выбирать
+    // the model: what is open and, when a server is behind the page, what to choose from
     root.appendChild(this.buildModel());
 
-    // ракурсы
+    // view presets
     this.presetButtons = new Map();
     const presetRow = el("div", { class: "row" });
     for (const name of view.preset_names()) {
@@ -29,7 +29,7 @@ class Panel {
         el("button", { text: T.btnResetPan, on: { click: () => app.invoke("pan", 0, 0) } }),
       ])]));
 
-    // наведение
+    // aim
     const targets = bench.focus_targets();
     this.focusSelect = el("select", { on: { change: () => this.onFocus() } });
     this.focusSelect.appendChild(el("option", { value: "", text: T.optWholeModel }));
@@ -43,7 +43,7 @@ class Panel {
     this.focusInfo = el("div", { class: "muted" });
     root.appendChild(el("section", null, [el("h2", { text: T.secFocus }), this.focusSelect, this.focusInfo]));
 
-    // части меша
+    // mesh shapes
     this.partBoxes = new Map();
     const parts = el("div", { class: "parts" });
     for (const name of bench.shape_names()) {
@@ -59,9 +59,10 @@ class Panel {
       el("div", { class: "row", style: "margin-top:6px" }, [
         el("button", { text: T.btnShowAll, on: { click: () => app.invoke("show_all") } })])]));
 
-    // капсулы столкновений - раздел есть только при открытом скелете: без него слоя нет
-    // и в ядре. Обе галочки - один метод фасада show_colliders(on, bumper); галочка
-    // капсул бампер не трогает (null), галочка бампера оставляет слой как есть.
+    // Collision capsules - the section is here only when a skeleton is open: without one the
+    // core has no such layer either. Both checkboxes go through the single facade method
+    // show_colliders(on, bumper): the capsule box leaves the bumper alone (null), and the
+    // bumper box leaves the layer as it is.
     this.colliderBox = null; this.bumperBox = null;
     if (bench.has_skeleton()) {
       this.colliderBox = el("input", { type: "checkbox",
@@ -78,7 +79,7 @@ class Panel {
         el("div", { class: "muted", text: T.capsulesNote })]));
     }
 
-    // раскраска
+    // colouring
     this.colourRadios = new Map();
     const modes = [["shade", T.modeShade], ["bone", T.modeBone], ["morph", T.modeMorph], ["strain", T.modeStrain]];
     const modeRow = el("div", { class: "row" });
@@ -94,7 +95,7 @@ class Panel {
       el("div", { class: "row", style: "margin-top:6px" }, [el("span", { class: "muted", text: T.colourMorphNote })]),
       this.morphSelect]));
 
-    // свет: за камерой или мировой, направление на источник, три силы
+    // light: bound to the camera or to the world, the direction towards the source, three powers
     this.lightFollowBox = el("input", { type: "checkbox",
       on: { change: () => app.invoke("light_follow_camera", this.lightFollowBox.checked) } });
     this.lightDirLabel = el("span", { class: "muted" });
@@ -115,7 +116,7 @@ class Panel {
         el("button", { text: T.btnLightDefaults, on: { click: () => this.resetLight() } }),
         el("span", { class: "muted", text: T.shadingIs + st.shading })])]));
 
-    // ползунки
+    // sliders
     this.sliderRows = new Map();
     const range = st.sliderRange, step = String(st.sliderStep);
     const sliders = el("div");
@@ -134,7 +135,7 @@ class Panel {
         el("button", { text: T.btnResetSliders, on: { click: () => app.invoke("reset_sliders") } }),
         el("span", { class: "muted", text: T.sliderRange + range[0] + " … " + range[1] + T.fromSettings })])]));
 
-    // легенда костей
+    // bone legend
     this.legendSelect = el("select", { on: { change: () => this.refreshLegend() } });
     for (const name of bench.shape_names()) this.legendSelect.appendChild(el("option", { value: name, text: name }));
     if (bench.shapes.has(st.baseShape)) this.legendSelect.value = st.baseShape;
@@ -142,7 +143,7 @@ class Panel {
     this.legendSection = el("section", null, [el("h2", { text: T.secLegend }), this.legendSelect, this.legend]);
     root.appendChild(this.legendSection);
 
-    // состояние
+    // state
     this.lastCall = el("pre", { text: "" });
     this.state = el("pre");
     this.command = el("pre");
@@ -154,9 +155,10 @@ class Panel {
       el("div", { class: "muted", text: T.sameFrame }), this.command, this.note, this.error]));
   }
 
-  // Раздел «Модель». В файле с диска - только имя открытого меша: выбирать не из чего, и
-  // страница не обращается никуда. С сервера - список мешей под корнем обзора, папка
-  // и обход без морфов; выбор ведёт на тот же сервер с другим запросом.
+  // The "Model" section. In a file on disk it is the name of the open mesh and nothing else:
+  // there is nothing to choose from, and the page asks nobody. From a server it also carries
+  // the meshes found under the browse root, the folder itself and the sweep that takes meshes
+  // without morphs; picking one goes back to the same server with a different query.
   buildModel() {
     const bench = this.bench, names = bench.names, srv = bench.server;
     const current = el("div", { class: "current" }, [
@@ -169,7 +171,7 @@ class Panel {
     const env = srv.environment || {};
     const envLine = el("div", { class: "muted", text:
       T.underMo2 + (env.insideMo2 ? T.yes : T.no) + T.rootIs + (srv.root || T.rootUnset) });
-    // список мешей: группы по папке от корня, в строке - файл и формат морфов
+    // the mesh list: grouped by the folder below the root, each line is the file and the morph format
     this.modelSelect = el("select", { on: { change: () => this.onModel() } });
     this.modelSelect.appendChild(el("option", { value: "",
       text: srv.catalog.length ? T.pickMesh + srv.catalog.length + T.pickMeshEnd : T.noMeshesUnderRoot }));
@@ -183,7 +185,7 @@ class Panel {
       if (bench.summary && same(e.nif, bench.summary.nif)) currentName = e.name;
     }
     this.modelSelect.value = currentName;
-    // папка обзора и обход без морфов
+    // the browse folder, and the sweep that takes meshes without morphs as well
     this.rootInput = el("input", { type: "text", class: "wide", value: srv.root || "", title: T.browseFolder });
     this.allBox = el("input", { type: "checkbox", on: { change: () => this.go({ root: this.rootInput.value }) } });
     this.allBox.checked = !srv.withMorphs;
@@ -193,8 +195,8 @@ class Panel {
       el("div", { class: "row" }, [el("label", null, [this.allBox, T.lblWithoutMorphs])]),
       envLine, el("div", { class: "err", text: srv.error || "" })]);
   }
-  // Переход на тот же сервер с другим телом или корнем: страница держит одно тело, поэтому
-  // смена модели - это перезагрузка с другим запросом, а не второй набор геометрии.
+  // Going to the same server with another body or another root: the page holds one body, so
+  // changing the model is a reload with a different query, not a second set of geometry.
   go(params) {
     const q = [];
     for (const k in params) if (params[k] !== undefined && params[k] !== null && params[k] !== "") q.push(k + "=" + encodeURIComponent(params[k]));
@@ -206,15 +208,15 @@ class Panel {
     if (name) this.go({ name: name, root: this.bench.server.root });
   }
 
-  // --- действия панели: каждое - вызов метода зеркала фасада ---
+  // --- what the panel does: every action calls a method of the facade mirror ---
   onFocus() {
     const v = this.focusSelect.value;
     if (!v) return this.app.invoke("focus_all");
     const i = v.indexOf(":"), kind = v.slice(0, i), name = v.slice(i + 1);
     this.app.invoke("focus_" + kind, name);
   }
-  // Галочка части - это only() со списком видимых либо show_all(), когда видны все:
-  // так состояние остаётся тем же, каким его выдаст view_state() ядра.
+  // A shape checkbox is only() with the list of the visible shapes, or show_all() when they
+  // are all visible: that keeps the state exactly what the core's view_state() would report.
   onPart(name, checked) {
     const view = this.bench.view, all = this.bench.shape_names();
     const names = all.filter((n) => n === name ? checked : view.is_visible(n));
@@ -230,19 +232,19 @@ class Panel {
   onLightDir() {
     const v = this.lightDirInputs.map((i) => Number(i.value) || 0);
     this.app.invoke("light_direction", v[0], v[1], v[2]);
-    this.showLight(this.bench.view.as_dict().light, true);   // в полях - то, что принял фасад
+    this.showLight(this.bench.view.as_dict().light, true);   // the fields show what the facade accepted
   }
   onLightPower() {
     const v = (key) => Number(this.lightPowerInputs[key].value) || 0;
     this.app.invoke("light_power", v("ambient"), v("diffuse"), v("fill"));
     this.showLight(this.bench.view.as_dict().light, true);
   }
-  // Свет как в настройках - один вызов фасада, у которого есть такой же метод в ядре.
+  // Light as in the settings - one facade call, and the core has a method of the same name.
   resetLight() {
     this.app.invoke("light_reset");
   }
 
-  // --- отражение состояния ---
+  // --- reflecting the state ---
   showLight(light, force) {
     this.lightFollowBox.checked = light.follow;
     this.lightDirLabel.textContent = light.follow ? T.lightAxesCamera : T.lightAxesWorld;
@@ -260,10 +262,11 @@ class Panel {
     const preset = state.preset;
     for (const [name, b] of this.presetButtons) b.classList.toggle("on", name === preset);
 
-    // наведение
+    // aim
     const focusValue = state.focus ? state.focus.name : "";
     if (focusValue && !Array.from(this.focusSelect.options).some((o) => o.value === focusValue)) {
-      // цель задана из командной строки по подстроке - ядро уже сосчитало сферу, покажем её как есть
+      // the target came from the command line as a substring - the core has already worked out the
+      // sphere, so show it as it is
       this.focusSelect.appendChild(el("option", { value: focusValue, text: focusValue + T.focusFromCli }));
     }
     this.focusSelect.value = focusValue;
@@ -271,22 +274,22 @@ class Panel {
       ? T.focusCentre + state.focus.centre.join(" ") + T.focusRadius + state.focus.radius + T.focusPadding + bench.settings.focusPadding
       : T.frameCoversAll;
 
-    // части
+    // shapes
     for (const [name, box] of this.partBoxes) box.checked = view.is_visible(name);
 
-    // капсулы
+    // capsules
     if (this.colliderBox) { this.colliderBox.checked = view.colliders; this.bumperBox.checked = view.bumper; }
 
-    // раскраска
+    // colouring
     for (const [mode, r] of this.colourRadios) r.checked = (mode === view.colouring);
     this.morphSelect.value = view.highlightMorph || "";
     this.legendSection.style.display = view.colouring === "bone" && bench.shape_names().length ? "" : "none";
     if (view.colouring === "bone" && this.legendSelect.value && this.legendFor !== this.legendSelect.value) this.refreshLegend();
 
-    // свет
+    // light
     this.showLight(state.light, false);
 
-    // ползунки
+    // sliders
     const sliders = bench.sliders();
     for (const [name, r] of this.sliderRows) {
       const v = name in sliders ? sliders[name] : 0;
@@ -295,7 +298,7 @@ class Panel {
       r.row.classList.toggle("active", name in sliders);
     }
 
-    // состояние и команда
+    // the state and the command
     this.lastCall.textContent = this.app.lastCall || "—";
     this.state.textContent = JSON.stringify({ view: state, sliders: sliders }, null, 2);
     this.command.textContent = this.buildCommand(preset);
@@ -315,15 +318,18 @@ class Panel {
     const g = Palette.NO_BONE.map((x) => Math.round(x * 255));
     this.legend.appendChild(el("div", null, [el("span", { class: "swatch", style: "background:rgb(" + g.join(",") + ")" }), T.noBone]));
   }
-  // Командная строка mb.py render с теми же ключами, что принимает cmd_render: всё, что
-  // нажато на странице, можно повторить без окна. Пары чисел идут через знак равенства,
-  // чтобы минус впереди не был принят разборщиком за ключ. Свет попадает в команду только
-  // там, где отличается от настроек: без ключей render светит так же, как настройки.
+  // The mb.py render command line, with the same options cmd_render takes: everything clicked
+  // on the page can be repeated without a window. Pairs of numbers go through an equals sign so
+  // that a leading minus is not taken for an option by the parser. Light gets into the command
+  // only where it differs from the settings: given no light options, render lights the body
+  // exactly as the settings say.
   buildCommand(preset) {
     const bench = this.bench, st = bench.settings, state = bench.view.as_dict(), sliders = bench.sliders();
     if (!bench.summary) return T.noFrameSource;
     const q = (s) => /[^\w.\-=:\\\/]/.test(s) ? '"' + s.replace(/"/g, '\\"') + '"' : s;
-    const parts = ["python", "mb.py", "render", q(bench.summary.nif), "--out", T.frameFile];
+    // the output name is not a key: a file name is the same in every language, and this line
+    // is pasted into a shell as it stands
+    const parts = ["python", "mb.py", "render", q(bench.summary.nif), "--out", "frame.png"];
     if (bench.summary.tri) parts.push("--tri", q(bench.summary.tri));
     if (preset) parts.push("--view", preset); else parts.push("--look=" + state.yaw + "," + state.pitch);
     for (const name in sliders) parts.push("--slider", q(name + "=" + fmt(sliders[name])));
@@ -338,7 +344,8 @@ class Panel {
       const i = state.focus.name.indexOf(":");
       parts.push("--focus-" + state.focus.name.slice(0, i), q(state.focus.name.slice(i + 1)));
     }
-    // Слой капсул: скелет называется явно, даже если render нашёл бы его рядом с мешем сам.
+    // The capsule layer: the skeleton is named outright, even though render would have found it
+    // beside the mesh on its own.
     if (state.colliders && bench.summary.skeleton) {
       parts.push("--skeleton", q(bench.summary.skeleton), "--colliders");
       if (state.bumper) parts.push("--bumper");

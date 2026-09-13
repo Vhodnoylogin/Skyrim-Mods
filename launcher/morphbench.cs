@@ -1,22 +1,23 @@
-// morphbench.exe - окно запуска: поднять сервер, остановить, состояние, папка обзора, страница.
+// morphbench.exe - the launch window: bring the server up, stop it, the state, the browse root,
+// the page.
 //
-// Зачем оно нужно. MO2 подменяет файловую систему только тем процессам, которые запустил
-// сам (и их потомкам): моды сливаются в один Data игры библиотекой usvfs. Чтобы верстак
-// увидел меши всей сборки, его надо запустить из MO2 - а MO2 запускает исполняемые файлы,
-// не скрипты. Это окно и есть такой исполняемый файл: запущенное из MO2, оно поднимает
-// `python mb.py serve` своим потомком, и тот видит Data со всеми модами.
+// Why it is needed. MO2 replaces the file system only for the processes it started itself (and
+// their children): the mods are merged into one game Data by the usvfs library. For the
+// workbench to see the meshes of the whole build it has to be started from MO2 - and MO2 starts
+// executables, not scripts. This window is exactly such an executable: started from MO2 it
+// brings up `python mb.py serve` as its own child, and that child sees Data with every mod.
 //
-// Окно ничего не считает и ничего не знает о мешах. Всё, что оно умеет, - вызовы того же
-// сервера, что и командная строка: `serve --status`, `serve`, `serve --stop`, `/api/root`,
-// открыть страницу. Ни одного пути внутри: модуль - рядом с exe (там лежит mb.py), либо
-// папка доводом, либо переменная MORPHBENCH_HOME; Python - переменная MORPHBENCH_PYTHON,
-// ключ "python" в morphbench.json, python.exe по PATH (кроме заглушки магазина Windows),
-// реестр PythonCore, либо запускатель py.exe.
+// The window computes nothing and knows nothing about meshes. Everything it can do is a call to
+// the same server the command line calls: `serve --status`, `serve`, `serve --stop`, `/api/root`,
+// open the page. Not a single path is written into it: the module is beside the exe (mb.py lives
+// there), or a folder given as an argument, or the MORPHBENCH_HOME variable; python is the
+// MORPHBENCH_PYTHON variable, the "python" key in morphbench.json, python.exe on PATH (bar the
+// Windows store stub), the PythonCore registry key, or the py.exe launcher.
 //
-// Доводы: --start - поднять сервер и открыть страницу сразу; --root <папка> - корень обзора
-// на этот запуск; <папка> - где лежит mb.py.
+// Arguments: --start - bring the server up and open the page at once; --root <folder> - the
+// browse root for this run; <folder> - where mb.py lives.
 //
-// Сборка - штатным компилятором .NET Framework, который есть на любой Windows:
+// Built with the stock .NET Framework compiler, which every Windows has:
 //     launcher\build.cmd
 using System;
 using System.Collections.Generic;
@@ -43,11 +44,13 @@ static class Program
         var options = Options.Parse(args);
         if (options.Diag)
         {
-            // Диагностика без окна: что python видит из-под MO2 - в файл рядом с exe.
-            // Так проверяют VFS без человека у экрана: запуск через MO2, ответ - в файле.
+            // Diagnostics without a window: what python sees from under MO2 - into a file
+            // beside the exe. That is how the VFS is checked with nobody at the screen:
+            // started through MO2, the answer is in the file.
             string home = Module.FindHome(options.Home);
             string python = home == null ? null : Module.FindPython(home);
-            string text = home == null ? "нет mb.py" : python == null ? "нет python"
+            string text = home == null ? Texts.T("launcher.diagNoModule")
+                : python == null ? Texts.T("launcher.diagNoPython")
                 : new Launcher(home, python).Cli("env --json") + "\n---catalog---\n"
                   + new Launcher(home, python).Cli("render --entry assets/malebodywerewolf_0.nif --size 300x300 --colliders --out morphbench.diag.png --json");
             File.WriteAllText(Path.Combine(home ?? AppDomain.CurrentDomain.BaseDirectory, "morphbench.diag.json"),
@@ -58,13 +61,191 @@ static class Program
     }
 }
 
-// ---- доводы командной строки ----------------------------------------------------------------
+// ---- texts: the window reads the same catalogue the module does -----------------------------
+//
+// The window runs no python of its own, so it reads the locale files itself. The rules here are
+// the rules of morphbench\i18n.py and the two must agree: the MORPHBENCH_LANG variable wins over
+// the `language` setting, `auto` means the language of the operating system, every
+// locale\<lang>\*.json is merged into one dictionary, a key starting with `#` is a note to the
+// translator, and a key with no text falls back to English and then to the key itself.
+//
+// Nothing here may throw. This is a launcher: it has to come up even when the module beside it
+// is broken, because a broken module is exactly when the user needs to read the error.
+static class Texts
+{
+    //: Overrides the setting - for a run that must not depend on the machine.
+    public const string Env = "MORPHBENCH_LANG";
+    //: The language every other one falls back to. Its files hold every key in use.
+    public const string Base = "en";
+
+    static readonly Dictionary<string, string> chosen = new Dictionary<string, string>(StringComparer.Ordinal);
+    static readonly Dictionary<string, string> fallback = new Dictionary<string, string>(StringComparer.Ordinal);
+    //: `%(name)s` - by name, never by position: another language puts the words in another order.
+    static readonly Regex Field = new Regex(@"%\((\w+)\)[-+ #0-9.]*[A-Za-z]");
+
+    static Texts()
+    {
+        try
+        {
+            string home = Home();
+            string folder = Path.Combine(home, "locale");
+            Read(Path.Combine(folder, Base), fallback);
+            string language = Wanted(home);
+            if (language != Base) Read(Path.Combine(folder, language), chosen);
+        }
+        catch (Exception)
+        {
+            // A catalogue that cannot be read is a nuisance; a window that will not open is a
+            // fault. Every lookup then falls through to the key itself - latin, short and
+            // searchable, which is better than an empty label.
+        }
+    }
+
+    /// The text for a key, with the base language and then the key itself behind it.
+    public static string T(string key)
+    {
+        string text;
+        if (chosen.TryGetValue(key, out text) && text.Length > 0) return text;
+        if (fallback.TryGetValue(key, out text) && text.Length > 0) return text;
+        return key;
+    }
+
+    /// The same with named values put in: T("launcher.page", "url", url). The arguments go in
+    /// pairs - name, value - because substitution is by name and a name is what the translator
+    /// sees in the text.
+    public static string T(string key, params object[] namesAndValues)
+    {
+        string text = T(key);
+        if (namesAndValues == null || namesAndValues.Length < 2) return text;
+        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        for (int i = 0; i + 1 < namesAndValues.Length; i += 2)
+        {
+            string name = namesAndValues[i] == null ? "" : namesAndValues[i].ToString();
+            values[name] = Convert.ToString(namesAndValues[i + 1], CultureInfo.InvariantCulture) ?? "";
+        }
+        bool whole = true;
+        string filled = Field.Replace(text, delegate(Match m)
+        {
+            string value;
+            if (values.TryGetValue(m.Groups[1].Value, out value)) return value;
+            whole = false;
+            return m.Value;
+        });
+        if (whole) return filled;
+        // A substitution that does not fit the text is the translator's slip, not a reason to
+        // lose what the caller meant to say: the values are appended so nothing goes missing.
+        var names = new List<string>(values.Keys);
+        names.Sort(StringComparer.Ordinal);
+        var tail = new StringBuilder();
+        foreach (string name in names)
+        {
+            if (tail.Length > 0) tail.Append(", ");
+            tail.Append(name).Append("=").Append(values[name]);
+        }
+        return filled + " [" + tail + "]";
+    }
+
+    /// Which language to speak: the variable, then the setting, then the language of Windows.
+    static string Wanted(string home)
+    {
+        string code = Clean(Environment.GetEnvironmentVariable(Env));
+        if (code.Length == 0) code = Clean(FromConfig(Path.Combine(home, "morphbench.json")));
+        if (code.Length == 0 || code == "auto") code = SystemLanguage();
+        return code.Length == 0 ? Base : code;
+    }
+
+    static string SystemLanguage()
+    {
+        try
+        {
+            // CurrentUICulture, not InstalledUICulture: the module asks Windows for
+            // GetUserDefaultUILanguage, which is the display language the user picked, and
+            // InstalledUICulture is the one the machine was installed with. On a box switched
+            // to another language the two differ, and the window would then speak a different
+            // language from the server it starts.
+            string code = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName;
+            return string.IsNullOrEmpty(code) ? Base : code.ToLowerInvariant();
+        }
+        catch (Exception) { return Base; }
+    }
+
+    static string FromConfig(string path)
+    {
+        try
+        {
+            if (!File.Exists(path)) return "";
+            var d = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(path));
+            object value;
+            if (d != null && d.TryGetValue("language", out value) && value != null) return value.ToString();
+        }
+        catch (Exception) { }
+        return "";
+    }
+
+    /// Every text of one language: a folder holding any number of files, one per section,
+    /// merged into one dictionary. A new section arrives as a NEW FILE, so two people adding
+    /// two sections never rewrite the same file. The first declaration of a key wins, the way
+    /// the module's catalogue does it.
+    static void Read(string folder, Dictionary<string, string> into)
+    {
+        string[] files;
+        try { files = Directory.GetFiles(folder, "*.json"); }
+        catch (Exception) { return; }          // no folder for this language - English answers
+        Array.Sort(files, StringComparer.OrdinalIgnoreCase);
+        var js = new JavaScriptSerializer();
+        foreach (string file in files)
+        {
+            try
+            {
+                var data = js.Deserialize<Dictionary<string, object>>(File.ReadAllText(file));
+                if (data == null) continue;
+                foreach (KeyValuePair<string, object> pair in data)
+                {
+                    string key = pair.Key ?? "";
+                    if (key.Length == 0 || key[0] == '#' || pair.Value == null) continue;
+                    if (!into.ContainsKey(key)) into[key] = pair.Value.ToString();
+                }
+            }
+            // Caught per file: one malformed file must not lose the texts of all the others.
+            catch (Exception) { }
+        }
+    }
+
+    /// Where the locale folder is. Beside the exe as a rule - the module and morphbench.exe
+    /// live in one folder - but a window started from elsewhere is told where the module is,
+    /// and the texts have to follow it there.
+    static string Home()
+    {
+        var candidates = new List<string>();
+        candidates.Add(AppDomain.CurrentDomain.BaseDirectory);
+        string named = Environment.GetEnvironmentVariable("MORPHBENCH_HOME");
+        if (!string.IsNullOrEmpty(named)) candidates.Add(named);
+        candidates.Add(Directory.GetCurrentDirectory());
+        foreach (string dir in candidates)
+        {
+            try
+            {
+                string full = Path.GetFullPath(dir);
+                if (Directory.Exists(Path.Combine(full, "locale"))) return full;
+            }
+            catch (Exception) { }
+        }
+        return AppDomain.CurrentDomain.BaseDirectory;
+    }
+
+    static string Clean(string code)
+    {
+        return code == null ? "" : code.Trim().ToLowerInvariant();
+    }
+}
+
+// ---- command line arguments -----------------------------------------------------------------
 class Options
 {
-    public string Home;          // папка с mb.py, если названа доводом
-    public string Root;          // корень обзора на этот запуск
-    public bool Start;           // поднять сервер сразу
-    public bool Diag;            // без окна: env --json в файл и выйти
+    public string Home;          // the folder with mb.py, if named as an argument
+    public string Root;          // the browse root for this run
+    public bool Start;           // bring the server up at once
+    public bool Diag;            // no window: env --json into a file, then leave
 
     public static Options Parse(string[] args)
     {
@@ -82,7 +263,7 @@ class Options
     }
 }
 
-// ---- где модуль и где Python -------------------------------------------------------------
+// ---- where the module is and where python is ------------------------------------------------
 static class Module
 {
     public const string Script = "mb.py";
@@ -117,8 +298,8 @@ static class Module
         foreach (string dir in path.Split(Path.PathSeparator))
         {
             if (dir.Trim().Length == 0) continue;
-            // Заглушка магазина Windows лежит в WindowsApps: без настоящего Python она
-            // открывает магазин вместо того, чтобы что-то запустить.
+            // The Windows store stub lives in WindowsApps: with no real python behind it, it
+            // opens the store instead of running anything.
             if (dir.IndexOf("WindowsApps", StringComparison.OrdinalIgnoreCase) >= 0) continue;
             string exe = Path.Combine(dir.Trim(), "python.exe");
             if (IsFile(exe)) return exe;
@@ -135,8 +316,9 @@ static class Module
         if (!IsFile(json)) return null;
         try
         {
-            // Настройки читает сам верстак; здесь нужен один ключ. Путь в двойных кавычках,
-            // косые в нём экранированы - Regex.Unescape их возвращает.
+            // The settings are read by the workbench itself; only one key is needed here. The
+            // path is in double quotes with its backslashes escaped - Regex.Unescape gives
+            // them back.
             var m = Regex.Match(File.ReadAllText(json), "\"python\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
             return m.Success ? Regex.Unescape(m.Groups[1].Value) : null;
         }
@@ -154,7 +336,7 @@ static class Module
                     if (core == null) continue;
                     string[] versions = core.GetSubKeyNames();
                     Array.Sort(versions, StringComparer.OrdinalIgnoreCase);
-                    Array.Reverse(versions);           // сначала самая новая
+                    Array.Reverse(versions);           // the newest one first
                     foreach (string v in versions)
                     {
                         using (RegistryKey k = core.OpenSubKey(v + @"\InstallPath"))
@@ -186,7 +368,7 @@ static class Module
     }
 }
 
-// ---- что окно помнит между запусками -------------------------------------------------------
+// ---- what the window remembers between runs -------------------------------------------------
 class Remembered
 {
     readonly string path;
@@ -218,22 +400,22 @@ class Remembered
     }
 }
 
-// ---- состояние сервера, как его видит окно --------------------------------------------------
+// ---- the state of the server as the window sees it ------------------------------------------
 class ServerStatus
 {
-    public string State = "free";          // free, ours, busy - как у ServerLink
+    public string State = "free";          // free, ours, busy - the same as ServerLink
     public string Url = "";
-    public bool? InsideMo2;                // сервер под MO2?
-    public string Root;                    // корень сервера
-    public int? Meshes;                    // мешей под корнем
-    public bool HereInsideMo2;             // этот процесс под MO2?
-    public string HereDataRoot;            // Data игры, которую он видит
-    public string Error;                   // почему не удалось спросить
+    public bool? InsideMo2;                // is the server under MO2?
+    public string Root;                    // the root of the server
+    public int? Meshes;                    // meshes under the root
+    public bool HereInsideMo2;             // is this process under MO2?
+    public string HereDataRoot;            // the game Data it sees
+    public string Error;                   // why asking failed
 
     public bool Up { get { return State == "ours"; } }
 }
 
-// ---- клиент сервера: те же вызовы, что у командной строки ----------------------------------
+// ---- the client of the server: the same calls the command line makes ------------------------
 class Launcher
 {
     public readonly string Home;
@@ -241,7 +423,9 @@ class Launcher
     public string Url = "";
     public Action<string> Log = delegate { };
     readonly JavaScriptSerializer js = new JavaScriptSerializer();
-    Process owned;                          // сервер, поднятый этим окном
+    Process owned;                          // the server this window brought up
+    //: How long a server is given to leave on its own before it is killed.
+    const int StopWaitMs = 5000;
 
     public Launcher(string home, string python)
     {
@@ -251,12 +435,12 @@ class Launcher
 
     public bool Owns { get { return owned != null && !owned.HasExited; } }
 
-    // -- командная строка верстака: единственный источник адреса и окружения --
+    // -- the command line of the workbench: the only source of the address and the environment --
     public ServerStatus StatusFromCli()
     {
         var st = new ServerStatus();
         string outp = RunCli("serve --status --json");
-        Log(outp.Trim());                      // что верстак знает об окружении - целиком
+        Log(outp.Trim());                      // everything the workbench knows about the environment, verbatim
         try
         {
             var d = js.Deserialize<Dictionary<string, object>>(FirstJson(outp));
@@ -271,17 +455,18 @@ class Launcher
         }
         catch (Exception e)
         {
-            st.Error = "serve --status не ответил: " + e.Message + "\r\n" + outp.Trim();
+            st.Error = Texts.T("launcher.statusNoAnswer", "error", e.Message) + "\r\n" + outp.Trim();
         }
         return st;
     }
 
     public string Cli(string args) { return RunCli(args); }
 
-    // Сервер уже поднят: не поднимать второго, а отдать ему корень обзора. Делается это
-    // тем же вызовом `mb.py serve`, что и подъём: правило «свободно - поднять, поднят -
-    // подключиться и передать путь» живёт в команде, в одном месте, и своей ветки решения
-    // у окна нет. Из-под MO2 передаётся Data игры, которую этот процесс видит сквозь usvfs.
+    // The server is already up: do not bring up a second one, hand it the browse root instead.
+    // That is done by the same `mb.py serve` call as bringing it up: the rule "free - bring one
+    // up, up - connect and hand over the path" lives in the command, in one place, and the
+    // window has no branch of its own. From under MO2 the game Data this process sees through
+    // usvfs is what gets handed over.
     public string HandOver(string root)
     {
         string args = "serve --no-browser";
@@ -299,9 +484,9 @@ class Launcher
         };
         using (var p = Process.Start(start))
         {
-            // Две трубы читаются одновременно: если читать их по очереди, потомок, забивший
-            // вторую трубу (длинная трассировка), встанет на записи, и первая никогда
-            // не закроется - окно зависло бы ровно тогда, когда нужна диагностика.
+            // Both pipes are read at once: read one after the other, and a child that has
+            // filled the second one (a long traceback) stops on the write, so the first pipe
+            // never closes - the window would hang exactly when the diagnostics are wanted.
             var err = p.StandardError.ReadToEndAsync();
             string o = p.StandardOutput.ReadToEnd();
             p.WaitForExit();
@@ -309,7 +494,7 @@ class Launcher
         }
     }
 
-    // -- сервер по HTTP: то же, что делает ServerLink --
+    // -- the server over HTTP: the same thing ServerLink does --
     public ServerStatus Probe(ServerStatus previous)
     {
         var st = new ServerStatus
@@ -333,8 +518,9 @@ class Launcher
         }
         catch (WebException e)
         {
-            // Соединение есть, ответа нет - это не чужая программа, а неизвестно кто:
-            // чаще всего наш сервер под замком на обходе большой папки.
+            // The connection goes through but no answer comes back. That does not mean some
+            // other program has the port - it means whoever has it cannot be named, and most
+            // often it is our own server, locked up walking a large folder.
             st.State = e.Status == WebExceptionStatus.ConnectFailure ? "free"
                 : e.Status == WebExceptionStatus.Timeout ? "slow" : "busy";
             if (st.State != "free") st.Error = e.Message;
@@ -356,10 +542,10 @@ class Launcher
     {
         if (Owns) return;
         string args = Module.Quote(Path.Combine(Home, Module.Script)) + " serve --no-browser --json";
-        // Сервер уходит вместе с этим окном САМ. Мирное закрытие останавливает его и так,
-        // но снятое жёстко окно на это времени не имеет, и без сторожа оставался бы
-        // невидимый сервер: порт занят, подмена MO2 для него устарела, а следующий запуск
-        // молча подключился бы именно к нему.
+        // The server leaves with this window BY ITSELF. Closing peacefully stops it anyway, but
+        // a window killed outright has no time for that, and with nothing watching the parent an
+        // invisible server would be left behind: the port taken, the file system MO2 handed it
+        // long out of date, and the next run would quietly connect to exactly that one.
         args += " --parent " + Process.GetCurrentProcess().Id.ToString(CultureInfo.InvariantCulture);
         if (!string.IsNullOrEmpty(root)) args += " --root " + Module.Quote(root);
         var start = new ProcessStartInfo(Python, args)
@@ -373,7 +559,7 @@ class Launcher
         owned.EnableRaisingEvents = true;
         owned.OutputDataReceived += (s, e) => { if (e.Data != null) Log(e.Data); };
         owned.ErrorDataReceived += (s, e) => { if (e.Data != null) Log(e.Data); };
-        owned.Exited += (s, e) => Log("сервер завершился, код " + SafeExitCode(owned));
+        owned.Exited += (s, e) => Log(Texts.T("launcher.serverExited", "code", SafeExitCode(owned)));
         owned.BeginOutputReadLine();
         owned.BeginErrorReadLine();
     }
@@ -391,13 +577,13 @@ class Launcher
         }
         catch (Exception e)
         {
-            Log("остановка: " + e.Message);
+            Log(Texts.T("launcher.stopFailed", "error", e.Message));
         }
         var p = owned;
         if (p == null) return;
-        if (!p.WaitForExit(5000))
+        if (!p.WaitForExit(StopWaitMs))
         {
-            Log("сервер не вышел за 5 с - снимаю");
+            Log(Texts.T("launcher.killed", "seconds", StopWaitMs / 1000));
             try { p.Kill(); } catch (Exception) { }
         }
         owned = null;
@@ -412,14 +598,14 @@ class Launcher
     Dictionary<string, object> Get(string path)
     {
         var req = (HttpWebRequest)WebRequest.Create(Url + path);
-        req.Timeout = 30000;                   // обход большой папки может длиться секунды
-        req.Proxy = null;                      // адрес местный, прокси из окружения ни к чему
+        req.Timeout = 30000;                   // walking a large folder can take seconds
+        req.Proxy = null;                      // the address is local, a proxy from the environment is no use
         try
         {
             using (var resp = (HttpWebResponse)req.GetResponse())
             {
                 string server = resp.Headers["Server"] ?? "";
-                if (!server.StartsWith("morphbench/")) throw new Exception("на " + Url + " отвечает не morphbench");
+                if (!server.StartsWith("morphbench/")) throw new Exception(Texts.T("launcher.notMorphbench", "url", Url));
                 return js.Deserialize<Dictionary<string, object>>(ReadAll(resp));
             }
         }
@@ -427,7 +613,7 @@ class Launcher
         {
             var resp = e.Response as HttpWebResponse;
             if (resp == null) throw;
-            // Отказ сервера - его словами: {"error": ...}
+            // A refusal by the server, in its own words: {"error": ...}
             string text = ReadAll(resp);
             string message = text;
             try
@@ -450,7 +636,7 @@ class Launcher
     {
         int i = text.IndexOf('{');
         int j = text.LastIndexOf('}');
-        if (i < 0 || j < i) throw new Exception("в ответе нет JSON");
+        if (i < 0 || j < i) throw new Exception(Texts.T("launcher.noJson"));
         return text.Substring(i, j - i + 1);
     }
 
@@ -475,7 +661,7 @@ class Launcher
     }
 }
 
-// ---- окно -----------------------------------------------------------------------------------
+// ---- the window -----------------------------------------------------------------------------
 class MainForm : Form
 {
     readonly Options options;
@@ -483,8 +669,11 @@ class MainForm : Form
     Remembered remembered;
     ServerStatus status = new ServerStatus();
     bool probing;
-    bool warnedForeign;                     // предупреждение о сервере вне MO2 - один раз
-    int waitTicks;                          // сколько секунд ещё ждать подъёма своего сервера
+    bool warnedForeign;                     // the warning about a server outside MO2 - once
+    int waitTicks;                          // how many more seconds to wait for our own server
+    //: What the parts of the environment line are strung together with. Punctuation, not a
+    //: text: a translator should not have to carry a separator through every one of them.
+    const string Sep = " · ";
 
     readonly Label stateLabel = new Label();
     readonly Label envLabel = new Label();
@@ -502,10 +691,10 @@ class MainForm : Form
     {
         this.options = options;
         Text = "morphbench";
-        // Значок заголовка задаётся явно: /win32icon даёт значок ФАЙЛУ (проводник, панель
-        // задач), а окно WinForms без этого рисует свой стандартный. Берётся тот же .ico,
-        // вложенный ресурсом, - в нём все размеры, и Windows выбирает 16 точек для
-        // заголовка сама, вместо того чтобы мельчить большой.
+        // The title icon is set explicitly: /win32icon gives an icon to the FILE (explorer, the
+        // taskbar), and a WinForms window without this draws its own default one. The same .ico
+        // is taken, embedded as a resource - it holds every size, and Windows picks the 16 point
+        // one for the title itself instead of shrinking the large one.
         try
         {
             using (var s = Assembly.GetExecutingAssembly().GetManifestResourceStream("morphbench.ico"))
@@ -516,8 +705,8 @@ class MainForm : Form
             try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); }
             catch (Exception) { }
         Font = new Font("Segoe UI", 9f);
-        // Размеры заданы для 96 dpi и умножаются на масштаб экрана сами: шрифты и кнопки
-        // WinForms масштабирует по dpi, а размер окна - нет.
+        // The sizes are given for 96 dpi and multiply themselves by the scale of the screen:
+        // WinForms scales fonts and buttons by dpi, but not the size of the window.
         AutoScaleMode = AutoScaleMode.None;
         float k;
         using (var g = CreateGraphics()) k = g.DpiX / 96f;
@@ -544,7 +733,7 @@ class MainForm : Form
         envLabel.AutoSize = true;
         envLabel.ForeColor = SystemColors.GrayText;
         envLabel.Margin = new Padding(0, 0, 0, 8);
-        // Длинный корень не должен раздвигать окно: подписи переносятся по его ширине.
+        // A long root must not push the window wider: the labels wrap at its width.
         grid.SizeChanged += (s, e) =>
         {
             int w = Math.Max(100, grid.ClientSize.Width - grid.Padding.Horizontal);
@@ -557,12 +746,12 @@ class MainForm : Form
         rootRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
         rootRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         rootRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        var rootLabel = new Label { Text = "Корень обзора:", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 6, 6, 0) };
+        var rootLabel = new Label { Text = Texts.T("launcher.rootLabel"), AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 6, 6, 0) };
         rootBox.Anchor = AnchorStyles.Left | AnchorStyles.Right;
-        browseButton.Text = "…";
+        browseButton.Text = Texts.T("launcher.browseButton");
         browseButton.AutoSize = true;
         browseButton.Click += (s, e) => Browse();
-        applyButton.Text = "Применить";
+        applyButton.Text = Texts.T("launcher.apply");
         applyButton.AutoSize = true;
         applyButton.Click += (s, e) => Apply();
         rootRow.Controls.Add(rootLabel, 0, 0);
@@ -571,10 +760,10 @@ class MainForm : Form
         rootRow.Controls.Add(applyButton, 3, 0);
 
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, Margin = new Padding(0, 0, 0, 8) };
-        startButton.Text = "Поднять сервер";
-        stopButton.Text = "Остановить";
-        pageButton.Text = "Открыть страницу";
-        refreshButton.Text = "Обновить";
+        startButton.Text = Texts.T("launcher.start");
+        stopButton.Text = Texts.T("launcher.stop");
+        pageButton.Text = Texts.T("launcher.openPage");
+        refreshButton.Text = Texts.T("launcher.refresh");
         foreach (var b in new[] { startButton, stopButton, pageButton, refreshButton })
         {
             b.AutoSize = true;
@@ -600,32 +789,32 @@ class MainForm : Form
         grid.Controls.Add(logBox, 0, 4);
         Controls.Add(grid);
 
-        // Состояние спрашивается по кнопке и после каждого действия. Таймер нужен только
-        // пока ждём, когда поднятый нами сервер ответит, - и гаснет, как только ответил.
+        // The state is asked for by the button and after every action. The timer is needed only
+        // while we wait for a server we brought up to answer - and goes out once it has.
         timer.Interval = 1000;
         timer.Tick += (s, e) => { if (--waitTicks <= 0) timer.Stop(); Refresh(false); };
     }
 
-    // -- жизнь окна --
+    // -- the life of the window --
     void OnLoad(object sender, EventArgs e)
     {
         string home = Module.FindHome(options.Home);
         if (home == null)
         {
-            Fail("рядом нет " + Module.Script + ": назовите папку модуля доводом или переменной MORPHBENCH_HOME");
+            Fail(Texts.T("launcher.noModule", "script", Module.Script));
             return;
         }
         string python = Module.FindPython(home);
         if (python == null)
         {
-            Fail("не нашёл python.exe: назовите его переменной MORPHBENCH_PYTHON или ключом \"python\" в morphbench.json");
+            Fail(Texts.T("launcher.noPython"));
             return;
         }
         launcher = new Launcher(home, python) { Log = Append };
         remembered = new Remembered(home);
-        Append("модуль: " + home);
-        Append("python: " + python);
-        stateLabel.Text = "спрашиваю состояние…";
+        Append(Texts.T("launcher.module", "path", home));
+        Append(Texts.T("launcher.python", "path", python));
+        stateLabel.Text = Texts.T("launcher.asking");
         SetButtons(false);
         ThreadPool.QueueUserWorkItem(_ =>
         {
@@ -638,8 +827,8 @@ class MainForm : Form
     {
         status = st;
         if (st.Error != null) Append(st.Error);
-        // Под MO2 корень - Data игры, которую видит этот процесс; вне MO2 - корень уже
-        // поднятого сервера, а если его нет - что помним.
+        // Under MO2 the root is the game Data this process sees; outside MO2 it is the root of
+        // a server that is already up, and if there is no server - the one we remember.
         rootBox.Text = !string.IsNullOrEmpty(options.Root) ? options.Root
             : st.HereInsideMo2 ? (st.HereDataRoot ?? "")
             : (st.Up && !string.IsNullOrEmpty(st.Root)) ? st.Root : remembered.Root;
@@ -650,20 +839,20 @@ class MainForm : Form
     void OnClosing(object sender, FormClosingEventArgs e)
     {
         timer.Stop();
-        // Сервер, поднятый этим окном, уходит вместе с ним: иначе из-под MO2 остался бы
-        // невидимый процесс, и MO2 ждала бы его.
+        // The server this window brought up leaves with it: otherwise an invisible process
+        // would be left under MO2, and MO2 would wait for it.
         if (launcher != null && launcher.Owns) launcher.Stop();
     }
 
     void Fail(string message)
     {
-        stateLabel.Text = "morphbench: " + message;
+        stateLabel.Text = Texts.T("launcher.failLabel", "message", message);
         stateLabel.ForeColor = Color.Firebrick;
         SetButtons(false);
         Append(message);
     }
 
-    // -- действия: каждое - вызов сервера, тот же, что у командной строки --
+    // -- actions: every one of them a call to the server, the same call the command line makes --
     void StartServer()
     {
         if (launcher == null) return;
@@ -674,7 +863,7 @@ class MainForm : Form
         }
         if (status.State == "busy")
         {
-            Append("порт занят другой программой: " + status.Url + " - смените servePort в morphbench.json");
+            Append(Texts.T("launcher.portTaken", "url", status.Url));
             return;
         }
         string root = rootBox.Text.Trim();
@@ -684,12 +873,12 @@ class MainForm : Form
         }
         catch (Exception e)
         {
-            Append("не удалось запустить: " + e.Message);
+            Append(Texts.T("launcher.startFailed", "error", e.Message));
             return;
         }
         if (!status.HereInsideMo2 && root.Length > 0) { remembered.Root = root; remembered.Save(); }
-        stateLabel.Text = "поднимаю…";
-        // Страницу открываем, как только сервер ответит, - см. Refresh.
+        stateLabel.Text = Texts.T("launcher.starting");
+        // The page is opened as soon as the server answers - see Refresh.
         pendingOpen = options.Start;
         options.Start = false;
         waitTicks = 60;
@@ -699,24 +888,24 @@ class MainForm : Form
 
     bool pendingOpen;
 
-    /// Сервер уже поднят - подключиться к нему и передать корень обзора. Вызов тот же,
-    /// что и при подъёме, поэтому нажатие «Поднять» идемпотентно: поднят сервер или нет,
-    /// окно делает одно и то же, а разбирается в этом команда.
+    /// The server is already up - connect to it and hand over the browse root. The call is the
+    /// same as the one that brings it up, which makes pressing "start" idempotent: server up or
+    /// not, the window does one and the same thing, and it is the command that tells them apart.
     void HandOver()
     {
         string root = rootBox.Text.Trim();
         bool open = options.Start;
         options.Start = false;
-        stateLabel.Text = "сервер поднят - передаю корень…";
+        stateLabel.Text = Texts.T("launcher.handingOver");
         SetButtons(false);
         ThreadPool.QueueUserWorkItem(_ =>
         {
             string outp;
             try { outp = launcher.HandOver(root); }
-            catch (Exception e) { outp = "передать корень не удалось: " + e.Message; }
+            catch (Exception e) { outp = Texts.T("launcher.handOverFailed", "error", e.Message); }
             BeginInvoke((Action)(() =>
             {
-                Append(outp.Trim().Length > 0 ? outp.Trim() : "сервер уже поднят: " + status.Url);
+                Append(outp.Trim().Length > 0 ? outp.Trim() : Texts.T("launcher.alreadyUp", "url", status.Url));
                 if (open) OpenPage();
                 Refresh(true);
             }));
@@ -725,29 +914,29 @@ class MainForm : Form
 
     void StopServer()
     {
-        if (launcher == null || !status.Up) { Append("сервер не поднят"); return; }
-        stateLabel.Text = "останавливаю…";
+        if (launcher == null || !status.Up) { Append(Texts.T("launcher.notUp")); return; }
+        stateLabel.Text = Texts.T("launcher.stopping");
         SetButtons(false);
         ThreadPool.QueueUserWorkItem(_ =>
         {
             launcher.Stop();
-            BeginInvoke((Action)(() => { Append("остановлен: " + status.Url); Refresh(true); }));
+            BeginInvoke((Action)(() => { Append(Texts.T("launcher.stopped", "url", status.Url)); Refresh(true); }));
         });
     }
 
     void OpenPage()
     {
         if (launcher == null) return;
-        if (!status.Up) { Append("сервер не поднят - страницу открывать не с чего"); return; }
-        try { launcher.OpenPage(); Append("страница: " + status.Url); }
-        catch (Exception e) { Append("не открылась страница: " + e.Message); }
+        if (!status.Up) { Append(Texts.T("launcher.noPageNoServer")); return; }
+        try { launcher.OpenPage(); Append(Texts.T("launcher.page", "url", status.Url)); }
+        catch (Exception e) { Append(Texts.T("launcher.pageFailed", "error", e.Message)); }
     }
 
     void Browse()
     {
         using (var dlg = new FolderBrowserDialog())
         {
-            dlg.Description = "Папка обзора: под ней ищутся меши с файлами морфов";
+            dlg.Description = Texts.T("launcher.browseHint");
             dlg.ShowNewFolderButton = false;
             if (rootBox.Text.Trim().Length > 0 && Directory.Exists(rootBox.Text.Trim())) dlg.SelectedPath = rootBox.Text.Trim();
             if (dlg.ShowDialog(this) == DialogResult.OK) rootBox.Text = dlg.SelectedPath;
@@ -758,10 +947,10 @@ class MainForm : Form
     {
         if (launcher == null) return;
         string root = rootBox.Text.Trim();
-        if (root.Length == 0) { Append("назовите папку"); return; }
+        if (root.Length == 0) { Append(Texts.T("launcher.nameFolder")); return; }
         if (!status.HereInsideMo2) { remembered.Root = root; remembered.Save(); }
-        if (!status.Up) { Append("корень запомнен; сервер не поднят - он возьмёт папку при подъёме"); return; }
-        stateLabel.Text = "обход " + root + "…";
+        if (!status.Up) { Append(Texts.T("launcher.rootRemembered")); return; }
+        stateLabel.Text = Texts.T("launcher.walking", "root", root);
         SetButtons(false);
         ThreadPool.QueueUserWorkItem(_ =>
         {
@@ -771,17 +960,17 @@ class MainForm : Form
                 var got = launcher.SetRoot(root);
                 object meshes;
                 got.TryGetValue("meshes", out meshes);
-                message = "обзор: " + root + " (" + meshes + " мешей)";
+                message = Texts.T("launcher.browsing", "root", root, "meshes", meshes);
             }
             catch (Exception e)
             {
-                message = "сервер отказал: " + e.Message;
+                message = Texts.T("launcher.serverRefused", "error", e.Message);
             }
             BeginInvoke((Action)(() => { Append(message); Refresh(true); }));
         });
     }
 
-    // -- состояние: опрос в фоне, показ в окне --
+    // -- the state: asked for in the background, shown in the window --
     void Refresh(bool now)
     {
         if (launcher == null || probing) return;
@@ -811,38 +1000,40 @@ class MainForm : Form
         switch (st.State)
         {
             case "ours":
-                state = "поднят  " + st.Url + (launcher != null && launcher.Owns ? "  (этим окном)" : "  (другим процессом)");
+                state = Texts.T("launcher.stateUp", "url", st.Url, "owner",
+                                Texts.T(launcher != null && launcher.Owns ? "launcher.ownerHere" : "launcher.ownerOther"));
                 colour = Color.ForestGreen;
                 break;
             case "busy":
-                state = "порт занят другой программой  " + st.Url;
+                state = Texts.T("launcher.stateBusy", "url", st.Url);
                 colour = Color.Firebrick;
                 break;
             case "slow":
-                state = "кто-то есть, но не отвечает  " + st.Url + "  (сервер за обходом большой папки?)";
+                state = Texts.T("launcher.stateSlow", "url", st.Url);
                 colour = Color.DarkOrange;
                 break;
             default:
-                state = "не поднят  " + st.Url;
+                state = Texts.T("launcher.stateDown", "url", st.Url);
                 colour = SystemColors.ControlText;
                 break;
         }
-        stateLabel.Text = "Сервер: " + state;
+        stateLabel.Text = Texts.T("launcher.serverIs", "state", state);
         stateLabel.ForeColor = colour;
         var env = new StringBuilder();
-        env.Append("это окно под MO2: ").Append(st.HereInsideMo2 ? "да" : "нет");
-        if (!string.IsNullOrEmpty(st.HereDataRoot)) env.Append(" · Data игры: ").Append(st.HereDataRoot);
+        env.Append(Texts.T("launcher.envHere", "yesno", YesNo(st.HereInsideMo2)));
+        if (!string.IsNullOrEmpty(st.HereDataRoot))
+            env.Append(Sep).Append(Texts.T("launcher.envData", "path", st.HereDataRoot));
         if (st.Up)
         {
-            env.Append(" · сервер под MO2: ").Append(st.InsideMo2 == true ? "да" : "нет");
-            env.Append(" · корень: ").Append(string.IsNullOrEmpty(st.Root) ? "не задан" : st.Root);
-            if (st.Meshes != null) env.Append(" (").Append(st.Meshes).Append(" мешей)");
+            env.Append(Sep).Append(Texts.T("launcher.envServer", "yesno", YesNo(st.InsideMo2 == true)));
+            env.Append(Sep).Append(Texts.T("launcher.envRoot", "root",
+                string.IsNullOrEmpty(st.Root) ? Texts.T("launcher.rootUnset") : st.Root));
+            if (st.Meshes != null) env.Append(Texts.T("launcher.envMeshes", "meshes", st.Meshes));
         }
         envLabel.Text = env.ToString();
         if (st.Up && st.HereInsideMo2 && st.InsideMo2 == false)
         {
-            if (!warnedForeign)
-                Append("сервер поднят вне MO2 и не видит мешей сборки: остановите его и поднимите отсюда");
+            if (!warnedForeign) Append(Texts.T("launcher.foreignServer"));
             warnedForeign = true;
         }
         else if (!st.Up) warnedForeign = false;
@@ -851,6 +1042,11 @@ class MainForm : Form
         stopButton.Enabled = st.Up;
         pageButton.Enabled = st.Up;
         applyButton.Enabled = true;
+    }
+
+    static string YesNo(bool on)
+    {
+        return Texts.T(on ? "launcher.yes" : "launcher.no");
     }
 
     void SetButtons(bool on)

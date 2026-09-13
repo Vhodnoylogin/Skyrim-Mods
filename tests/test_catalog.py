@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
-"""Обзор мешей и окружение: какие тела есть в папке, к какому подобраны морфы и куда
-разрешено смотреть.
+"""Browsing meshes and the surroundings: what bodies a folder holds, which of them got morphs
+matched, and where looking is allowed.
 
-Дерево строится во временной папке из пустых файлов: каталог не открывает мешей, ему
-хватает имён и первых байтов файла морфов. Ловит: потерянный суффикс веса (_0/_1),
-регистр расширения, меш без пары, мусорный заголовок, принятый за формат, подпапки
-из настроек, не сузившие обход, кеш обзора, переживший rescan, и ограничение под MO2,
-пропустившее папку вне Data. MO2 имитируется подменой Environment.inside_mo2, игры
-из реестра — подменой Environment.game_roots: ни одной настоящей папки сборки.
+The tree is built in a temporary folder out of empty files: the catalogue opens no mesh, names
+and the first bytes of the morph file are enough for it. What this catches: a lost weight
+suffix (_0/_1), the case of an extension, a mesh with no pair, a junk header taken for a
+format, subfolders from the settings that did not narrow the walk, a browse cache that
+outlived its rescan, and the limit under MO2 letting a folder outside Data through. MO2 is
+imitated by replacing Environment.inside_mo2, the games from the registry by replacing
+Environment.game_roots: not one real folder of the build is touched.
 """
 import os
 import sys
@@ -35,7 +36,7 @@ TREE = {
     "other/x.nif": b"",
     "other/x.tri": b"PIRT" + bytes(4),
 }
-# Порядок — по имени без учёта регистра.
+# The order is by name, case ignored.
 WITH_MORPHS = ["meshes/a/body_0.nif", "meshes/a/body_1.nif", "meshes/a/head.nif",
                "meshes/b/junk.nif", "meshes/b/Weird.NIF"]
 ALL_MESHES = ["meshes/a/body_0.nif", "meshes/a/body_1.nif", "meshes/a/head.nif",
@@ -54,7 +55,7 @@ def make_tree(root) -> Path:
 
 
 def add_mesh(root, rel: str, tri: bool = True) -> Path:
-    """Дописать в дерево ещё один меш (и файл морфов TRIP рядом)."""
+    """Add one more mesh to the tree (and a TRIP morph file beside it)."""
     nif = Path(root) / rel
     nif.parent.mkdir(parents=True, exist_ok=True)
     nif.write_bytes(b"")
@@ -64,12 +65,12 @@ def add_mesh(root, rel: str, tri: bool = True) -> Path:
 
 
 def mo2(inside: bool):
-    """Имитация запуска под MO2 (или без него) — подмена опознания usvfs."""
+    """Imitate a run under MO2 (or without it) - the usvfs check is replaced."""
     return mock.patch.object(Environment, "inside_mo2", staticmethod(lambda: inside))
 
 
 def games(*roots):
-    """Подмена игр из реестра: список папок вместо чтения HKLM."""
+    """The games from the registry, replaced: a list of folders instead of reading HKLM."""
     fake = [{"game": "Game %d" % i, "root": str(r)} for i, r in enumerate(roots)]
     return mock.patch.object(Environment, "game_roots", staticmethod(lambda: list(fake)))
 
@@ -86,9 +87,9 @@ class TestCatalog(unittest.TestCase):
         self.root = make_tree(self.tmp.name)
 
     def test_with_morphs(self):
-        """Только меши с файлом морфов: body_0 и body_1 берут body.tri (суффикс веса
-        отброшен), Weird.NIF находит weird.tri (регистр), junk с мусорным заголовком
-        остаётся, но без формата; lonely и всё вне meshes не попадают."""
+        """Only meshes with a morph file: body_0 and body_1 take body.tri (the weight suffix
+        dropped), Weird.NIF finds weird.tri (the case), junk stays with its junk header but
+        without a format; lonely and everything outside meshes do not get in."""
         cat = Catalog(self.root, ["meshes"], with_morphs=True)
         self.assertEqual([e.name for e in cat.entries], WITH_MORPHS)
         self.assertEqual(len(cat), 5)
@@ -105,7 +106,7 @@ class TestCatalog(unittest.TestCase):
             self.assertTrue(e.nif.is_file(), e.nif)
 
     def test_all_meshes(self):
-        """with_morphs=False добавляет lonely — без морфов и без формата."""
+        """with_morphs=False adds lonely - no morphs and no format."""
         cat = Catalog(self.root, ["meshes"], with_morphs=False)
         self.assertEqual([e.name for e in cat.entries], ALL_MESHES)
         lonely = cat.get("meshes/b/lonely.nif")
@@ -114,7 +115,8 @@ class TestCatalog(unittest.TestCase):
         self.assertFalse(lonely.has_morphs)
 
     def test_dicts(self):
-        """as_dicts: номер по порядку, имя прямыми косыми, папка и файл, полные пути строками."""
+        """as_dicts: the number in order, the name with forward slashes, folder and file,
+        full paths as strings."""
         rows = Catalog(self.root, ["meshes"]).as_dicts()
         self.assertEqual([r["index"] for r in rows], list(range(5)))
         for r in rows:
@@ -130,8 +132,8 @@ class TestCatalog(unittest.TestCase):
         self.assertTrue(first["tri"].endswith("body.tri"))
 
     def test_get(self):
-        """По номеру, по имени любыми косыми, по уникальной подстроке; неоднозначная
-        подстрока, чужое имя и номер за пределами — KeyError."""
+        """By number, by name with either slash, by a substring that is unique; an ambiguous
+        substring, a name from nowhere and a number out of range - KeyError."""
         cat = Catalog(self.root, ["meshes"])
         self.assertEqual(cat.get(0).name, "meshes/a/body_0.nif")
         self.assertEqual(cat.get(4).name, "meshes/b/Weird.NIF")
@@ -142,9 +144,9 @@ class TestCatalog(unittest.TestCase):
         self.assertEqual(cat.get("WEIRD").name, "meshes/b/Weird.NIF")
         self.assertEqual(cat.get("body_1").name, "meshes/a/body_1.nif")
         with self.assertRaises(KeyError):
-            cat.get("body")                  # body_0 и body_1
+            cat.get("body")                  # body_0 and body_1
         with self.assertRaises(KeyError):
-            cat.get("lonely")                # без морфов - в этом обзоре его нет
+            cat.get("lonely")                # no morphs - this browse does not hold it
         with self.assertRaises(KeyError):
             cat.get(5)
         with self.assertRaises(KeyError):
@@ -163,8 +165,9 @@ class TestCatalog(unittest.TestCase):
             Catalog(self.root / "meshes" / "a" / "head.nif")
 
     def test_subdirs(self):
-        """Подпапки из настроек сужают обход, пока хоть одна из них есть; иначе обходится
-        весь корень — и тогда в обзор попадает other/x.nif."""
+        """Subfolders from the settings narrow the walk as long as at least one of them is
+        there; otherwise the whole root is walked - and then other/x.nif lands in the
+        browse."""
         self.assertNotIn("other/x.nif", [e.name for e in Catalog(self.root, ["meshes"]).entries])
         whole = [e.name for e in Catalog(self.root, ["nothing", "nowhere"]).entries]
         self.assertIn("other/x.nif", whole)
@@ -183,8 +186,8 @@ class TestCatalog(unittest.TestCase):
         self.assertEqual(cat.get("new").name, "meshes/c/new.nif")
 
     def test_kind_by_header_only(self):
-        """Формат — по первым байтам: PIRT и вариант с нулевым байтом дают TRIP, FRTRI —
-        FRTRI, что угодно ещё — None; пустой файл морфов — тоже None."""
+        """The format comes from the first bytes: PIRT and the variant with a zero byte give
+        TRIP, FRTRI gives FRTRI, anything else gives None; an empty morph file - None too."""
         root = Path(self.tmp.name) / "kinds"
         for stem, head in (("p", b"PIRT"), ("z", b"\0IRT"), ("f", b"FRTRI003"),
                            ("g", b"NIF\0\0\0\0\0"), ("e", b"")):
@@ -196,7 +199,7 @@ class TestCatalog(unittest.TestCase):
                                  "meshes/e.nif": None})
 
     def test_root_level_entry(self):
-        """Меш прямо в корне: папка «.», имя без косых."""
+        """A mesh right in the root: the folder is ".", the name carries no slash."""
         root = Path(self.tmp.name) / "flat"
         add_mesh(root, "top.nif")
         row = Catalog(root).as_dicts()[0]
@@ -218,8 +221,8 @@ class TestEnvironment(unittest.TestCase):
         self.assertIs(type(self.env().inside_mo2()), bool)
 
     def test_game_roots_shape(self):
-        """Список словарей game/root; каждая названная папка существует. Список может
-        быть пустым — на машине без игр это не сбой."""
+        """A list of game/root dictionaries; every folder named is there. The list may be
+        empty - on a machine with no games that is not a failure."""
         roots = Environment.game_roots()
         self.assertIsInstance(roots, list)
         for g in roots:
@@ -229,7 +232,7 @@ class TestEnvironment(unittest.TestCase):
         self.assertTrue(common.is_plain(roots))
 
     def test_explicit_catalog_root_wins(self):
-        """catalogRoot из настроек — корень обзора и вне MO2, и под ним."""
+        """catalogRoot from the settings is the browsing root both outside MO2 and under it."""
         env = self.env(catalogRoot=str(self.here))
         for inside in (False, True):
             with mo2(inside):
@@ -238,7 +241,8 @@ class TestEnvironment(unittest.TestCase):
                 self.assertEqual(env.describe()["catalogRoot"], str(self.here))
 
     def test_outside_mo2_everything_allowed(self):
-        """Вне MO2 без catalogRoot корня по умолчанию нет, а смотреть можно куда угодно."""
+        """Outside MO2 and without catalogRoot there is no default root, and looking is
+        allowed anywhere."""
         with mo2(False):
             env = self.env()
             self.assertIsNone(env.data_root())
@@ -251,7 +255,7 @@ class TestEnvironment(unittest.TestCase):
             self.assertEqual(d["catalogRoot"], "")
 
     def test_inside_mo2_limited_to_data(self):
-        """Под MO2 с catalogRoot: внутрь корня можно, наружу — нет."""
+        """Under MO2 with catalogRoot: inside the root yes, outside it no."""
         with mo2(True):
             env = self.env(catalogRoot=str(self.here))
             self.assertEqual(env.data_root(), self.here)
@@ -263,8 +267,9 @@ class TestEnvironment(unittest.TestCase):
             self.assertTrue(env.describe()["insideMo2"])
 
     def test_inside_mo2_data_from_games(self):
-        """Под MO2 без catalogRoot корень — Data той игры, где видна папка meshes;
-        если её нет ни у кого — Data первой; без игр — None и запрет на всё."""
+        """Under MO2 without catalogRoot the root is the Data of the game where a meshes
+        folder is visible; if none of them has one - the Data of the first; with no games
+        at all - None, and nothing allowed."""
         first, second = self.here / "GameA", self.here / "GameB"
         (first / "Data").mkdir(parents=True)
         (second / "Data" / "meshes").mkdir(parents=True)
@@ -301,7 +306,8 @@ class TestFacadeCatalog(unittest.TestCase):
         return MorphBench(common.config(self.tmp.name, **overrides))
 
     def test_no_root_outside_mo2(self):
-        """Вне MO2 без catalogRoot корень назвать обязаны: ValueError, а не пустой список."""
+        """Outside MO2 and without catalogRoot the root has to be named: ValueError, not an
+        empty list."""
         with mo2(False):
             bench = self.bench()
             with self.assertRaises(ValueError):
@@ -319,8 +325,8 @@ class TestFacadeCatalog(unittest.TestCase):
             self.assertEqual(bench.environment()["dataRoot"], str(self.root))
 
     def test_explicit_root_and_cache(self):
-        """Обзор сканируется один раз на корень: новый файл виден только после rescan;
-        with_morphs — отдельный ключ кеша."""
+        """A browse is scanned once per root: a new file is visible only after rescan;
+        with_morphs is a cache key of its own."""
         with mo2(False):
             bench = self.bench()
             rows = bench.catalog(self.root)
@@ -337,7 +343,8 @@ class TestFacadeCatalog(unittest.TestCase):
                 bench.catalog(self.root / "nowhere")
 
     def test_mo2_forbids_outside_data(self):
-        """Под MO2 обзор ограничен корнем Data: родитель — PermissionError, подпапка — можно."""
+        """Under MO2 the browse is held to the Data root: the parent - PermissionError,
+        a subfolder - allowed."""
         data = self.root / "meshes"
         with mo2(True):
             bench = self.bench(catalogRoot=str(data))
@@ -347,15 +354,16 @@ class TestFacadeCatalog(unittest.TestCase):
                 bench.open_entry(0, self.root)
             with self.assertRaises(PermissionError):
                 bench.catalog(self.root / "other")
-            # Корень по умолчанию - сама Data; в ней нет подпапки «meshes», значит обходится
-            # она целиком, а имена записей считаются от неё, а не от дерева.
+            # The default root is Data itself; there is no "meshes" subfolder in it, so it
+            # is walked whole, and entry names are counted from it, not from the tree.
             self.assertEqual(names(bench.catalog()),
                              [n[len("meshes/"):] for n in WITH_MORPHS])
             self.assertEqual(names(bench.catalog(data / "a")), ["body_0.nif", "body_1.nif", "head.nif"])
 
     def test_open_entry_opens_real_nif(self):
-        """open_entry открывает меш из обзора по номеру, имени и подстроке; нужен настоящий
-        NIF — его пишет PyNifly, морфы TRIP — TripFile."""
+        """open_entry opens a mesh from the browse by number, by name and by substring. This
+        one needs a real NIF, which PyNifly writes, and real TRIP morphs, which TripFile
+        writes."""
         cfg = common.config(self.tmp.name)
         pynifly = common.load_pynifly(cfg)
         TripFile = common.trip_file_class(cfg)

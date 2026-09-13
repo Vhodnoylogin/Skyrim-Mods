@@ -1,6 +1,6 @@
 "use strict";
 
-// ---- страница целиком ---------------------------------------------------------------------
+// ---- the page as a whole ---------------------------------------------------------------------
 const POSITION_METHODS = new Set(["set_slider", "set_sliders", "reset_sliders"]);
 const COLOUR_METHODS = new Set(["colour_by"]);
 
@@ -13,8 +13,9 @@ class App {
     this.canvas = document.getElementById("canvas");
     this.renderer = new Renderer(this.canvas, data.settings);
     for (const name of this.bench.shape_names()) this.renderer.upload(this.bench.shape(name));
-    // Капсулы - в буферы один раз, все куски по костям: ползунки их не двигают, цвет
-    // у них один, а какие из них рисовать, решает collider_mesh() на каждый кадр.
+    // Capsules go into the buffers once, every chunk of every bone: the sliders do not move
+    // them and they all share one colour, while which of them to draw is decided by
+    // collider_mesh() on every frame.
     for (const chunk of this.bench.collider_meshes()) this.renderer.uploadColliders(chunk);
     this.renderer.uploadColliders(this.bench.bumper_mesh());
     this.refreshPositions();
@@ -25,7 +26,7 @@ class App {
     this.panel.refresh();
     this.draw();
   }
-  // Единственная дверь ко всем действиям: имя метода фасада и его доводы.
+  // The one door to every action: the name of a facade method and its arguments.
   invoke(method, ...args) {
     this.panel.error.textContent = "";
     try {
@@ -40,17 +41,18 @@ class App {
     this.panel.refresh();
     this.draw();
   }
-  // Позиции с применёнными ползунками и нормали по ним - в буферы; нормали пересчитываются
-  // после каждого движения ползунка, потому что затенение идёт по деформированному телу.
+  // Positions with the sliders applied, and the normals that follow from them, into the
+  // buffers; the normals are recomputed after every slider move, because the shading is
+  // taken off the deformed body.
   refreshPositions() {
     for (const name of this.bench.shape_names()) {
       const s = this.bench.shape(name);
-      this.bench.vertex_normals(name);         // внутри - deformed(): позиции и нормали разом
+      this.bench.vertex_normals(name);         // deformed() inside: positions and normals at once
       this.renderer.setPositions(s);
       this.renderer.setNormals(s);
     }
   }
-  // Признак у фасада, цвет - здесь: то же правило, что у растеризатора.
+  // The value comes from the facade, the colour is made here - by the same rule the rasteriser uses.
   refreshColours() {
     for (const name of this.bench.shape_names()) {
       const s = this.bench.shape(name);
@@ -73,7 +75,8 @@ class App {
       this.renderer.setColours(s, colours);
     }
   }
-  // Размер холста - тоже состояние показа: он уходит в ядро тем же resize, что и --size.
+  // The canvas size is part of the view state as well: it reaches the core through the same
+  // resize that --size goes through.
   draw() {
     this.renderer.resize();
     const w = this.canvas.width, h = this.canvas.height, view = this.bench.view;
@@ -81,8 +84,9 @@ class App {
     const r = this.renderer.draw(this.bench);
     if (r) this.scale = r.scale;
   }
-  // Точка курсора в долях половины меньшей стороны холста от центра, вправо и вверх, -
-  // в пикселях холста с учётом плотности экрана и положения холста на странице.
+  // The cursor point in fractions of half the shorter side of the canvas, measured from the
+  // centre, right and up - out of canvas pixels, allowing for the screen density and for
+  // where the canvas sits on the page.
   cursorFraction(e) {
     const c = this.canvas, rect = c.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
     const px = (e.clientX - rect.left) * dpr, py = (e.clientY - rect.top) * dpr;
@@ -95,7 +99,7 @@ class App {
     c.addEventListener("contextmenu", (e) => e.preventDefault());
     c.addEventListener("pointerdown", (e) => {
       drag = { button: e.button, x: e.clientX, y: e.clientY };
-      try { c.setPointerCapture(e.pointerId); } catch (_) { /* указатель без захвата - не беда */ }
+      try { c.setPointerCapture(e.pointerId); } catch (_) { /* a pointer without capture is no great loss */ }
     });
     c.addEventListener("pointermove", (e) => {
       if (!drag) return;
@@ -105,7 +109,8 @@ class App {
         const k = this.bench.settings.orbitSensitivity;
         this.invoke("orbit", rnd(dx * k, 2), rnd(dy * k, 2));
       } else if (drag.button === 2) {
-        // Пиксели экрана в единицы модели через масштаб кадра - и в ядро тем же методом.
+        // Screen pixels into model units through the frame scale - and into the core by the
+        // same method the command line calls.
         const dpr = window.devicePixelRatio || 1;
         this.invoke("pan_by", rnd(dx * dpr / this.scale, 3), rnd(-dy * dpr / this.scale, 3));
       }
@@ -113,7 +118,8 @@ class App {
     const stop = (e) => { drag = null; try { c.releasePointerCapture(e.pointerId); } catch (_) {} };
     c.addEventListener("pointerup", stop);
     c.addEventListener("pointercancel", stop);
-    // Колесо - масштаб к точке под курсором: zoom_at фасада с новым масштабом и долями кадра.
+    // The wheel zooms towards the point under the cursor: the facade's zoom_at with the new
+    // zoom and the fractions of the frame.
     c.addEventListener("wheel", (e) => {
       e.preventDefault();
       const f = this.cursorFraction(e);

@@ -1,26 +1,29 @@
-"""Слой показа: настройки Faster HDT-SMP для цепочек костей - XML `hdtSkinnedMeshConfigs`.
+"""Presentation layer: Faster HDT-SMP settings for bone chains - the `hdtSkinnedMeshConfigs` XML.
 
-SMP качает цепочку как связку тел: `<bone name>` с массой, инерцией и затуханием
-на каждое звено и `<generic-constraint bodyA= bodyB=>` - шарнир от звена к родителю
-с пределами и жёсткостью. Кость, объявленная без тела (`<bone name="X"/>`), неподвижна
-и ведётся анимацией - это опора, от которой качается всё остальное; у 3BBB это
-`Breast00`, у пушистых хвостов - первое звено. Сколько первых звеньев держать
-неподвижными - `smpStaticLinks`; при нуле опорой служит родитель цепочки в скелете.
+SMP swings a chain as a string of bodies: a `<bone name>` carrying mass, inertia and damping for
+every link, and a `<generic-constraint bodyA= bodyB=>` - the joint from a link to its parent,
+with limits and stiffness. A bone declared without a body (`<bone name="X"/>`) does not move and
+is driven by the animation - it is the anchor everything else swings from; on 3BBB that is
+`Breast00`, on a furry tail it is the first link. How many leading links to hold still is
+`smpStaticLinks`; at zero the anchor is the chain's parent in the skeleton.
 
-Столкновения у SMP идут ОТ МЕША, а не от капсул на костях: `<per-vertex-shape>`
-и `<per-triangle-shape>` называют ЧАСТЬ МЕША, и форму он строит по её вершинам сам.
-Поэтому севшие капсулы сюда не переносятся - переносятся только имена частей, на которых
-лежит кожа цепочки, с зазором и глубиной из настроек. Файл подключается к части через
-`defaultBBPs.xml` (`<map shape="часть" file="..."/>`) либо строкой `HDT Skinned Mesh
-Physics Object` внутри NIF - это делается руками, верстак чужих файлов не правит.
+Collisions in SMP come FROM THE MESH, not from capsules on bones: `<per-vertex-shape>` and
+`<per-triangle-shape>` name A PART OF THE MESH, and SMP builds the shape from its vertices
+itself. Fitted capsules are therefore not carried over here - only the names of the parts the
+skin of the chain lies on, with the margin and the penetration from the settings. The file is
+hooked to a part through `defaultBBPs.xml` (`<map shape="part" file="..."/>`) or by an
+`HDT Skinned Mesh Physics Object` string inside the NIF - that is done by hand, the workbench
+does not edit other people's files.
 
-Такой же клиент фасада, как `ppb` и `cbpc`: берёт `chain_capsules(engine="smp")`,
-`chains()` для шапки и числа `smp*` из настроек. Цепочки, отданные другому движку,
-сюда не попадают: SMP и CBPC - разные движки, одну кость обоим отдавать нельзя.
+The same kind of facade client as `ppb` and `cbpc`: it takes `chain_capsules(engine="smp")`,
+`chains()` for the header and the `smp*` numbers from the settings. Chains given to the other
+engine never reach it: SMP and CBPC are different engines, and one bone cannot be handed to both.
 """
 from __future__ import annotations
 
 from xml.sax.saxutils import escape
+
+from morphbench.i18n import t
 
 from . import text as _text
 
@@ -28,7 +31,7 @@ _TAB = "\t"
 
 
 def selected(rows: list[dict]) -> list[dict]:
-    """Какие из отданных SMP цепочек попадают в вывод: годные - с кожей и без обрыва."""
+    """Which of the chains given to SMP reach the output: the usable ones - skinned, unbroken."""
     return [r for r in rows if r["fit"]]
 
 
@@ -46,7 +49,7 @@ def _static_bone(name: str) -> list[str]:
 
 
 def bone_lines(name: str, mass: float, cfg) -> list[str]:
-    """Тело звена: масса своя, остальное - из настроек."""
+    """The body of one link: its own mass, everything else out of the settings."""
     d = _TAB * 2
     inertia = float(cfg["smpInertia"])
     return [
@@ -69,7 +72,7 @@ def bone_lines(name: str, mass: float, cfg) -> list[str]:
 
 
 def constraint_lines(child: str, parent: str, cfg) -> list[str]:
-    """Шарнир звена к родителю: пределы, жёсткости, затухания - из настроек."""
+    """The joint from a link to its parent: limits, stiffnesses and damping out of the settings."""
     d = _TAB * 2
     return [
         '%s<generic-constraint bodyA="%s" bodyB="%s">' % (_TAB, _attr(child), _attr(parent)),
@@ -93,7 +96,7 @@ def constraint_lines(child: str, parent: str, cfg) -> list[str]:
 
 
 def shape_lines(part: str, cfg) -> list[str]:
-    """Форма столкновения по вершинам части меша; с собой не сталкивается."""
+    """The collision shape over the vertices of a mesh part; it does not collide with itself."""
     d = _TAB * 2
     return [
         '%s<per-vertex-shape name="%s">' % (_TAB, _attr(part)),
@@ -106,12 +109,13 @@ def shape_lines(part: str, cfg) -> list[str]:
 
 
 def chain_lines(row: dict, cfg) -> list[str]:
-    """Одна цепочка: опора, звенья с телами, шарниры от звена к его родителю в цепочке.
+    """One chain: the anchor, the links with bodies, the joint from a link to its parent in it.
 
-    Опора - ведущие звенья без кожи (`anchors`), их ведёт анимация; нет таких - первые
-    `smpStaticLinks` звеньев, а при нуле - кость снаружи цепочки (`parent`). Хвост без кожи
-    (`tail`) не пишется: качать невидимое незачем. Родитель звена берётся из самого звена:
-    при ветвлении обе ветви крепятся к одной кости, а не к соседке по списку.
+    The anchor is the leading links with no skin (`anchors`), the ones the animation drives;
+    where there are none it is the first `smpStaticLinks` links, and at zero a bone outside the
+    chain (`parent`). A tail with no skin (`tail`) is not written: there is no sense in swinging
+    what nobody sees. The parent of a link is taken from the link itself: where a chain branches,
+    both branches hang off the same bone and not off whoever stands next in the list.
     """
     tail = set(row.get("tail") or [])
     links = [l for l in row["links"] if l["bone"] not in tail]
@@ -121,14 +125,15 @@ def chain_lines(row: dict, cfg) -> list[str]:
     if not static_names:
         static = max(0, int(cfg["smpStaticLinks"]))
         if static == 0 and not outside:
-            static = 1                       # дерева костей нет - опора первое звено
+            static = 1                       # no bone tree - the first link is the anchor
         static_names = [l["bone"] for l in links[:static]]
         if not static_names and outside:
             static_names = [outside]
     static_set = set(static_names)
-    out = ["%s<!-- %s: опора %s, звеньев %d%s -->" % (
-        _TAB, row["chain"], ", ".join(static_names), len(links),
-        (", без кожи отброшено: %s" % ", ".join(sorted(tail))) if tail else "")]
+    dropped = t("smp.chainDropped", names=", ".join(sorted(tail))) if tail else ""
+    out = ["%s<!-- %s -->" % (_TAB, t("smp.chainNote", chain=row["chain"],
+                                      anchors=", ".join(static_names),
+                                      links=len(links), dropped=dropped))]
     for name in static_names:
         out += _static_bone(name)
     mass = float(cfg["smpMass"])
@@ -147,24 +152,22 @@ def chain_lines(row: dict, cfg) -> list[str]:
 
 
 def text(rows: list[dict], chains: list[dict], cfg, title: str | None = None) -> str:
-    """XML настроек SMP по цепочкам, отданным ему.
+    """The SMP settings XML for the chains given to it.
 
-    `rows` - `MorphBench.chain_capsules("smp")` (капсулы в нём не используются: SMP
-    их не читает; нужны опора и звенья), `chains` - `MorphBench.chains()` целиком ради
-    шапки, `cfg` - настройки с числами `smp*`.
+    `rows` is `MorphBench.chain_capsules("smp")` (the capsules in it go unused: SMP does not
+    read them, what is needed here is the anchor and the links), `chains` is the whole of
+    `MorphBench.chains()`, purely for the header, and `cfg` the settings with the `smp*` numbers.
     """
     head = ['<?xml version="1.0" encoding="UTF-8"?>', "<!--",
-            "morphbench: настройки Faster HDT-SMP%s" % ((" для " + title) if title else ""),
-            "цепочки:"]
+            t("smp.titleFor", title=title) if title else t("smp.title"),
+            t("smp.chains")]
     head += ["  " + line.replace("--", "- -") for line in _text.assignments(chains, "smp")]
-    head += ["Столкновения SMP считает по вершинам частей меша, капсул по костям он не читает:",
-             "ниже только имена частей, на которых лежит кожа цепочек. Подключить файл к части:",
-             'defaultBBPs.xml, <map shape="часть" file="SKSE\\Plugins\\hdtSkinnedMeshConfigs\\этот файл"/>.',
-             "-->"]
+    head += t("smp.note").splitlines()
+    head += ["-->"]
     wanted = selected(rows)
     if not wanted:
         return "\n".join(head + ["<system>",
-                                 "%s<!-- SMP не отдано ни одной годной цепочки: писать нечего -->" % _TAB,
+                                 "%s<!-- %s -->" % (_TAB, t("smp.nothing")),
                                  "</system>"]) + "\n"
     out = head + ["<system>"]
     for r in wanted:
@@ -176,20 +179,21 @@ def text(rows: list[dict], chains: list[dict], cfg, title: str | None = None) ->
             for part in l["shapes"]:
                 if part not in parts:
                     parts.append(part)
-    out.append("%s<!-- части меша с кожей цепочек: форма по их вершинам -->" % _TAB)
+    out.append("%s<!-- %s -->" % (_TAB, t("smp.parts")))
     for part in parts:
         out += shape_lines(part, cfg)
     out.append("</system>")
     return "\n".join(out) + "\n"
 
-# ---- проверка готового файла ------------------------------------------------------------------
+# ---- checking a ready file ---------------------------------------------------------------------
 def check(xml_text: str, bones, shapes=None) -> list[dict]:
-    """Ссылается ли XML SMP на то, что есть: кости - в скелете, части - в меше.
+    """Does the SMP XML point at things that exist: bones in the skeleton, parts in the mesh.
 
-    SMP молча пропускает файл с ошибкой: ни строки в журнале, просто ничего не качается.
-    Здесь ловится то, что окупается первой же опечаткой: неизвестная кость в `<bone>`,
-    шарнир на необъявленную кость, часть меша, которой нет, `<collision>` между
-    неназванными формами, и битый XML. По находке на строку: род, имя, где, в чём дело.
+    SMP lets a broken file through in silence: not a line in the log, simply nothing swings.
+    What is caught here pays for itself with the very first typo: an unknown bone in `<bone>`,
+    a joint onto a bone nobody declared, a mesh part that is not there, a `<collision>` between
+    shapes nobody names, and XML that does not parse. One finding per line: kind, name, where,
+    what is wrong.
     """
     import xml.etree.ElementTree as ET
     known_bones = set(bones)
@@ -202,31 +206,31 @@ def check(xml_text: str, bones, shapes=None) -> list[dict]:
     try:
         root = ET.fromstring(xml_text)
     except ET.ParseError as e:
-        return [{"kind": "xml", "name": "", "where": "", "problem": "XML не разбирается: %s" % e}]
+        return [{"kind": "xml", "name": "", "where": "", "problem": t("smp.badXml", error=e)}]
     declared = set()
     for el in root.iter("bone"):
         name = el.get("name") or ""
         declared.add(name)
         if name not in known_bones:
-            hit("bone", name, "<bone>", "такой кости нет в скелете")
+            hit("bone", name, "<bone>", t("smp.noBone"))
     declared_shapes = set()
     for tag in ("per-vertex-shape", "per-triangle-shape"):
         for el in root.iter(tag):
             name = el.get("name") or ""
             declared_shapes.add(name)
             if known_shapes is not None and name not in known_shapes:
-                hit("shape", name, "<%s>" % tag, "такой части нет в меше")
+                hit("shape", name, "<%s>" % tag, t("smp.noPart"))
     for el in root.iter("generic-constraint"):
         for attr in ("bodyA", "bodyB"):
             name = el.get(attr) or ""
             if name not in declared:
                 hit("constraint", name, "<generic-constraint %s>" % attr,
-                    "шарнир на кость, не объявленную <bone>" if name in known_bones
-                    else "шарнир на кость, которой нет ни в файле, ни в скелете")
+                    t("smp.jointUndeclared") if name in known_bones
+                    else t("smp.jointNowhere"))
     names = declared | declared_shapes
     for el in root.iter("collision"):
         for attr in ("a", "b"):
             name = el.get(attr) or ""
             if name and name not in names:
-                hit("collision", name, "<collision %s>" % attr, "столкновение с неназванной формой")
+                hit("collision", name, "<collision %s>" % attr, t("smp.collisionUnnamed"))
     return out

@@ -1,16 +1,18 @@
 # -*- coding: utf-8 -*-
-"""Растяжение рёбер: числа, посчитанные вручную на сетке из двух треугольников.
+"""Strain of the edges: numbers worked out by hand on a grid of two triangles.
 
-Мера |после / до − 1| ловит «перчатку»: если морф двигает ладонь и не трогает пальцы, рёбра
-между ними растягиваются во столько же раз, во сколько разъехались их концы. Здесь известны
-и длины рёбер до, и сдвиг одной вершины, поэтому ожидаемое растяжение каждого ребра
-выписано явно. Морф, двигающий часть целиком, обязан дать ноль: форма не изменилась.
+The measure |after / before - 1| catches the "glove": when a morph moves the palm and
+leaves the fingers alone, the edges between them stretch by the same factor as their ends
+moved apart. Here both the lengths of the edges before and the shift of the one vertex are
+known, so the expected strain of every edge is written out. A morph that moves the whole
+shape must give zero: the form did not change.
 
-Дальше - то же для НАБОРА ползунков: два морфа тянут концы одного ребра в разные стороны,
-и вместе рвут его сильнее, чем каждый поодиночке; набор равен сумме смещений, пара стоит
-наверху перебора с положительной прибавкой; бюджет амплитуды для морфа, растягивающего
-ребро линейно, равен порогу, делённому на наклон. Командная строка проверяется через
-`mb.main` с фасадом, подключённым к фигуре в памяти: файлов и PyNifly ей не нужно.
+Then the same for a SET of sliders: two morphs pull the ends of one edge in opposite
+directions and together tear it worse than either alone; the set is the sum of the
+displacements, the pair stands at the top of the walk with a positive gain; the amplitude
+budget of a morph that stretches an edge linearly is the threshold divided by the slope.
+The command line is checked through `mb.main` with the facade bound to a shape held in
+memory: it needs neither files nor PyNifly.
 """
 import contextlib
 import io
@@ -27,12 +29,14 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common  # noqa: E402
 
-import mb  # noqa: E402 - корень программы в sys.path добавил common
+import mb  # noqa: E402 - common put the program root on sys.path
 from morphbench import MorphBench, Shape  # noqa: E402
 from morphbench.analysis import Analyzer  # noqa: E402
+from morphbench.i18n import t  # noqa: E402
+from presenters import text  # noqa: E402
 
-# Квадрат из двух треугольников. Рёбра (по возрастанию пар): (0,1) (0,2) (1,2) (1,3) (2,3),
-# длины 1, 1, √2, 1, 1.
+# A square of two triangles. Edges (pairs in rising order): (0,1) (0,2) (1,2) (1,3) (2,3),
+# of lengths 1, 1, sqrt(2), 1, 1.
 VERTS = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], dtype=np.float32)
 TRIS = np.array([[0, 1, 2], [1, 3, 2]], dtype=np.int32)
 EDGES = [[0, 1], [0, 2], [1, 2], [1, 3], [2, 3]]
@@ -45,8 +49,8 @@ class TestStrainByHand(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.body = Shape("body", VERTS, TRIS, None, None, {})
-        # Pull тянет вершину 3 на +1 по X: ребро (1,3) из 1 становится √2, ребро (2,3) — 2.
-        # Shift двигает всё целиком на (3, -2, 5).
+        # Pull drags vertex 3 by +1 along X: edge (1,3) goes from 1 to sqrt(2), edge (2,3)
+        # to 2. Shift moves everything as one by (3, -2, 5).
         self.ms = common.morph_set(
             common.morph("Pull", "body", [3], [(1.0, 0.0, 0.0)]),
             common.morph("Shift", "body", [0, 1, 2, 3], [(3.0, -2.0, 5.0)]),
@@ -55,25 +59,25 @@ class TestStrainByHand(unittest.TestCase):
         self.an = self.bench.analyzer
 
     def test_edges_unique_and_sorted(self):
-        """Рёбра части — без повторов, каждая пара по возрастанию; общее ребро двух
-        треугольников считается один раз."""
+        """Edges of a shape - no repeats, every pair in rising order; the edge two
+        triangles share is counted once."""
         self.assertEqual(self.an.edges("body").tolist(), EDGES)
         self.assertIs(self.an.edges("body"), self.an.edges("body"))
 
     def test_edge_strain(self):
-        """Растяжение по рёбрам: (1,3) → √2−1, (2,3) → 1, остальные — 0."""
+        """Strain along the edges: (1,3) -> sqrt(2)-1, (2,3) -> 1, the rest 0."""
         edges, strain = self.an.edge_strain("body", "Pull")
         self.assertEqual(edges.tolist(), EDGES)
         self.assertTrue(np.allclose(strain, [0, 0, 0, SQRT2 - 1, 1.0], atol=1e-6), strain)
 
     def test_vertex_strain(self):
-        """У вершины — наибольшее растяжение её рёбер: 0, √2−1, 1, 1."""
+        """A vertex takes the largest strain of its edges: 0, sqrt(2)-1, 1, 1."""
         vs = self.an.vertex_strain("body", "Pull")
         self.assertTrue(np.allclose(vs, [0, SQRT2 - 1, 1.0, 1.0], atol=1e-6), vs)
         self.assertTrue(np.array_equal(self.bench.strain_key("body", "Pull"), vs))
 
     def test_threshold_counts_edges(self):
-        """Порог считает рёбра сверх него: 0.25 → два, 0.5 → одно, 2 → ни одного."""
+        """The threshold counts the edges over it: 0.25 -> two, 0.5 -> one, 2 -> none."""
         expect = np.array([0, 0, 0, SQRT2 - 1, 1.0])
         for threshold, count in ((0.25, 2), (0.5, 1), (2.0, 0)):
             st = self.an.strain("body", "Pull", threshold=threshold)
@@ -84,8 +88,9 @@ class TestStrainByHand(unittest.TestCase):
             self.assertAlmostEqual(st.p99_strain, float(np.percentile(expect, 99)), places=5)
 
     def test_worst_bounds(self):
-        """Охват худших рёбер — по исходным координатам их концов: при 0.25 это вершины
-        1, 2, 3 (0..1 по X и Y); при пороге выше всех растяжений охвата нет."""
+        """The extent of the worst edges is taken from the original coordinates of their
+        ends: at 0.25 those are vertices 1, 2, 3 (0..1 along X and Y); with a threshold
+        above every strain there is no extent at all."""
         st = self.an.strain("body", "Pull", threshold=0.25)
         self.assertEqual(st.as_dict()["worstBounds"],
                          {"min": [0.0, 0.0, 0.0], "max": [1.0, 1.0, 0.0]})
@@ -96,13 +101,13 @@ class TestStrainByHand(unittest.TestCase):
         self.assertIsNone(self.an.strain("body", "Pull", threshold=2.0).as_dict()["worstBounds"])
 
     def test_amount_scales_the_shift(self):
-        """Половина ползунка: вершина 3 уходит на 0.5, ребро (1,3) → √1.25−1, (2,3) → 0.5."""
+        """Half a slider: vertex 3 goes 0.5, edge (1,3) -> sqrt(1.25)-1, (2,3) -> 0.5."""
         _, strain = self.an.edge_strain("body", "Pull", amount=0.5)
         self.assertTrue(np.allclose(strain, [0, 0, 0, math.sqrt(1.25) - 1, 0.5], atol=1e-6))
         self.assertAlmostEqual(self.an.strain("body", "Pull", amount=0.5).max_strain, 0.5, places=6)
 
     def test_rigid_shift_has_no_strain(self):
-        """Морф, двигающий часть целиком, ничего не растягивает: ровно ноль везде."""
+        """A morph that moves the whole shape stretches nothing: exactly zero everywhere."""
         _, strain = self.an.edge_strain("body", "Shift")
         self.assertTrue(np.all(strain == 0.0), strain)
         st = self.an.strain("body", "Shift", threshold=0.0)
@@ -112,8 +117,8 @@ class TestStrainByHand(unittest.TestCase):
         self.assertTrue(np.all(self.an.vertex_strain("body", "Shift") == 0.0))
 
     def test_none_for_unknown_or_empty(self):
-        """Нет части, нет морфа или морф пуст — None, а не исключение; растяжение вершин
-        при этом — нули длиной в часть."""
+        """No such shape, no such morph, or an empty morph - None, not an exception; the
+        vertex strain is then zeros as long as the shape."""
         self.assertIsNone(self.an.edge_strain("head", "Pull"))
         self.assertIsNone(self.an.edge_strain("body", "Nope"))
         self.assertIsNone(self.an.edge_strain("body", "Empty"))
@@ -121,8 +126,8 @@ class TestStrainByHand(unittest.TestCase):
         self.assertTrue(np.array_equal(self.an.vertex_strain("body", "Empty"), np.zeros(4)))
 
     def test_report_sorted_and_filtered(self):
-        """Сводка идёт по убыванию наибольшего растяжения, пропускает пустые морфы и части,
-        которых в меше нет, и фильтруется по подстроке имени."""
+        """The report runs by falling maximum strain, skips empty morphs and shapes the
+        mesh does not have, and filters by a substring of the name."""
         rows = self.an.strain_report()
         self.assertEqual([r.morph for r in rows], ["Pull", "Shift"])
         self.assertEqual([r.morph for r in self.an.strain_report(morph_filter="shi")], ["Shift"])
@@ -130,7 +135,8 @@ class TestStrainByHand(unittest.TestCase):
         self.assertEqual(Analyzer(common.model(self.body), orphan).strain_report(), [])
 
     def test_facade_matches_analyzer(self):
-        """Фасад отдаёт те же строки, что as_dict() у StrainStat, и с теми же доводами."""
+        """The facade gives the same rows as_dict() of StrainStat does, on the same
+        arguments."""
         want = [s.as_dict() for s in Analyzer(common.model(self.body), self.ms)
                 .strain_report(0.5, 0.3, None)]
         self.assertEqual(self.bench.strain(0.5, 0.3), want)
@@ -139,14 +145,15 @@ class TestStrainByHand(unittest.TestCase):
 
 
 class TestDegenerateGeometry(unittest.TestCase):
-    """Вырожденные случаи, на которых легко получить NaN или падение."""
+    """Degenerate cases where a NaN or a crash comes easily."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
 
     def test_zero_length_edge(self):
-        """Две совпадающие вершины дают ребро нулевой длины: его растяжение — 0, а не NaN."""
+        """Two vertices in the same place give an edge of zero length: its strain is 0,
+        not a NaN."""
         pinched = Shape("pinched", np.array([[0, 0, 0], [0, 0, 0], [1, 0, 0]], np.float32),
                         np.array([[0, 1, 2]], np.int32), None, None, {})
         ms = common.morph_set(common.morph("Pull", "pinched", [2], [(1.0, 0.0, 0.0)]))
@@ -157,25 +164,26 @@ class TestDegenerateGeometry(unittest.TestCase):
         self.assertTrue(np.allclose(strain, [0.0, 1.0, 1.0]))
 
     def test_shape_without_triangles(self):
-        """Часть из одних вершин (без треугольников) с морфом: у неё нет рёбер, и сводка
-        обязана либо пропустить её, либо показать ноль рёбер — но не упасть, иначе один
-        такой блок в меше ломает отчёт по всем остальным."""
+        """A shape of bare vertices (no triangles) that has a morph: it has no edges, and
+        the report must either skip it or show zero edges - but not fall over, or one such
+        block in a mesh breaks the report on every other one."""
         cloud = Shape("cloud", VERTS, np.zeros((0, 3), np.int32), None, None, {})
         ms = common.morph_set(common.morph("Pull", "cloud", [3], [(1.0, 0.0, 0.0)]))
         bench = common.bench(self.tmp.name, common.model(cloud), ms)
         try:
             rows = bench.strain()
         except ValueError as e:
-            self.fail("strain() упал на части без треугольников: %s" % e)
+            self.fail("strain() fell over on a shape without triangles: %s" % e)
         for r in rows:
             self.assertEqual(r["edges"], 0)
 
 
-# ---- набор ползунков и перебор пар ------------------------------------------------------
-# Right тянет вершину 1 на +1 по X, Left - вершину 0 на -1 по X. Ребро (0,1) длиной 1
-# от каждого становится 2 (растяжение 1), от обоих - 3 (растяжение 2): пара рвёт сильнее
-# каждого поодиночке. Остальные рёбра: у Right (1,2) √2 -> √5, (1,3) 1 -> √2; у Left
-# (0,2) 1 -> √2. Shift двигает всё целиком и ничего не добавляет.
+# ---- a set of sliders and the walk over pairs --------------------------------------------
+# Right drags vertex 1 by +1 along X, Left drags vertex 0 by -1 along X. Edge (0,1), length
+# 1, becomes 2 under either alone (strain 1) and 3 under both (strain 2): the pair tears
+# worse than either on its own. The other edges: under Right (1,2) sqrt(2) -> sqrt(5),
+# (1,3) 1 -> sqrt(2); under Left (0,2) 1 -> sqrt(2). Shift moves everything as one and
+# adds nothing.
 RIGHT = [1.0, 0.0, math.sqrt(2.5) - 1, SQRT2 - 1, 0.0]
 LEFT = [1.0, SQRT2 - 1, 0.0, 0.0, 0.0]
 BOTH = [2.0, SQRT2 - 1, math.sqrt(2.5) - 1, SQRT2 - 1, 0.0]
@@ -201,7 +209,7 @@ class TestStrainSet(unittest.TestCase):
         self.an = self.bench.analyzer
 
     def test_single_matches_edge_strain(self):
-        """Набор из одного морфа - то же, что edge_strain по нему."""
+        """A set of one morph is the same as edge_strain on that morph."""
         edges, strain = self.an.edge_strain_set("body", {"Right": 1.0})
         self.assertEqual(edges.tolist(), EDGES)
         self.assertTrue(np.allclose(strain, RIGHT, atol=1e-6), strain)
@@ -210,8 +218,8 @@ class TestStrainSet(unittest.TestCase):
                                     atol=1e-6))
 
     def test_set_is_the_sum(self):
-        """Оба вместе: ребро (0,1) из 1 становится 3 - растяжение 2, больше, чем 1 у каждого;
-        и это ровно то, что даёт последовательное Morph.apply."""
+        """Both together: edge (0,1) goes from 1 to 3 - strain 2, more than the 1 of either;
+        and that is exactly what Morph.apply gives when applied one after the other."""
         _, strain = self.an.edge_strain_set("body", {"Right": 1.0, "Left": 1.0})
         self.assertTrue(np.allclose(strain, BOTH, atol=1e-6), strain)
         moved = self.ms.get("body", "Left").apply(self.ms.get("body", "Right").apply(VERTS))
@@ -221,7 +229,7 @@ class TestStrainSet(unittest.TestCase):
         self.assertTrue(np.allclose(strain, np.abs(after / before - 1.0), atol=1e-6))
 
     def test_amounts_scale(self):
-        """Половина каждого: (0,1) из 1 становится 2 - растяжение 1; остальные - по √."""
+        """Half of each: (0,1) goes from 1 to 2 - strain 1; the rest by the square root."""
         _, strain = self.an.edge_strain_set("body", {"Right": 0.5, "Left": 0.5})
         self.assertTrue(np.allclose(strain, HALF, atol=1e-6), strain)
 
@@ -232,7 +240,8 @@ class TestStrainSet(unittest.TestCase):
         self.assertTrue(np.all(strain == 0.0))
 
     def test_skips_zero_unknown_empty(self):
-        """Ноль, чужое имя и пустой морф - не ползунки; набор из них одних не двигает ничего."""
+        """A zero, an unknown name and an empty morph are not sliders; a set of nothing
+        but those moves nothing."""
         self.assertIsNone(self.an.edge_strain_set("body", {"Right": 0.0, "Nope": 1.0, "Empty": 1.0}))
         self.assertIsNone(self.an.edge_strain_set("head", {"Right": 1.0}))
         _, strain = self.an.edge_strain_set("body", {"Right": 0.0, "Left": 1.0, "Nope": 2.0})
@@ -241,7 +250,8 @@ class TestStrainSet(unittest.TestCase):
         self.assertEqual(self.an.strain_set({"Nope": 1.0}), [])
 
     def test_baseline_cached_per_shape(self):
-        """Рёбра и длины «до» считаются один раз на часть: перебор пар их не пересчитывает."""
+        """The edges and the lengths before are worked out once per shape: the walk over
+        pairs does not count them again."""
         first = self.an.edge_lengths("body")
         self.assertIs(first, self.an.edge_lengths("body"))
         self.assertIs(first[0], self.an.edges("body"))
@@ -249,8 +259,9 @@ class TestStrainSet(unittest.TestCase):
         self.assertIsNone(self.an.edge_lengths("head"))
 
     def test_rows_carry_the_set(self):
-        """Строка сводки - как у strain_report, но с набором вместо морфа: при пороге 0.5
-        сверх него два ребра, (0,1) и (1,2); охват их концов - вершины 0, 1, 2."""
+        """A row of the report is the one strain_report gives, with the set in place of the
+        morph: at a threshold of 0.5 two edges are over it, (0,1) and (1,2); the extent of
+        their ends is vertices 0, 1, 2."""
         rows = self.an.strain_set({"Right": 1.0, "Left": 1.0}, threshold=0.5)
         self.assertEqual(len(rows), 1)
         st = rows[0]
@@ -263,14 +274,14 @@ class TestStrainSet(unittest.TestCase):
         self.assertNotIn("morph", d)
         self.assertEqual(d["worstBounds"], {"min": [0.0, 0.0, 0.0], "max": [1.0, 1.0, 0.0]})
         self.assertTrue(common.is_plain(d))
-        # Одиночный итог по-прежнему отдаёт morph и не отдаёт sliders.
+        # A single result still carries morph and still does not carry sliders.
         single = self.an.strain("body", "Right").as_dict()
         self.assertEqual(single["morph"], "Right")
         self.assertNotIn("sliders", single)
 
     def test_sorted_across_shapes(self):
-        """Части идут по убыванию растяжения; часть, которой набор не касается, не в счёт."""
-        head = common.grid("head", 2, 2, z=5.0)                 # та же топология, выше
+        """Shapes run by falling strain; a shape the set does not touch does not count."""
+        head = common.grid("head", 2, 2, z=5.0)          # the same topology, higher up
         ms = common.morph_set(common.morph("Right", "body", [1], [(1.0, 0.0, 0.0)]),
                               common.morph("Nose", "head", [3], [(3.0, 0.0, 0.0)]))
         an = Analyzer(common.model(self.body, head), ms)
@@ -282,8 +293,9 @@ class TestStrainSet(unittest.TestCase):
         self.assertEqual(an.strain_extent({"Nope": 1.0}), (0.0, 0, None))
 
     def test_facade(self):
-        """Фасад: values None - нынешние ползунки; строки те же, что as_dict() у ядра;
-        пустой набор и чужое имя - отказ, а не пустой ответ."""
+        """The facade: values None means the current sliders; the rows are the ones
+        as_dict() of the core gives; an empty set and an unknown name are a refusal,
+        not an empty answer."""
         want = [s.as_dict() for s in self.an.strain_set({"Right": 1.0, "Left": 1.0}, 0.5)]
         self.assertEqual(self.bench.strain_set({"Right": 1, "Left": 1}, 0.5), want)
         self.bench.set_sliders({"Right": 1.0, "Left": 1.0})
@@ -310,8 +322,9 @@ class TestStrainPairs(unittest.TestCase):
         self.assertEqual(self.an.active_morphs(), ["Left", "Right", "Shift"])
 
     def test_pair_on_top_with_gain(self):
-        """Три непустых морфа - три пары. Left+Right вместе 2 при 1 у каждого: прибавка 1,
-        наверху; пары с Shift равны своему одиночке, прибавка 0."""
+        """Three morphs that are not empty - three pairs. Left+Right together give 2 where
+        each alone gives 1: a gain of 1, and the top row; pairs with Shift equal their own
+        single morph, a gain of 0."""
         rows = self.an.strain_pairs(1.0, 0.5, top=None)
         self.assertEqual([(r["a"], r["b"]) for r in rows],
                          [("Left", "Right"), ("Left", "Shift"), ("Right", "Shift")])
@@ -324,8 +337,8 @@ class TestStrainPairs(unittest.TestCase):
         for r in rows[1:]:
             self.assertAlmostEqual(r["maxStrain"], 1.0, places=6)
             self.assertAlmostEqual(r["gain"], 0.0, places=6)
-        self.assertEqual(rows[1]["overThreshold"], 1)      # у Left сверх 0.5 только (0,1)
-        self.assertEqual(rows[2]["overThreshold"], 2)      # у Right ещё и (1,2)
+        self.assertEqual(rows[1]["overThreshold"], 1)      # Left has only (0,1) over 0.5
+        self.assertEqual(rows[2]["overThreshold"], 2)      # Right has (1,2) as well
 
     def test_top_and_order(self):
         self.assertEqual(len(self.an.strain_pairs(top=1)), 1)
@@ -337,7 +350,7 @@ class TestStrainPairs(unittest.TestCase):
             self.an.strain_pairs(by="worst")
 
     def test_amount_scales_pairs(self):
-        """При половине ползунков пара даёт 1, одиночки - по 0.5: прибавка 0.5."""
+        """At half the sliders the pair gives 1 and each alone gives 0.5: a gain of 0.5."""
         rows = self.an.strain_pairs(0.5, top=1)
         self.assertAlmostEqual(rows[0]["maxStrain"], 1.0, places=6)
         self.assertAlmostEqual(rows[0]["gain"], 0.5, places=6)
@@ -354,11 +367,12 @@ class TestStrainPairs(unittest.TestCase):
         self.assertEqual(rows[0]["maxStrain"], 2.0)
 
 
-# ---- бюджет амплитуд ----------------------------------------------------------------------
+# ---- the amplitude budget ------------------------------------------------------------------
 class TestBudget(unittest.TestCase):
-    """Pull тянет вершину 3 на +1 по X: ребро (2,3) длиной 1 становится 1+t, растяжение
-    ровно t, а (1,3) даёт √(1+t²)-1 < t, - наибольшее растяжение линейно с наклоном 1.
-    Pull2 - наклон 2, Tiny - наклон 0.1: на верхнем пределе 1 порога 0.25 не достигает."""
+    """Pull drags vertex 3 by +1 along X: edge (2,3), length 1, becomes 1+t, so its strain
+    is exactly t, while (1,3) gives sqrt(1+t*t)-1 < t - the largest strain is linear with
+    a slope of 1. Pull2 has a slope of 2, Tiny a slope of 0.1: at the upper limit of 1 it
+    never reaches the threshold of 0.25."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -374,7 +388,8 @@ class TestBudget(unittest.TestCase):
         self.an = self.bench.analyzer
 
     def test_limits_by_hand(self):
-        """Порог 0.25: Pull - 0.25/1, Pull2 - 0.25/2; Tiny и Shift в пределах не рвут."""
+        """Threshold 0.25: Pull - 0.25/1, Pull2 - 0.25/2; Tiny and Shift do not tear
+        within the range."""
         rows = common.by_key(self.an.budget(), "morph")
         self.assertEqual(set(rows), {"Pull", "Pull2", "Tiny", "Shift"})
         self.assertAlmostEqual(rows["Pull"]["limit"], 0.25, delta=0.005)
@@ -389,7 +404,8 @@ class TestBudget(unittest.TestCase):
         self.assertAlmostEqual(rows["Pull2"]["maxAt"], 2.0, places=6)
 
     def test_order_tearing_first(self):
-        """Рвущие - по возрастанию предела, потом не рвущие - по убыванию растяжения."""
+        """The ones that tear come first by rising limit, then the ones that do not, by
+        falling strain."""
         self.assertEqual([r["morph"] for r in self.an.budget()], ["Pull2", "Pull", "Tiny", "Shift"])
 
     def test_threshold_and_range(self):
@@ -405,7 +421,8 @@ class TestBudget(unittest.TestCase):
         self.assertAlmostEqual(coarse["Pull"]["limit"], 0.25, delta=0.1)
 
     def test_facade_takes_settings(self):
-        """Порог, пределы и точность - из настроек; числа округлены и пригодны для JSON."""
+        """The threshold, the range and the resolution come from the settings; the numbers
+        are rounded and fit for JSON."""
         rows = common.by_key(self.bench.budget(), "morph")
         self.assertAlmostEqual(rows["Pull"]["limit"], 0.25, delta=0.005)
         self.assertTrue(common.is_plain(list(rows.values())))
@@ -421,10 +438,16 @@ class TestBudget(unittest.TestCase):
         self.assertAlmostEqual(rows["Pull2"]["limit"], 0.05, delta=0.005)
 
 
-# ---- командная строка -----------------------------------------------------------------------
+# ---- the command line -------------------------------------------------------------------------
 class TestCommandLine(unittest.TestCase):
-    """strain без новых ключей - как раньше; --slider меряет набор, --pairs перебирает пары,
-    budget даёт бюджет. Фасад подключён к фигуре в памяти, а open подменён: файлов нет."""
+    """strain without the newer keys behaves as it always did; --slider measures a set,
+    --pairs walks the pairs, budget gives the budget. The facade is bound to a shape in
+    memory and open is swapped out: there are no files.
+
+    Which table came out is checked against the presenter itself rather than against a word
+    of its heading. The headings are localised, the tests run in English, and an assertion
+    on one English word would have to be chased every time the wording is proof-read.
+    """
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -464,10 +487,12 @@ class TestCommandLine(unittest.TestCase):
         self.assertEqual(rows, self.fresh().strain_set({"Right": 1.0, "Left": 1.0}, 0.5))
         self.assertEqual(rows[0]["sliders"], {"Right": 1.0, "Left": 1.0})
         self.assertNotIn("morph", rows[0])
+        bench = self.fresh()
         code, out, _ = self.cli(["strain", "x.nif", "--slider", "Right=1", "--slider", "Left=0.5"],
-                                self.fresh())
+                                bench)
         self.assertEqual(code, 0)
-        self.assertIn("набор", out.splitlines()[0])
+        # The set table, not the single-morph one; the sliders it was given are named in it.
+        self.assertEqual(out, text.strain_set(bench.strain_set(None, None)) + "\n")
         self.assertIn("Right=1, Left=0.5", out)
 
     def test_bad_sliders_refused(self):
@@ -488,7 +513,8 @@ class TestCommandLine(unittest.TestCase):
         self.assertEqual(len(rows), 3)
         code, out, _ = self.cli(["strain", "x.nif", "--pairs"], self.fresh())
         self.assertEqual(code, 0)
-        self.assertIn("прибавка", out.splitlines()[0])
+        self.assertEqual(out, text.strain_pairs(self.fresh().strain_pairs(1.0, None, 10, "max"))
+                         + "\n")
         self.assertEqual(len(out.splitlines()), 2 + 3)
 
     def test_budget(self):
@@ -502,8 +528,13 @@ class TestCommandLine(unittest.TestCase):
         self.assertEqual(rows, self.fresh(ms).budget(0.5))
         code, out, _ = self.cli(["budget", "x.nif"], self.fresh(ms))
         self.assertEqual(code, 0)
-        self.assertIn("предел", out.splitlines()[0])
-        self.assertIn("в пределах не рвёт", out)
+        self.assertEqual(out, text.budget(self.fresh(ms).budget(None)) + "\n")
+        # Tiny does not reach the threshold anywhere in the range, and its row has to say
+        # so in words - an empty cell there reads as "no strain at all". The words are
+        # asked of the catalogue rather than spelled out, so proof-reading them cannot
+        # break this test; equality with text.budget above cannot catch it on its own,
+        # because both sides would change together.
+        self.assertIn(t("text.noLimit"), out)
         self.assertIn("Pull2", out)
 
 

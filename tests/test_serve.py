@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
-"""Локальная страница со списком мешей: сервер поверх фасада отвечает JSON и HTML.
+"""The local page with the list of meshes: the server on top of the facade answers JSON and HTML.
 
-Сервер поднимается фоновым потоком (`WebServer.start`) на порту 0 — систему просят дать
-свободный — с корнем обзора во временной папке, где лежит настоящий крошечный NIF
-с файлом морфов TRIP (их пишут PyNifly и TripFile). Ловит: окружение, обзор и payload,
-не отданные как JSON; страницу без холста; url, не знающий выбранного системой порта;
-несуществующий корень или запись, ответившие 200 или не-JSON; папку вне Data под MO2,
-пропущенную без 403; сервер, который не останавливается. Без serve.py — пропуск.
+The server comes up on a background thread (`WebServer.start`) on port 0 - the system is
+asked for a free one - with the browse root in a temporary folder holding a real tiny NIF
+and a TRIP file of morphs (PyNifly and TripFile write them). Catches: the environment, the
+browse list and the payload not handed out as JSON; a page without a canvas; a url that does
+not know the port the system picked; a root or an entry that does not exist answering 200 or
+something that is not JSON; a folder outside the game's Data under MO2 let through without a
+403; a server that does not stop. Without serve.py - skipped.
 """
 import contextlib
 import json
@@ -36,12 +37,12 @@ except ImportError as e:  # noqa: N816
     WebServer = None
     IMPORT_ERROR = e
 
-# Без прокси: адрес местный, а переменные окружения могут завернуть его наружу.
+# No proxy: the address is local, and the environment variables could send it out.
 _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 def get(url: str):
-    """(код, тип содержимого, тело) — и для ошибочных кодов тоже."""
+    """(code, content type, body) - for the failing codes as well."""
     try:
         with _OPENER.open(url, timeout=10) as r:
             return r.status, r.headers.get("Content-Type", ""), r.read()
@@ -50,8 +51,8 @@ def get(url: str):
 
 
 def quiet():
-    """Строки журнала запросов — не в вывод проверок. Глушится одна точка записи,
-    через которую идут и запросы, и ошибки, и сообщения http.server."""
+    """The lines of the request journal stay out of the checks' output. One point of writing
+    is silenced, the one that requests, failures and http.server's own messages go through."""
     handler = getattr(serve, "_Handler", None)
     if handler is None or not hasattr(handler, "_write"):
         return contextlib.nullcontext()
@@ -59,7 +60,8 @@ def quiet():
 
 
 def write_body(cfg, folder: Path) -> tuple[Path, Path]:
-    """tiny_0.nif и tiny.tri рядом: квадрат из двух треугольников и морф Up на одной вершине."""
+    """tiny_0.nif and tiny.tri side by side: a square of two triangles and an Up morph on
+    one vertex."""
     pynifly = common.load_pynifly(cfg)
     TripFile = common.trip_file_class(cfg)
     verts = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (1.0, 1.0, 0.0)]
@@ -77,7 +79,7 @@ def write_body(cfg, folder: Path) -> tuple[Path, Path]:
 NAME = "meshes/tiny/tiny_0.nif"
 
 
-@unittest.skipIf(WebServer is None, "presenters/serve.py ещё нет: %s" % (
+@unittest.skipIf(WebServer is None, "there is no presenters/serve.py yet: %s" % (
     IMPORT_ERROR if WebServer is None else ""))
 class TestWebServer(unittest.TestCase):
 
@@ -122,7 +124,7 @@ class TestWebServer(unittest.TestCase):
         return "?" + urllib.parse.urlencode(params)
 
     def test_url_knows_the_port(self):
-        """Порт 0 отдан системе: url и port показывают настоящий, а не ноль."""
+        """Port 0 is handed to the system: url and port show the real one, not zero."""
         self.assertGreater(self.server.port, 0)
         self.assertTrue(self.base.endswith(":%d" % self.server.port), self.base)
         self.assertTrue(self.base.startswith("http://127.0.0.1:"), self.base)
@@ -133,12 +135,12 @@ class TestWebServer(unittest.TestCase):
         data = self.json("/api/environment")
         self.assertEqual(set(data), {"insideMo2", "dataRoot", "games", "catalogRoot", "candidates", "root"})
         self.assertIs(type(data["insideMo2"]), bool)
-        self.assertEqual(Path(data.pop("root")), self.root)     # корень сервера - отдельно
+        self.assertEqual(Path(data.pop("root")), self.root)     # the server's root goes apart
         self.assertEqual(data, self.bench.environment())
 
     def test_catalog(self):
-        """Обзор по корню сервера — тот же список, что даёт фасад; root= в запросе
-        меняет корень, all= и rescan= доезжают до фасада."""
+        """The browse list by the server's root - the same list the facade gives; root= in
+        the request changes the root, all= and rescan= reach the facade."""
         rows = self.json("/api/catalog")
         self.assertEqual([r["name"] for r in rows], [NAME])
         self.assertEqual((rows[0]["index"], rows[0]["kind"]), (0, "TRIP"))
@@ -148,22 +150,23 @@ class TestWebServer(unittest.TestCase):
         self.assertEqual([r["name"] for r in rows], ["tiny/tiny_0.nif"])
 
     def test_payload_opens_entry(self):
-        """payload по номеру и по имени открывает меш в фасаде и отдаёт то же, что WebPage."""
+        """payload by number and by name opens the mesh in the facade and hands out the same
+        as WebPage."""
         data = self.json("/api/payload?index=0")
         self.assertEqual([s["name"] for s in data["shapes"]], ["body"])
-        # Страница строит кадр по этим числам, поэтому они уходят без округления.
+        # The page builds its frame from these numbers, so they go out without rounding.
         self.assertEqual(data["view"], self.bench.view_state(precise=True))
         self.assertIn("Up", data["deltas"])
         self.assertEqual(Path(self.bench.model.path), self.nif)
         self.assertEqual(Path(self.bench.morph_set.path), self.tri)
         by_name = self.json("/api/payload" + self.q(name=NAME))
         self.assertEqual([s["name"] for s in by_name["shapes"]], ["body"])
-        # Меш открыт — payload без ключа отдаёт его же.
+        # The mesh is open - payload without a key hands out that same one.
         self.assertEqual([s["name"] for s in self.json("/api/payload")["shapes"]], ["body"])
 
     def test_page(self):
-        """Страница с холстом и без единой ссылки наружу; по index= открывает тело;
-        ошибка показывается на той же странице с кодом ошибки, а не пустым ответом."""
+        """A page with a canvas and not one link outside it; index= opens the body; a refusal
+        is shown on the same page with the refusal's code, not as an empty answer."""
         text = self.html("/")
         self.assertIn("<canvas", text)
         self.assertNotIn("https://", text)
@@ -175,8 +178,8 @@ class TestWebServer(unittest.TestCase):
         self.assertIn("<canvas", self.html("/?index=zzz", 400))
 
     def test_errors_are_json_with_codes(self):
-        """Несуществующий корень и запись — 404, кривой номер — 400, чужой путь — 404;
-        всё — JSON с ключом error."""
+        """A root and an entry that do not exist - 404, a mangled number - 400, a foreign
+        path - 404; all of it JSON with an error key."""
         for path, code in (("/api/catalog" + self.q(root=str(self.root / "nowhere")), 404),
                            ("/api/payload?index=99", 404),
                            ("/api/payload?name=nothing-like-this", 404),
@@ -187,7 +190,8 @@ class TestWebServer(unittest.TestCase):
             self.assertIsInstance(data["error"], str)
 
     def test_mo2_forbids_outside_data(self):
-        """Под MO2 (имитация) корень вне Data игры — 403 с JSON; окружение об этом знает."""
+        """Under MO2 (pretended) a root outside the game's Data - 403 with JSON; the
+        environment knows about it."""
         game = Path(self.tmp.name) / "Game"
         (game / "Data" / "meshes").mkdir(parents=True)
         with mo2(True), games(game):
@@ -199,8 +203,8 @@ class TestWebServer(unittest.TestCase):
         self.assertFalse(self.json("/api/environment")["insideMo2"])
 
     def test_start_and_stop(self):
-        """Второй сервер на порту 0: без открытого меша payload — 400, страница — 200;
-        после stop() порт не отвечает, а поток завершён."""
+        """A second server on port 0: with no mesh open payload is 400 and the page is 200;
+        after stop() the port does not answer and the thread has ended."""
         bench = MorphBench(self.cfg)
         server = WebServer(bench, root=self.root, host="127.0.0.1", port=0).start()
         try:
@@ -216,18 +220,19 @@ class TestWebServer(unittest.TestCase):
             server.stop()
         with self.assertRaises(urllib.error.URLError):
             get(base + "/api/environment")
-        # Первый сервер остановка второго не задела.
+        # Stopping the second server did not touch the first.
         self.json("/api/environment")
 
 
-@unittest.skipIf(WebServer is None, "нет presenters/serve.py")
+@unittest.skipIf(WebServer is None, "no presenters/serve.py")
 class TestDeadJournal(unittest.TestCase):
-    """Труба к тому, кто запустил сервер, закрылась — обслуживание продолжается.
+    """The pipe to whoever started the server has closed - serving goes on.
 
-    Так выглядит снятое окно запуска: сервер пишет строку журнала в трубу, читателя
-    у которой больше нет. Писалась она внутри отправки ответа, до заголовков, поэтому
-    падение уносило с собой каждый обслуживаемый запрос: клиент получал обрыв связи
-    без единого слова, а работа при этом делалась. Теперь выбывает один приёмник.
+    That is what a killed launcher window looks like: the server writes a journal line into
+    a pipe that has no reader left. It was written inside sending the answer, before the
+    headers, so the fall took every served request with it: the client got the connection
+    cut without a single word, while the work was in fact done. Now one sink drops out
+    instead.
     """
 
     def test_serving_survives_and_the_other_sink_keeps_the_record(self):
@@ -247,7 +252,7 @@ class TestDeadJournal(unittest.TestCase):
                     self.assertEqual(code, 200, body[:300])
                 code, ctype, body = get(base + "/")
                 self.assertEqual(code, 200)
-                # Отказ отправки тоже не должен ронять сервер: 404 приходит как 404.
+                # A refusal to send must not fell the server either: a 404 comes as a 404.
                 self.assertEqual(get(base + "/api/no-such-path")[0], 404)
             finally:
                 server.stop()
@@ -258,18 +263,19 @@ class TestDeadJournal(unittest.TestCase):
             self.assertIn("dropped out", lines)
 
 
-@unittest.skipIf(WebServer is None, "нет presenters/serve.py")
+@unittest.skipIf(WebServer is None, "no presenters/serve.py")
 class TestParentWatch(unittest.TestCase):
-    """Сервер уходит вместе с тем, кто его поднял.
+    """The server leaves together with whoever raised it.
 
-    Мирно закрытое окно останавливает сервер само; снятое жёстко — не успевает, и остаётся
-    невидимый процесс на живой подмене MO2, к которому следующий запуск молча подключится,
-    потому что точка входа идемпотентна. Поэтому сервер ждёт родителя сам.
+    A window closed peacefully stops the server itself; killed hard it does not get the
+    chance, and an invisible process is left on a live MO2 substitution, which the next
+    launch will quietly attach to, because the entry point is idempotent. So the server
+    waits for its parent itself.
     """
 
     @staticmethod
     def child(seconds: float):
-        """Короткоживущий процесс вместо окна запуска."""
+        """A short-lived process instead of the launcher window."""
         return subprocess.Popen([sys.executable, "-c", "import time; time.sleep(%r)" % seconds],
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -277,10 +283,10 @@ class TestParentWatch(unittest.TestCase):
         from morphbench.environment import process_alive, wait_process
         p = self.child(1.0)
         self.assertTrue(process_alive(p.pid))
-        wait_process(p.pid)                       # возвращается ровно когда процесс умер
+        wait_process(p.pid)                       # comes back exactly when the process died
         self.assertFalse(process_alive(p.pid))
         p.wait(timeout=5)
-        self.assertFalse(process_alive(999999))   # несуществующий номер - не жив
+        self.assertFalse(process_alive(999999))   # a number that does not exist - not alive
         self.assertFalse(process_alive(0))
 
     def test_server_leaves_with_the_parent(self):
@@ -294,15 +300,15 @@ class TestParentWatch(unittest.TestCase):
                 server.watch_parent(parent.pid)
                 self.assertEqual(get(base + "/api/environment")[0], 200)
                 parent.wait(timeout=15)
-                # Отказ бывает разный — отказано в соединении, разорвано хозяином, —
-                # и все они OSError; важно, что ответа больше нет.
-                for _ in range(60):               # сторож просыпается на смерти родителя
+                # The refusal comes in different shapes - connection refused, reset by the
+                # host - and they are all OSError; what matters is that no answer comes.
+                for _ in range(60):               # the watch wakes on the parent's death
                     try:
                         get(base + "/api/environment")
                     except OSError:
                         break
                     time.sleep(0.2)
-                # Порт отпущен, а не оставлен слушать без ответа.
+                # The port is let go, not left listening without an answer.
                 with self.assertRaises(OSError):
                     get(base + "/api/environment")
             finally:
@@ -310,7 +316,7 @@ class TestParentWatch(unittest.TestCase):
                 server.close()
 
     def test_no_pid_means_no_watch(self):
-        """Прежнее поведение сохранено: без номера процесса сторожа нет вовсе."""
+        """The old behaviour is kept: without a process number there is no watch at all."""
         with tempfile.TemporaryDirectory() as tmp:
             bench = MorphBench(common.config(tmp))
             with quiet():
@@ -318,7 +324,7 @@ class TestParentWatch(unittest.TestCase):
             try:
                 server.watch_parent(0)
                 self.assertIsNone(server._watcher)
-                # Умерший родитель сервер не роняет, а только предупреждает.
+                # A dead parent does not fell the server, it only warns.
                 p = self.child(0.1)
                 p.wait(timeout=5)
                 server.watch_parent(p.pid)

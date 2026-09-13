@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Качающаяся физика: назначение цепочек движкам, капсулы по звеньям, слои smp и cbpc,
-команда `physics`. Фигуры в памяти: кожа 10x4, у которой столбцы держат звенья хвоста,
-уха и «шипа», шерсть на втором звене хвоста; скелет - матрицы и дерево без тел.
-Хвост отдан SMP, ухо - CBPC, шип - никому: так проверяется, что чужая цепочка в вывод
-не попадает, а шапка перечисляет всех.
+"""Swinging physics: chains handed to engines, capsules along the links, the smp and cbpc
+layers, the `physics` command. Shapes in memory: a 10x4 skin whose columns carry the links of
+a tail, an ear and a "spike", plus fur on the second link of the tail; the skeleton is matrices
+and a tree, no bodies. The tail goes to SMP, the ear to CBPC and the spike to nobody: that is
+what proves another engine's chain stays out of the output while the header still names every
+one of them.
 """
 from __future__ import annotations
 
@@ -35,7 +36,8 @@ class Fixture(unittest.TestCase):
             "TailBone02": bone("TailBone02", columns(NX, NY, (2, 3))),
             "NPC EarL Bone01": bone("NPC EarL Bone01", columns(NX, NY, (4, 5))),
             "NPC EarL Bone02": bone("NPC EarL Bone02", columns(NX, NY, (6, 7))),
-            # По одному столбцу: четыре точки в линию - кожа есть, а капсуле сесть не на что.
+            # One column each: four points in a line - there is skin, but nothing for
+            # a capsule to sit on.
             "SpikeBone01": bone("SpikeBone01", columns(NX, NY, (8,))),
             "SpikeBone02": bone("SpikeBone02", columns(NX, NY, (9,)))})
         fur = grid("fur", 2, NY, z=1.0, x0=2.0, bones={"TailBone02": bone("TailBone02", range(8))})
@@ -64,7 +66,7 @@ class TestFacade(Fixture):
         self.assertEqual(self.bench.assign_chains(), {"tail": "smp", "ear": "cbpc"})
         got = self.bench.assign_chains({"spike": "CBPC", "tail": "cbpc"})
         self.assertEqual(got, {"spike": "cbpc", "tail": "cbpc", "ear": "cbpc"})
-        self.assertEqual(list(got)[:2], ["spike", "tail"])          # названное сверяется первым
+        self.assertEqual(list(got)[:2], ["spike", "tail"])          # what was named is matched first
         by = {r["chain"]: r["engine"] for r in self.bench.chains()}
         self.assertEqual(set(by.values()), {"cbpc"})
         with self.assertRaises(ValueError):
@@ -81,7 +83,8 @@ class TestFacade(Fixture):
         first = ear["links"][0]
         self.assertEqual((first["bone"], first["points"], first["vertices"]), ("NPC EarL Bone01", 8, 8))
         cap = first["capsule"]
-        # Кость стоит на (4, 0, 30), кожа на z=0: в системе кости капсула лежит на z=-30.
+        # The bone stands at (4, 0, 30) and the skin at z=0: in the bone's own space the
+        # capsule lies at z=-30.
         self.assertAlmostEqual(cap["p1"][2], -30.0, delta=0.01)
         self.assertAlmostEqual(cap["p2"][2], -30.0, delta=0.01)
         self.assertAlmostEqual(cap["p1"][0], 0.5, delta=0.01)
@@ -89,7 +92,7 @@ class TestFacade(Fixture):
         by = {r["chain"]: r for r in self.bench.chain_capsules()}
         self.assertEqual(by["TailBone"]["parent"], "Tails")
         self.assertEqual(by["TailBone"]["links"][1]["shapes"], {"body": 8, "fur": 8})
-        self.assertIsNone(by["SpikeBone"]["links"][0]["capsule"])   # четыре точки в линию
+        self.assertIsNone(by["SpikeBone"]["links"][0]["capsule"])   # four points in a line
 
     def test_capsules_need_a_skeleton(self):
         self.bench.rig = None
@@ -98,7 +101,7 @@ class TestFacade(Fixture):
 
 
 def _code(text_out: str) -> list[str]:
-    """Строки CBPC без комментариев и пустых."""
+    """The CBPC lines with comments and blanks taken out."""
     return [l for l in text_out.splitlines() if l and not l.startswith("#")]
 
 
@@ -124,16 +127,16 @@ class TestCBPC(Fixture):
         self.assertRegex(line, r"^-?[\d.]+,-?[\d.]+,-?[\d.]+,[\d.]+ & -?[\d.]+,-?[\d.]+,-?[\d.]+,[\d.]+ \| "
                                r"-?[\d.]+,-?[\d.]+,-?[\d.]+,[\d.]+ & -?[\d.]+,-?[\d.]+,-?[\d.]+,[\d.]+$")
         half1, half2 = line.split(" | ")
-        self.assertEqual(half1, half2)                       # вес 0 и вес 100 - одно тело
-        self.assertIn("-30", half1)                          # в системе кости
+        self.assertEqual(half1, half2)                       # weight 0 and weight 100 - one body
+        self.assertIn("-30", half1)                          # in the bone's own space
         self.assertFalse(any("Tail" in l or "Spike" in l for l in code))
 
     def test_header_names_every_assignment(self):
         head = [l for l in self.text().splitlines() if l.startswith("#")]
         self.assertIn("memory", head[0])
-        self.assertTrue(any("TailBone -> smp: другому движку" in l for l in head))
-        self.assertTrue(any("NPC EarL Bone -> cbpc: здесь" in l for l in head))
-        self.assertTrue(any("SpikeBone -> никому" in l for l in head))
+        self.assertTrue(any("TailBone -> smp: to another engine" in l for l in head))
+        self.assertTrue(any("NPC EarL Bone -> cbpc: here" in l for l in head))
+        self.assertTrue(any("SpikeBone -> given to nobody" in l for l in head))
 
     def test_numbers_come_from_settings(self):
         self.bench.cfg.set("cbpcStiffness", 0.42)
@@ -147,14 +150,14 @@ class TestCBPC(Fixture):
         out = self.text()
         self.assertIn("SpikeBone01=MBSpikeBone", _code(out))
         self.assertNotIn("[SpikeBone01]", out)
-        self.assertIn("# SpikeBone01: кожи на капсулу не хватило (4 точек)", out)
+        self.assertIn("# SpikeBone01: not enough skin for a capsule (4 points)", out)
 
     def test_nothing_to_write_is_said_not_silent(self):
         self.bench.assign_chains({"ear": "smp"})
         out = self.text()
-        self.assertIn("писать нечего", out)
+        self.assertIn("nothing to write", out)
         self.assertEqual(_code(out), [])
-        self.assertIn("NPC EarL Bone -> smp: другому движку", out)
+        self.assertIn("NPC EarL Bone -> smp: to another engine", out)
 
     def test_alias(self):
         self.assertEqual(cbpc.alias("NPC EarL [EarL]Bone"), "MBEarLBone")
@@ -167,13 +170,13 @@ class TestSMP(Fixture):
 
     def test_bones_constraints_and_shapes(self):
         out = self.text()
-        root = ET.fromstring(out.encode("utf-8"))               # XML верный
+        root = ET.fromstring(out.encode("utf-8"))               # the XML is sound
         self.assertEqual(root.tag, "system")
         bones = [(b.get("name"), len(b) > 0) for b in root.findall("bone")]
         self.assertEqual(bones, [("Tails", False), ("TailBone01", True), ("TailBone02", True)])
         dyn = {b.get("name"): b for b in root.findall("bone") if len(b)}
         self.assertEqual(dyn["TailBone01"].find("mass").text, "0.5")
-        self.assertEqual(dyn["TailBone02"].find("mass").text, "0.35")     # легчает к кончику
+        self.assertEqual(dyn["TailBone02"].find("mass").text, "0.35")     # lighter towards the tip
         self.assertEqual(dyn["TailBone01"].find("inertia").get("x"), "200")
         cons = [(c.get("bodyA"), c.get("bodyB")) for c in root.findall("generic-constraint")]
         self.assertEqual(cons, [("TailBone01", "Tails"), ("TailBone02", "TailBone01")])
@@ -189,10 +192,10 @@ class TestSMP(Fixture):
     def test_header_names_every_assignment(self):
         head = self.text().split("-->", 1)[0]
         self.assertIn("memory", head)
-        self.assertIn("TailBone -> smp: здесь", head)
-        self.assertIn("NPC EarL Bone -> cbpc: другому движку", head)
-        self.assertIn("SpikeBone -> никому", head)
-        self.assertIn("капсул по костям он не читает", head)
+        self.assertIn("TailBone -> smp: here", head)
+        self.assertIn("NPC EarL Bone -> cbpc: to another engine", head)
+        self.assertIn("SpikeBone -> given to nobody", head)
+        self.assertIn("does not read capsules on bones", head)
 
     def test_numbers_come_from_settings(self):
         self.bench.cfg.set("smpMass", 2.0)
@@ -220,11 +223,11 @@ class TestSMP(Fixture):
         out = self.text()
         root = ET.fromstring(out.encode("utf-8"))
         self.assertEqual(list(root), [])
-        self.assertIn("писать нечего", out)
+        self.assertIn("nothing to write", out)
 
 
 class TestCommandLine(Fixture):
-    """`mb.py physics` и `chains --assign` с фасадом в памяти вместо файлов."""
+    """`mb.py physics` and `chains --assign` against the facade in memory instead of files."""
 
     def main(self, argv) -> tuple[int, str, str]:
         out, err = io.StringIO(), io.StringIO()
@@ -271,7 +274,7 @@ class TestCommandLine(Fixture):
         self.assertIn("written", printed)
 
     def test_physics_takes_sliders_and_only(self):
-        """Кожа - то, что видно: спрятал шерсть - у звена нет шерсти в частях."""
+        """The skin is what can be seen: hide the fur and the link has no fur among its parts."""
         data = json.loads(self.run_ok(["physics", "memory.nif", "--engine", "smp", "--json",
                                        "--only", "body"]))
         self.assertNotIn('per-vertex-shape name="fur"', data["text"])
@@ -296,14 +299,15 @@ class TestCommandLine(Fixture):
 
 
 class TestCheck(unittest.TestCase):
-    """Проверка готового файла: движок молчит об ошибках, а мы находим опечатку."""
+    """Checking a ready file: the engine says nothing about its mistakes, and we find the typo."""
 
     BONES = ["NPC Head [Head]", "Ear01", "Ear02", "TailBone01", "TailBone02"]
 
     def test_smp_finds_unknown_bone_shape_and_constraint(self):
         from presenters import smp
+        # `EarO1` is a capital O where a zero belongs - the kind of typo nobody sees by eye.
         xml = """<?xml version="1.0"?><system>
-        <bone name="NPC Head [Head]"/><bone name="Ear01"/><bone name="Ear0З"/>
+        <bone name="NPC Head [Head]"/><bone name="Ear01"/><bone name="EarO1"/>
         <generic-constraint bodyA="Ear01" bodyB="NPC Head [Head]"/>
         <generic-constraint bodyA="Ear02" bodyB="Ear01"/>
         <generic-constraint bodyA="Nowhere" bodyB="Ear01"/>
@@ -312,12 +316,12 @@ class TestCheck(unittest.TestCase):
         </system>"""
         rows = smp.check(xml, self.BONES, ["head", "body"])
         kinds = sorted((r["kind"], r["name"]) for r in rows)
-        self.assertEqual(kinds, [("bone", "Ear0З"), ("collision", "ghost"),
+        self.assertEqual(kinds, [("bone", "EarO1"), ("collision", "ghost"),
                                  ("constraint", "Ear02"), ("constraint", "Nowhere"), ("shape", "hed")])
         by = {r["name"]: r for r in rows}
-        self.assertIn("не объявленную", by["Ear02"]["problem"])      # есть в скелете, нет в файле
-        self.assertIn("ни в файле, ни в скелете", by["Nowhere"]["problem"])
-        self.assertEqual(smp.check(xml.replace('name="Ear0З"', 'name="Ear02"')
+        self.assertIn("never declares", by["Ear02"]["problem"])      # in the skeleton, not in the file
+        self.assertIn("neither in the file nor in the skeleton", by["Nowhere"]["problem"])
+        self.assertEqual(smp.check(xml.replace('name="EarO1"', 'name="Ear02"')
                                    .replace('name="hed"', 'name="body"')
                                    .replace('a="ghost"', 'a="body"')
                                    .replace('bodyA="Nowhere"', 'bodyA="Ear02"'), self.BONES, ["head", "body"]), [])

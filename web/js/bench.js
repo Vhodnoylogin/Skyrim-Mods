@@ -1,14 +1,15 @@
 "use strict";
 
-// ---- зеркало morphbench/api.py: MorphBench ------------------------------------------------
-// Имена методов нарочно те же, что у фасада, вплоть до подчёркиваний: каждая кнопка страницы
-// зовёт метод отсюда, а он один в один соответствует вызову ядра.
+// ---- mirror of morphbench/api.py: MorphBench -----------------------------------------------
+// The method names are deliberately the facade's own, underscores and all: every button on the
+// page calls a method from here, and that method answers one for one to a call of the core. The
+// names are the API - making one of them look more like JavaScript would cut that tie.
 class BenchMirror {
   constructor(data) {
-    this.summary = data.summary;               // null - меш не открыт (страница с сервера)
+    this.summary = data.summary;               // null - no mesh open (a page from the server)
     this.names = data.names;
     this.settings = data.settings;
-    this.server = data.server || null;         // список мешей и окружение - только с сервера
+    this.server = data.server || null;         // mesh list and environment - only when served
     this.shapes = new Map(data.shapes.map((raw) => [raw.name, new Shape(raw)]));
     this.morphList = data.morphs;
     this.deltas = {};
@@ -22,8 +23,8 @@ class BenchMirror {
       for (const shape in data.strain[morph]) this.strainData[morph][shape] = new Strain(data.strain[morph][shape]);
     }
     this.targets = data.targets;
-    // Капсулы - только при открытом скелете: тела кусками по костям и бампер отдельно.
-    // Распаковываются и получают нормали один раз - ползунки капсул не касаются.
+    // Capsules exist only when a skeleton is open: the bodies in pieces, one per bone, and the
+    // bumper apart. They are unpacked and given their normals once - sliders never touch them.
     const raw = data.colliders || null;
     this._colliderMeshes = raw
       ? raw.bodies.map((b) => new ColliderMesh("colliders:" + b.bone, b, b.bone)) : null;
@@ -33,13 +34,13 @@ class BenchMirror {
   }
 
   is_open() { return this.summary !== null; }
-  // скелет и капсулы: геометрия уже сосчитана ядром и лежит в странице
+  // skeleton and capsules: the core has already worked the geometry out, and it travels in the page
   has_skeleton() { return this._colliderMeshes !== null; }
   collider_bones() { return this.has_skeleton() ? this._colliderMeshes.map((m) => m.bone) : []; }
-  // Кости с телом, чьи вершины есть хотя бы в одной видимой части, - зеркало
-  // visible_collider_bones() ядра: скрыл голову - капсула головы не нужна. Кость «держит»
-  // часть, если она главная для её вершин (heldBones, считает ядро); при выключенном
-  // collidersFollowParts - все кости.
+  // Bones with a body whose vertices sit in at least one visible shape - a mirror of the core's
+  // visible_collider_bones(): hide the head and the head capsule is no longer wanted. A bone
+  // "holds" a shape when it is the main bone of that shape's vertices (heldBones, counted by
+  // the core); with collidersFollowParts off, every bone counts.
   visible_collider_bones() {
     const bones = this.collider_bones();
     if (!this.settings.collidersFollowParts) return bones;
@@ -47,10 +48,10 @@ class BenchMirror {
     for (const name of this.visible_shapes()) for (const b of this.shape(name).heldBones) held.add(b);
     return bones.filter((b) => held.has(b));
   }
-  // все куски по костям - в буферы их кладут один раз
+  // every per-bone piece - they go into the buffers once
   collider_meshes() { return this.has_skeleton() ? this._colliderMeshes.slice() : []; }
-  // куски только видимых костей - зеркало collider_mesh() ядра, которое отдаёт их одним
-  // куском; здесь список, чтобы не склеивать геометрию на каждый кадр
+  // the pieces of the visible bones only - a mirror of the core's collider_mesh(), which returns
+  // them glued into one; here it stays a list, so no geometry is glued together every frame
   collider_mesh() {
     if (!this.has_skeleton()) return [];
     const keep = new Set(this.visible_collider_bones());
@@ -64,7 +65,7 @@ class BenchMirror {
   presets() { return this.view.presets; }
   visible_shapes() { return this.shape_names().filter((n) => this.view.is_visible(n)); }
 
-  // ползунки
+  // sliders
   set_slider(name, value) {
     if (!this.morphList.includes(name)) throw new Error(say(T.errNoSlider, { name }));
     value = Number(value);
@@ -75,7 +76,7 @@ class BenchMirror {
   sliders() { return Object.fromEntries(this._sliders); }
   reset_sliders() { this._sliders.clear(); return {}; }
 
-  // геометрия: base + сумма amount × scale × int16 - тот же счёт, что делает Morph.apply в ядре
+  // geometry: base + the sum of amount × scale × int16 - the same sum Morph.apply does in the core
   deformed(name) {
     const s = this.shape(name);
     s.pos.set(s.base);
@@ -85,14 +86,14 @@ class BenchMirror {
     }
     return s.pos;
   }
-  // нормали вершин части с применёнными ползунками - для мягкого затенения
+  // vertex normals of a shape with the sliders applied - what smooth shading needs
   vertex_normals(name) {
     const s = this.shape(name);
     return vertexNormals(this.deformed(name), s.tris, s.nrm);
   }
-  // Центр и полуразмах кадра: охват видимых частей с применёнными ползунками в осях камеры,
-  // затем наведение и панорама - зеркало MorphBench.framing(). Полуразмах остаётся в ViewMirror,
-  // и масштаб к точке знает, какой кадр был на экране.
+  // Centre and half-span of the frame: the extent of the visible shapes with the sliders applied,
+  // measured in camera axes, then the aim and the pan - a mirror of MorphBench.framing(). The
+  // half-span stays in ViewMirror, so zooming to a point knows which frame was on the screen.
   framing() {
     const shapes = this.visible_shapes().map((n) => this.shape(n)).filter((s) => s.triCount > 0);
     if (!shapes.length) throw new Error(T.errAllHidden);
@@ -120,7 +121,7 @@ class BenchMirror {
     return this.view.framing(whole, half);
   }
 
-  // признаки раскраски: числа, а не цвета
+  // colouring keys: numbers, not colours
   bone_key(name) { return this.shape(name).boneKey; }
   morph_key(name, morph) {
     const s = this.shape(name), out = new Float32Array(s.count);
@@ -143,35 +144,36 @@ class BenchMirror {
     return this.strain_key(name, this.view.highlightMorph);
   }
 
-  // состояние показа
+  // the state of the view
   orbit(dYaw, dPitch) { return this.view.orbit(dYaw, dPitch).as_dict(); }
   look(yaw, pitch) { return this.view.look(yaw, pitch).as_dict(); }
   preset(name) { return this.view.preset(name).as_dict(); }
   preset_name() { return this.view.preset_name(); }
   zoom(factor) { return this.view.set_zoom(factor).as_dict(); }
   resize(width, height) { return this.view.resize(width, height).as_dict(); }
-  // Масштаб к точке под курсором: кадр пересчитывается здесь же, чтобы точка бралась с того
-  // кадра, который на экране, - как в фасаде.
+  // Zoom to the point under the cursor: the frame is worked out again right here, so the point
+  // is taken from the frame that is on the screen - the same order the facade keeps.
   zoom_at(factor, fx, fy) { this.framing(); return this.view.zoom_at(factor, fx, fy).as_dict(); }
   pan(dx, dy) { return this.view.set_pan(dx, dy).as_dict(); }
   pan_by(dx, dy) { return this.view.pan_by(dx, dy).as_dict(); }
   colour_by(mode, morph) { return this.view.colour_by(mode, morph).as_dict(); }
   only(names) { return this.view.only(names).as_dict(); }
   show_all() { return this.view.show_all().as_dict(); }
-  // «Видно всё» ядро хранит как null, а ViewState имён частей не знает - поэтому, как и
-  // в фасаде, перечень видимых разворачивается здесь, и hide прячет одну часть, а не все.
+  // The core keeps "everything is visible" as null, and ViewState knows no shape names - so, as
+  // in the facade, the list of visible shapes is spelled out here, and hide then takes away one
+  // shape instead of all of them.
   hide(name) { if (this.view.visible === null) this.view.only(this.shape_names()); return this.view.hide(name).as_dict(); }
   show(name) { return this.view.show(name).as_dict(); }
   view_state() { return this.view.as_dict(); }
 
-  // свет: тоже состояние показа
+  // light: part of the state of the view as well
   light_follow_camera(on) { return this.view.light_follow_camera(on).as_dict(); }
   light_direction(x, y, z) { return this.view.light_direction(x, y, z).as_dict(); }
   light_power(ambient, diffuse, fill) { return this.view.light_power(ambient, diffuse, fill).as_dict(); }
   light_reset() { return this.view.light_reset().as_dict(); }
   light_vector() { return this.view.light_vector(); }
 
-  // наведение: центры и радиусы уже посчитаны ядром и лежат в focus_targets
+  // aim: the centres and radii are counted by the core already and sit in focus_targets
   _target(kind, name) {
     const hit = this.targets[kind].find((t) => t.name === name);
     if (!hit) throw new Error(say(T.errNoTarget, { kind, name }));

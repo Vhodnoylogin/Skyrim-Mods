@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Фасад отдаёт то же, что таблицы разборов, и разговаривает только числами.
+"""The facade gives out what the analysis tables hold, and it speaks in numbers only.
 
-`MorphBench` — единственная дверь для всех слоёв показа, поэтому каждая его таблица обязана
-совпадать с as_dict() соответствующего объекта Analyzer, сериализоваться в JSON без подсказок
-и не содержать ни цвета, ни типа numpy. Ползунки фасада обязаны давать ровно то, что даёт
-Morph.apply, — иначе картинка и числа разойдутся.
+`MorphBench` is the single door for every presenter, so each of its tables has to match the
+as_dict() of the matching Analyzer object, go into JSON with no help, and carry neither a
+colour nor a numpy type. The facade's sliders have to give exactly what Morph.apply gives -
+otherwise the picture and the numbers drift apart.
 """
 import json
 import os
@@ -29,7 +29,7 @@ class TestFacadeTables(unittest.TestCase):
         self.model = common.sample_model()
         self.ms = common.sample_morphs()
         self.bench = common.bench(self.tmp.name, self.model, self.ms)
-        # Независимый Analyzer с теми же умолчаниями, что записаны в настройках.
+        # An Analyzer of its own, with the same defaults as the ones in the settings.
         self.an = Analyzer(self.model, self.ms, 6.0, 0.02)
 
     def test_summary_and_shapes(self):
@@ -44,7 +44,7 @@ class TestFacadeTables(unittest.TestCase):
         self.assertEqual(shapes["fur"]["bones"], 1)
 
     def test_bones_aggregate_and_filter(self):
-        """Кости складываются по всем частям и идут по убыванию числа вершин."""
+        """Bones add up across every shape and come out in descending order of vertex count."""
         rows = self.bench.bones()
         self.assertEqual(rows[0], {"bone": "Fur", "vertices": 16})
         self.assertEqual(sorted((r["bone"], r["vertices"]) for r in rows[1:]),
@@ -55,7 +55,7 @@ class TestFacadeTables(unittest.TestCase):
         self.assertEqual(self.bench.morphs(), ["Empty", "Tip", "Up", "Wide"])
 
     def test_tables_match_analyzer(self):
-        """Каждая таблица фасада — as_dict() соответствующих объектов Analyzer."""
+        """Every table of the facade is the as_dict() of the matching Analyzer objects."""
         self.assertEqual(self.bench.morph_stats(), [s.as_dict() for s in self.an.morph_stats()])
         self.assertEqual(self.bench.morph_stats("up", "bod"),
                          [s.as_dict() for s in self.an.morph_stats("up", "bod")])
@@ -69,7 +69,8 @@ class TestFacadeTables(unittest.TestCase):
                          [s.as_dict() for s in self.an.layers("Up", "body", True)])
 
     def test_bindings_match_analyzer(self):
-        """Кости морфа и «оставленные» кости — те же пары, округлённые до тысячных."""
+        """The bones of a morph and the bones left behind - the same pairs, rounded to
+        thousandths."""
         self.assertEqual(self.bench.morph_bones("body", "Up"),
                          [{"bone": n, "share": round(v, 3)} for n, v in self.an.morph_bones("body", "Up")])
         self.assertEqual(self.bench.morph_bones("body", "Up"), [{"bone": "Finger", "share": 1.0}])
@@ -80,7 +81,8 @@ class TestFacadeTables(unittest.TestCase):
         self.assertEqual(self.bench.bones_left_behind("body", "Wide"), [])
 
     def test_layers_by_hand(self):
-        """Оболочка над пальцами: половина вершин над сдвигом, ждём 1, получили 0.5."""
+        """The layer over the fingers: half its vertices sit over the shift, we expect 1 and
+        get 0.5."""
         row = self.bench.layers("Up")[0]
         self.assertEqual(row["follower"], "fur")
         self.assertEqual(row["contact"], 0.5)
@@ -90,7 +92,7 @@ class TestFacadeTables(unittest.TestCase):
         self.assertFalse(row["missing"])
 
     def test_everything_serialises(self):
-        """Все ответы фасада уходят в json.dumps без подсказок и без типов numpy."""
+        """Every answer of the facade goes into json.dumps with no help and no numpy types."""
         self.bench.focus_shape("fur")
         self.bench.set_slider("Up", 0.5)
         outputs = {
@@ -104,12 +106,12 @@ class TestFacadeTables(unittest.TestCase):
             "sliders": self.bench.sliders(), "orbit": self.bench.orbit(10, 5),
         }
         for name, value in outputs.items():
-            self.assertTrue(common.is_plain(value), "%s содержит не-JSON типы: %r" % (name, value))
+            self.assertTrue(common.is_plain(value), "%s holds non-JSON types: %r" % (name, value))
             json.dumps(value, ensure_ascii=False)
 
     def test_view_state_is_numbers_only(self):
-        """Состояние показа — числа, строки, списки, None и словари. Никаких цветов: перевод
-        в цвет — дело слоя показа, ядро о нём не знает."""
+        """The view state is numbers, strings, lists, None and dictionaries. No colours:
+        turning a key into a colour is a presenter's job, and the core knows nothing of it."""
         self.bench.colour_by("bone")
         self.bench.only(["body"])
         self.bench.focus_bone("Hand")
@@ -139,7 +141,7 @@ class TestSliders(unittest.TestCase):
         self.fur = self.model.shape("fur").verts
 
     def test_deformed_matches_apply(self):
-        """Один ползунок на 0.5 — ровно Morph.apply(verts, 0.5) на каждой части."""
+        """One slider at 0.5 is exactly Morph.apply(verts, 0.5) on every shape."""
         self.assertEqual(self.bench.set_slider("Up", 0.5), {"Up": 0.5})
         self.assertTrue(np.array_equal(self.bench.deformed("body"),
                                        self.ms.get("body", "Up").apply(self.body, 0.5)))
@@ -148,11 +150,12 @@ class TestSliders(unittest.TestCase):
         self.assertTrue(np.allclose(self.bench.deformed("body")[common.columns(4, 4, (2, 3)), 2], 0.5))
 
     def test_two_sliders_compose(self):
-        """Два ползунка складываются: результат — apply второго поверх apply первого."""
+        """Two sliders stack: the result is the apply of the second over the apply of the
+        first."""
         self.bench.set_sliders({"Up": 1.0, "Wide": 0.25})
         want = self.ms.get("body", "Wide").apply(self.ms.get("body", "Up").apply(self.body, 1.0), 0.25)
         self.assertTrue(np.allclose(self.bench.deformed("body"), want))
-        # У оболочки нет Wide: применяется только Up.
+        # The outer layer has no Wide: only Up is applied to it.
         self.assertTrue(np.array_equal(self.bench.deformed("fur"),
                                        self.ms.get("fur", "Up").apply(self.fur, 1.0)))
 
@@ -168,12 +171,13 @@ class TestSliders(unittest.TestCase):
     def test_unknown_and_empty_sliders(self):
         with self.assertRaises(KeyError):
             self.bench.set_slider("Ghost", 1.0)
-        # Пустой морф принимается, но ничего не двигает.
+        # An empty morph is accepted, but it moves nothing.
         self.bench.set_slider("Empty", 1.0)
         self.assertTrue(np.array_equal(self.bench.deformed("body"), self.body))
 
     def test_without_morphs(self):
-        """Меш без файла морфов: геометрия отдаётся, вопросы о морфах — отказ словами."""
+        """A mesh with no morph file: the geometry is still given out, and questions about
+        morphs are refused in plain words rather than falling over."""
         bench = common.bench(self.tmp.name, self.model, None)
         self.assertIs(bench.deformed("body"), self.body)
         self.assertEqual(bench.summary()["morphs"], 0)
@@ -196,7 +200,8 @@ class TestSliders(unittest.TestCase):
 
 
 class TestColourKeys(unittest.TestCase):
-    """Признаки раскраски — числа, по одному на вершину; цвет из них делает слой показа."""
+    """The colouring keys are numbers, one per vertex; the colour is made from them by the
+    presenter."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -210,7 +215,8 @@ class TestColourKeys(unittest.TestCase):
         self.assertIsNone(self.bench.vertex_colour_key("body"))
 
     def test_bone_key(self):
-        """Номер главной кости в порядке костей части: столбцы 0-1 → Hand (0), 2-3 → Finger (1)."""
+        """The number of the dominant bone in the shape's bone order: columns 0-1 -> Hand (0),
+        2-3 -> Finger (1)."""
         self.bench.colour_by("bone")
         key = self.bench.vertex_colour_key("body")
         self.assertTrue(np.array_equal(key, self.bench.bone_key("body")))
@@ -219,14 +225,14 @@ class TestColourKeys(unittest.TestCase):
         self.assertTrue(np.all(self.bench.bone_key("fur") == 0))
 
     def test_unbound_vertex_is_minus_one(self):
-        """Вершина без привязки получает -1, а не номер первой кости."""
+        """A vertex with no weights gets -1, not the number of the first bone."""
         shape = Shape("loose", np.zeros((3, 3), np.float32), np.array([[0, 1, 2]], np.int32),
                       None, None, {"Only": common.bone("Only", [1])})
         bench = common.bench(self.tmp.name, common.model(shape), None)
         self.assertEqual(bench.bone_key("loose").tolist(), [-1, 0, -1])
 
     def test_morph_key(self):
-        """Величина сдвига выбранного морфа; ноль там, где он не трогает."""
+        """How far the chosen morph moves a vertex; zero where it does not touch it."""
         self.bench.colour_by("morph", "Up")
         key = self.bench.vertex_colour_key("body")
         self.assertTrue(np.array_equal(key, self.bench.morph_key("body", "Up")))
@@ -249,7 +255,7 @@ class TestColourKeys(unittest.TestCase):
         self.assertTrue(np.all(key == 0.0))
 
     def test_unknown_mode(self):
-        """Неизвестный режим — ValueError, и прежний режим остаётся на месте."""
+        """An unknown mode is a ValueError, and the mode in force stays where it was."""
         self.bench.colour_by("bone")
         with self.assertRaises(ValueError):
             self.bench.colour_by("rainbow")
@@ -257,7 +263,7 @@ class TestColourKeys(unittest.TestCase):
 
 
 class TestViewMethods(unittest.TestCase):
-    """Методы состояния показа — те самые, что нажмёт будущая кнопка."""
+    """The methods of the view state - the very ones a future button will press."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -286,8 +292,8 @@ class TestViewMethods(unittest.TestCase):
         self.assertEqual(self.bench.visible_shapes(), ["body", "fur"])
 
     def test_hide_keeps_other_shapes_visible(self):
-        """Скрыть одну часть из состояния «видно всё» — значит скрыть её одну. Если после
-        этого пропадают все части, кнопка «скрыть оболочку» оставит пустой кадр."""
+        """Hiding one shape out of "everything is visible" means hiding that one. If the rest
+        vanish with it, the "hide the fur" button leaves an empty frame."""
         self.bench.show_all()
         self.bench.hide("fur")
         self.assertEqual(self.bench.visible_shapes(), ["body"])

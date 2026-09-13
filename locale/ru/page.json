@@ -1,5 +1,6 @@
 {
   "#": "Страница-смотрелка: заголовки разделов, кнопки, пояснения и отказы скрипта.",
+  "#frameFile": "page.frameFile - имя файла в строке mb.py render, которую показывает панель, а не надпись: во всех языках остаётся frame.png.",
   "page.allHidden": "скрыты все части - растеризатору нечего рисовать.",
   "page.browseFolder": "папка обзора",
   "page.btnBrowse": "обзор",
@@ -11,7 +12,6 @@
   "page.btnZoom11": "масштаб 1:1",
   "page.cannotStart": "Не удалось запустить смотрелку: ",
   "page.capsulesNote": "полупрозрачно поверх тела; цвет и прозрачность — colliderColour и colliderOpacity из настроек",
-  "page.capsulesOf": " · капсул ",
   "page.chooseMesh": "выберите меш в списке на панели",
   "page.colourMorphNote": "морф для режимов",
   "page.errAllHidden": "нечего показывать: все части меша скрыты",
@@ -29,7 +29,7 @@
   "page.focusPadding": " × запас ",
   "page.focusRadius": ", радиус ",
   "page.frameCoversAll": "кадр охватывает видимые части",
-  "page.frameFile": "кадр.png",
+  "page.frameFile": "frame.png",
   "page.fromSettings": " из настроек",
   "page.grpBones": "кости",
   "page.grpMorphs": "морфы",

@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Шары охвата: наименьший шар над облаком, состояния ползунков, строки фасада и запись.
+"""Bounding spheres: the smallest sphere over a cloud, slider states, facade rows, writing.
 
-Фигуры в памяти: сетка с морфом, уводящим одну вершину далеко, - ожидания считаются
-в уме. Запись проверяется на крошечном блоке части, собранном здесь же по раскладке
-BSTriShape, и на настоящем NIF от PyNifly: шар, прочитанный NifPatch, обязан совпасть
-с тем, что читает PyNifly, - иначе раскладка не та.
+Shapes built in memory: a grid with a morph that carries one vertex far away - the expected
+numbers are worked out by hand. Writing is checked against a tiny shape block assembled here
+from the BSTriShape layout, and against a real NIF from PyNifly: the sphere NifPatch reads
+must match the one PyNifly reads - otherwise the layout is the wrong one.
 """
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from morphbench.nifpatch import NifPatch
 
 class TestEnclosingSphere(unittest.TestCase):
     def test_covers_everything_and_is_tight(self):
-        """Точки на сфере радиуса 5 вокруг (1,2,3): шар накрывает все и не шире 5.5."""
+        """Points on a sphere of radius 5 around (1,2,3): covered by a sphere no wider than 5.5."""
         rng = np.random.default_rng(3)
         v = rng.normal(size=(500, 3)).astype(np.float32)
         pts = np.array([1, 2, 3], np.float32) + 5.0 * v / np.linalg.norm(v, axis=1, keepdims=True)
@@ -33,7 +33,7 @@ class TestEnclosingSphere(unittest.TestCase):
         self.assertLess(float(np.linalg.norm(s.centre - [1, 2, 3])), 0.6)
 
     def test_never_worse_than_the_start(self):
-        """Названный центр - кандидат: шар не выйдет шире, чем от него."""
+        """A named centre is a candidate: the sphere comes out no wider than it would from there."""
         pts = np.array([[0, 0, 0], [10, 0, 0], [0, 10, 0]], np.float32)
         start = np.array([5, 5, 0], np.float32)
         s = enclosing_sphere(pts, start=start)
@@ -45,8 +45,8 @@ class TestEnclosingSphere(unittest.TestCase):
 
 class TestReach(unittest.TestCase):
     def setUp(self):
-        # Сетка 4x4 в плоскости z=0; морф Up поднимает вершину 15 на 20 вверх,
-        # морф Down опускает вершину 0 на 6 вниз.
+        # A 4x4 grid in the plane z=0; the morph Up lifts vertex 15 by 20,
+        # the morph Down drops vertex 0 by 6.
         self.rest = grid("body", 4, 4).verts
         self.deltas = {"Up": np.zeros((16, 3), np.float32), "Down": np.zeros((16, 3), np.float32)}
         self.deltas["Up"][15, 2] = 20.0
@@ -65,7 +65,8 @@ class TestReach(unittest.TestCase):
         s = r.needed()
         top = self.rest[15] + [0, 0, 20]
         self.assertLessEqual(float(np.linalg.norm(top - s.centre)), s.radius + 1e-3)
-        # Тесно: сфера через (0,0,-6) - вершина 0 под морфом Down - и (3,3,20): r = 13.17.
+        # Tight: the sphere through (0,0,-6) - vertex 0 under the morph Down - and
+        # (3,3,20): r = 13.17.
         self.assertLess(s.radius, 13.4)
         self.assertGreater(s.radius, 13.0)
 
@@ -83,9 +84,10 @@ class TestReach(unittest.TestCase):
         self.assertEqual(single, "Up=1")
 
     def test_corner_of_two_sliders_is_covered(self):
-        """Два ползунка вместе уводят дальше любого одного и дальше «худшего набора»
-        по направлению: полоска 7x3, Up, Forward и встречный Back. Радиус нужного шара
-        обязан накрыть угол Up=1, Forward=1, и reach_exact называет этот угол."""
+        """Two sliders together carry a vertex farther than either one alone and farther
+        than the "worst set" taken along the direction: a 7x3 strip with Up, Forward and an
+        opposing Back. The radius of the needed sphere must cover the corner Up=1, Forward=1,
+        and reach_exact names that corner."""
         rest = grid("body", 7, 3).verts
         n = rest.shape[0]
         d = {"Up": np.tile([0, 0, 8.0], (n, 1)).astype(np.float32),
@@ -99,7 +101,7 @@ class TestReach(unittest.TestCase):
         self.assertAlmostEqual(far, s.radius, places=3)
         self.assertEqual(over, 0)
         self.assertEqual(set(state.split(",")), {"Up=1", "Forward=1"})
-        # Перебор всех углов вручную - тот же ответ.
+        # Every corner tried by hand - the same answer.
         best = 0.0
         for mask in range(8):
             pts = rest + sum(list(d.values())[j] for j in range(3) if (mask >> j) & 1)
@@ -124,9 +126,9 @@ class TestFacadeBounds(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         skin = grid("body", 4, 4)
-        skin.bound = Sphere([1.5, 1.5, 0.0], 2.2)          # как в файле: только покой
+        skin.bound = Sphere([1.5, 1.5, 0.0], 2.2)          # as in the file: rest only
         skin.block = 7
-        fur = grid("fur", 4, 4, z=1.0)                      # без шара в файле
+        fur = grid("fur", 4, 4, z=1.0)                      # no sphere in the file
         up = morph("Up", "body", [15], [(0, 0, 20)])
         self.bench = bench(self.tmp.name, model(skin, fur), morph_set(up))
 
@@ -161,25 +163,25 @@ class TestFacadeBounds(unittest.TestCase):
                                base * 1.1, places=3)
 
 
-# ---- запись: блок части, собранный по раскладке ------------------------------------------
+# ---- writing: a shape block assembled from the layout ------------------------------------
 def shape_block(extra_refs: int, centre=(1.0, 2.0, 3.0), radius: float = 4.0) -> bytes:
-    """Голова BSTriShape до шара охвата включительно; хвост блока - нули."""
+    """The head of a BSTriShape down to the bounding sphere included; the rest is zeroes."""
     b = bytearray()
-    b += struct.pack("<I", 0)                       # имя
+    b += struct.pack("<I", 0)                       # name
     b += struct.pack("<I", extra_refs) + struct.pack("<%dI" % extra_refs, *([9] * extra_refs))
-    b += struct.pack("<I", 0xFFFFFFFF)              # контроллер
-    b += struct.pack("<I", 14)                      # флаги
-    b += struct.pack("<3f", 0, 0, 0)                # перенос
-    b += struct.pack("<9f", 1, 0, 0, 0, 1, 0, 0, 0, 1)   # поворот
-    b += struct.pack("<f", 1.0)                     # масштаб
-    b += struct.pack("<I", 0xFFFFFFFF)              # коллизия
-    b += struct.pack("<4f", *centre, radius)        # шар охвата
+    b += struct.pack("<I", 0xFFFFFFFF)              # controller
+    b += struct.pack("<I", 14)                      # flags
+    b += struct.pack("<3f", 0, 0, 0)                # translation
+    b += struct.pack("<9f", 1, 0, 0, 0, 1, 0, 0, 0, 1)   # rotation
+    b += struct.pack("<f", 1.0)                     # scale
+    b += struct.pack("<I", 0xFFFFFFFF)              # collision
+    b += struct.pack("<4f", *centre, radius)        # bounding sphere
     b += bytes(40)
     return bytes(b)
 
 
 def tiny_nif(blocks: list[tuple[str, bytes]], bs_version: int = 100) -> bytes:
-    """Заголовок NIF того вида, который читает NifPatch, и блоки за ним."""
+    """A NIF header of the kind NifPatch reads, and the blocks behind it."""
     kinds = sorted({k for k, _ in blocks})
     out = bytearray(b"Gamebryo File Format, Version 20.2.0.7\n")
     out += struct.pack("<IBI", 0x14020007, 1, 12)
@@ -236,7 +238,7 @@ class TestBoundsPatch(unittest.TestCase):
             NifPatch(old).read_bounds(0)
 
     def test_real_file_from_pynifly_reads_the_same_sphere(self):
-        """Настоящий NIF: шар, прочитанный по раскладке, совпадает с тем, что читает PyNifly."""
+        """A real NIF: the sphere read from the layout is the one PyNifly reads."""
         cfg = common.config(self.tmp.name)
         pynifly = common.load_pynifly(cfg)
         nif_path = common.write_nif(pynifly, Path(self.tmp.name) / "real.nif", {"body": {
@@ -259,12 +261,13 @@ class TestBoundsPatch(unittest.TestCase):
         from morphbench import MorphBench
         b = MorphBench(cfg)
         b.open(nif_path, tri="", skeleton="")
-        with self.assertRaises(ValueError):                       # без морфов писать нечего
+        with self.assertRaises(ValueError):                       # no morphs, nothing to write
             b.bounds_write(Path(self.tmp.name) / "x.nif")
         b.morph_set = morph_set(morph("Up", "body", [3], [(0, 0, 30)]))
-        with self.assertRaises(ValueError):                       # поверх исходника нельзя
+        with self.assertRaises(ValueError):                       # no writing over the source
             b.bounds_write(nif_path)
-        # Намеренно широкий шар - в самом файле, как его оставил бы человек под SMP.
+        # A deliberately wide sphere in the file itself, the way a person would leave it
+        # for SMP.
         patch = NifPatch(nif_path)
         patch.write_bounds(b.model.shape("body").block, (1, 1, 15), 50.0)
         wide = patch.save(Path(self.tmp.name) / "wide2.nif")
@@ -277,7 +280,8 @@ class TestBoundsPatch(unittest.TestCase):
         self.assertEqual(out["shapes"], ["body"])
 
     def test_bounds_write_makes_a_new_file_that_pynifly_reads_back(self):
-        """Запись через фасад: новый файл, старый цел, PyNifly читает новый шар."""
+        """Writing through the facade: a new file, the old one intact, and PyNifly reads
+        the new sphere."""
         cfg = common.config(self.tmp.name)
         pynifly = common.load_pynifly(cfg)
         nif_path = common.write_nif(pynifly, Path(self.tmp.name) / "real.nif", {"body": {

@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Нормали вершин: направление, единичная длина, вес по площади и ползунки.
+"""Vertex normals: the direction, the unit length, the weight by area, and the sliders.
 
-Плоская сетка с обходом против часовой стрелки даёт (0,0,1) в каждой вершине; куб с обходом
-наружу — нормали от центра; вершина без треугольников смотрит вверх. Ловит: перепутанный
-порядок в векторном произведении (нормали внутрь), ненормированную сумму, среднее без веса
-по площади, деление на ноль у одинокой вершины и нормали фасада, посчитанные по исходным
-вершинам вместо деформированных.
+A flat grid wound counter-clockwise gives (0,0,1) at every vertex; a cube wound outwards gives
+normals away from its centre; a vertex with no triangles points up. Catches: the order swapped
+in the cross product (normals pointing inwards), a sum left un-normalised, an average taken
+without the weight by area, a division by zero at a lonely vertex, and facade normals worked
+out from the original vertices instead of the deformed ones.
 """
 import os
 import sys
@@ -26,7 +26,7 @@ UP = np.array([0.0, 0.0, 1.0], dtype=np.float32)
 class TestVertexNormals(unittest.TestCase):
 
     def test_flat_grid_faces_up(self):
-        """Сетка в плоскости XY с обходом против часовой — все нормали (0,0,1)."""
+        """A grid in the XY plane wound counter-clockwise - every normal is (0,0,1)."""
         g = common.grid("g", 5, 4)
         n = vertex_normals(g.verts, g.tris)
         self.assertEqual(n.shape, (20, 3))
@@ -34,22 +34,22 @@ class TestVertexNormals(unittest.TestCase):
         self.assertTrue(np.allclose(n, UP, atol=1e-6), n)
 
     def test_reversed_winding_faces_down(self):
-        """Тот же обход в обратную сторону — все нормали (0,0,-1): направление берётся
-        из порядка вершин, а не из положения в пространстве."""
+        """The same grid wound the other way - every normal is (0,0,-1): the direction comes
+        from the order of the vertices, not from where they lie in space."""
         g = common.grid("g", 5, 4)
         n = vertex_normals(g.verts, g.tris[:, ::-1])
         self.assertTrue(np.allclose(n, -UP, atol=1e-6), n)
 
     def test_cube_normals_point_outward(self):
-        """У куба с обходом наружу нормаль каждой вершины смотрит от центра: скалярное
-        произведение с радиус-вектором положительно, и у угла с тремя равными гранями
-        это ровно диагональ (±1,±1,±1)/√3."""
+        """On a cube wound outwards the normal of every vertex points away from the centre:
+        the dot product with the radius vector is positive, and at a corner where three equal
+        faces meet it is exactly the diagonal (±1,±1,±1)/√3."""
         c = solids.cube(half=2.0, centre=(1.0, -3.0, 0.5))
         n = vertex_normals(c.verts, c.tris)
         radial = c.verts - np.array([1.0, -3.0, 0.5], dtype=np.float32)
         dots = np.einsum("ij,ij->i", n, radial / np.linalg.norm(radial, axis=1, keepdims=True))
         self.assertTrue(np.all(dots > 0.5), dots)
-        # Вершина 0 держит по два треугольника каждой из трёх граней — все веса равны.
+        # Vertex 0 holds two triangles of each of the three faces - every weight is equal.
         self.assertTrue(np.allclose(n[0], -np.ones(3) / np.sqrt(3.0), atol=1e-6), n[0])
         for tri in c.tris:
             face = solids.face_normal(c.verts, tri)
@@ -57,8 +57,8 @@ class TestVertexNormals(unittest.TestCase):
                 self.assertGreater(float(n[i] @ face), 0.0, (tri, i))
 
     def test_lonely_vertex_and_no_triangles(self):
-        """Вершина, которой нет ни в одном треугольнике, — (0,0,1), а не NaN; без
-        треугольников вовсе — так у всех."""
+        """A vertex that belongs to no triangle is (0,0,1), not NaN; and when there are no
+        triangles at all, that goes for every vertex."""
         verts = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [7, 7, 7]], dtype=np.float32)
         n = vertex_normals(verts, np.array([[0, 1, 2]], dtype=np.int32))
         self.assertTrue(np.allclose(n[:3], UP, atol=1e-6))
@@ -70,7 +70,7 @@ class TestVertexNormals(unittest.TestCase):
             self.assertTrue(np.all(n == UP), n)
 
     def test_unit_length(self):
-        """Все нормали единичной длины, даже там, где сходятся треугольники разной площади."""
+        """Every normal is of unit length, even where triangles of different areas meet."""
         c = solids.cube(half=3.0)
         for verts, tris in ((c.verts, c.tris),
                             (np.array([[0, 0, 0], [10, 0, 0], [0, 10, 0], [1, 0, 0], [0, 0, 1]],
@@ -80,9 +80,9 @@ class TestVertexNormals(unittest.TestCase):
             self.assertTrue(np.allclose(np.linalg.norm(n, axis=1), 1.0, atol=1e-6), n)
 
     def test_area_weighted(self):
-        """Большой треугольник в XY (площадь 50, нормаль +Z) и крошечный в XZ (площадь 0.5,
-        нормаль -Y) сходятся в вершине 0: с весом по площади её нормаль почти +Z
-        (z ≈ 0.99995), без веса была бы (0,-1,1)/√2 с z ≈ 0.71."""
+        """A big triangle in XY (area 50, normal +Z) and a tiny one in XZ (area 0.5, normal −Y)
+        meet at vertex 0: with the weight by area its normal is almost +Z (z ≈ 0.99995), and
+        without the weight it would be (0,-1,1)/√2 with z ≈ 0.71."""
         verts = np.array([[0, 0, 0], [10, 0, 0], [0, 10, 0], [1, 0, 0], [0, 0, 1]], np.float32)
         tris = np.array([[0, 1, 2], [0, 3, 4]], np.int32)
         n = vertex_normals(verts, tris)
@@ -96,10 +96,10 @@ class TestVertexNormals(unittest.TestCase):
 
 
 class TestFacadeNormals(unittest.TestCase):
-    """MorphBench.vertex_normals считает по деформированным вершинам."""
+    """MorphBench.vertex_normals works from the deformed vertices."""
 
     NX = NY = 4
-    RAISED = 5          # вершина (1, 1): её поднимает морф Bump
+    RAISED = 5          # vertex (1, 1): the Bump morph lifts it
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -113,8 +113,8 @@ class TestFacadeNormals(unittest.TestCase):
         self.assertTrue(np.allclose(n, UP, atol=1e-6))
 
     def test_slider_tilts_neighbours_only(self):
-        """После Bump = 1 вершина 1 (сосед поднятой) наклонена, вершина 0 и дальний
-        угол 15 — нет; результат совпадает с vertex_normals по deformed()."""
+        """After Bump = 1 vertex 1 (a neighbour of the lifted one) is tilted, while vertex 0
+        and the far corner 15 are not; the result matches vertex_normals over deformed()."""
         self.bench.set_slider("Bump", 1.0)
         n = self.bench.vertex_normals("body")
         self.assertTrue(np.allclose(n[0], UP, atol=1e-6), n[0])
@@ -124,7 +124,7 @@ class TestFacadeNormals(unittest.TestCase):
         shape = self.bench.model.shape("body")
         expected = vertex_normals(self.bench.deformed("body"), shape.tris)
         self.assertTrue(np.allclose(n, expected, atol=1e-7))
-        # Половина сдвига — половина наклона: нормаль вершины 1 лежит между ровной и полной.
+        # Half the shift - half the tilt: the normal of vertex 1 lies between flat and full.
         self.bench.set_slider("Bump", 0.5)
         half = self.bench.vertex_normals("body")
         self.assertGreater(float(half[1, 2]), float(n[1, 2]))
@@ -133,7 +133,8 @@ class TestFacadeNormals(unittest.TestCase):
         self.assertTrue(np.allclose(self.bench.vertex_normals("body"), UP, atol=1e-6))
 
     def test_source_normals_untouched(self):
-        """Нормали из файла (Shape.normals) фасад не подменяет: это отдельное поле."""
+        """The normals out of the file (Shape.normals) are not replaced by the facade: that is
+        a field of its own."""
         shape = self.bench.model.shape("body")
         self.assertIsNone(shape.normals)
         self.bench.set_slider("Bump", 1.0)

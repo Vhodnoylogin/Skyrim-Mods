@@ -1,13 +1,14 @@
-"""Слой показа: картинка PNG прямо из чисел ядра.
+"""Presentation layer: a PNG straight out of the core's numbers.
 
-Своими средствами, без Blender и без игры: ортографическая камера, буфер глубины и затенение
-по нормали вершины. Тело вервольфа - тридцать четыре тысячи треугольников - рисуется за секунды,
-а не за минуту, и это единственное, ради чего слой существует: увидеть результат сразу
-после сборки, а не в следующем игровом прогоне.
+By its own means, without Blender and without the game: an orthographic camera, a depth
+buffer and shading by vertex normal. A body of thirty-four thousand triangles is drawn in
+seconds rather than in a minute, and that is the one thing this layer exists for: to see
+the result right after a build instead of in the next run of the game.
 
-Ничего не вычисляет сам. Вершины берёт у `MorphBench.deformed`, нормали - у `vertex_normals`,
-кадр - у `framing`, признак раскраски - у `vertex_colour_key`, направление и силы света -
-у `ViewState`. Перевод признака в цвет живёт здесь, потому что цвет - это уже показ.
+It works nothing out for itself. Vertices come from `MorphBench.deformed`, normals from
+`vertex_normals`, the frame from `framing`, the colouring key from `vertex_colour_key`, the
+direction and the powers of the light from `ViewState`. Turning a key into a colour lives
+here, because a colour is already presentation.
 """
 from __future__ import annotations
 
@@ -22,17 +23,17 @@ from morphbench.i18n import t
 
 
 class Raster:
-    """Растеризатор поверх фасада."""
+    """The rasteriser on top of the facade."""
 
     def __init__(self, bench):
         self.bench = bench
         self.cfg = bench.cfg
 
-    # ---- цвета ------------------------------------------------------------------------
+    # ---- colours ----------------------------------------------------------------------
     @staticmethod
     def _bone_palette(count: int) -> np.ndarray:
-        """Разные кости — заметно разные цвета. Золотой угол по кругу оттенков даёт
-        соседям контраст, а не соседний оттенок одного цвета."""
+        """Different bones - visibly different colours. The golden angle around the hue
+        circle gives neighbours contrast, not the next shade of the same colour."""
         out = np.zeros((max(count, 1), 3), dtype=np.float32)
         for i in range(max(count, 1)):
             h = (i * 0.61803398875) % 1.0
@@ -43,7 +44,7 @@ class Raster:
 
     @staticmethod
     def _heat(values: np.ndarray) -> np.ndarray:
-        """Серое - ноль, дальше жёлтое и красное. Для величины сдвига и растяжения."""
+        """Grey is zero, then yellow and red. For the size of a shift and for strain."""
         v = np.asarray(values, dtype=np.float32)
         top = float(v.max()) if v.size else 0.0
         share = np.zeros_like(v) if top <= 1e-6 else np.clip(v / top, 0.0, 1.0)
@@ -66,9 +67,9 @@ class Raster:
             return col
         return self._heat(key)
 
-    # ---- геометрия сцены --------------------------------------------------------------
+    # ---- the geometry of the scene ----------------------------------------------------
     def _collect(self):
-        """Все видимые части в одном массиве: вершины, нормали, треугольники, цвета вершин."""
+        """Every visible shape in one array: vertices, normals, triangles, vertex colours."""
         verts, norms, tris, cols = [], [], [], []
         base = 0
         for name in self.bench.visible_shapes():
@@ -86,25 +87,25 @@ class Raster:
             raise RuntimeError(t("core.nothingToDraw"))
         return (np.vstack(verts), np.vstack(norms), np.vstack(tris), np.vstack(cols))
 
-    # ---- свет -------------------------------------------------------------------------
+    # ---- light ------------------------------------------------------------------------
     def _lit(self, normals: np.ndarray) -> np.ndarray:
-        """Сила света на нормали: рассеянная плюс направленная с той стороны, откуда светит,
-        плюс встречная подсветка с противоположной - чтобы тень не была слепой."""
+        """The power of the light on a normal: ambient, plus directional from the side the
+        light comes from, plus a fill from the opposite one - so the shadow is not blind."""
         view = self.bench.view
         light = np.asarray(view.light_vector(), dtype=np.float32)
         lam = normals @ light
         return (view.ambient + view.diffuse * np.clip(lam, 0.0, 1.0)
                 + view.fill * np.clip(-lam, 0.0, 1.0)).astype(np.float32)
 
-    # ---- рисование --------------------------------------------------------------------
+    # ---- drawing ----------------------------------------------------------------------
     def _screen(self, verts: np.ndarray):
-        """Вершины в координатах холста: вправо, вниз и глубина от зрителя."""
+        """Vertices in canvas coordinates: right, down, and depth away from the viewer."""
         view = self.bench.view
         w, h = view.width, view.height
         basis = view.basis()
-        # Кадр - вся модель, сфера наведения или панорама - решает ядро.
+        # The frame - the whole model, the focus sphere or a pan - is the core's decision.
         centre, half = self.bench.framing()
-        local = (verts - centre) @ basis.T          # x вправо, y вверх, z от зрителя
+        local = (verts - centre) @ basis.T          # x right, y up, z away from the viewer
         scale = ((min(w, h) * float(self.cfg["frameFill"]))
                  / max(half * 2.0, 1e-3) * view.zoom)
         return (local[:, 0] * scale + w * 0.5,
@@ -120,11 +121,12 @@ class Raster:
     def _paint(self, colour: np.ndarray, zbuf: np.ndarray, verts: np.ndarray,
                normals: np.ndarray, tris: np.ndarray, vcols: np.ndarray,
                alpha: float = 1.0) -> None:
-        """Треугольники в холст с проверкой глубины - один путь и для кожи, и для капсул.
+        """Triangles onto the canvas with a depth test - one path for the skin and for the
+        capsules alike.
 
-        Затенение. Мягкое - свет считается в вершинах и растягивается по треугольнику
-        вместе с цветом; плоское - одна сила света на треугольник, по его нормали.
-        `alpha` меньше единицы подмешивает цвет к тому, что на холсте уже есть.
+        Shading. Smooth - the light is worked out at the vertices and stretched across the
+        triangle together with the colour; flat - one power of light per triangle, from its
+        own normal. An `alpha` below one blends the colour into what is on the canvas already.
         """
         h, w = zbuf.shape
         sx, sy, depth = self._screen(verts)
@@ -193,13 +195,14 @@ class Raster:
         return Image.fromarray((colour * 255.0).astype(np.uint8), mode="RGB")
 
     def _overlay_colliders(self, colour: np.ndarray) -> None:
-        """Капсулы поверх тела - полупрозрачно, с собственной глубиной.
+        """The capsules over the body - half transparent, with a depth of their own.
 
-        Смысл прозрачности в том, что видно обе оболочки сразу: там, где капсула лежит
-        внутри тела, она просвечивает сквозь кожу, а там, где вылезает наружу, ложится
-        прямо на фон и сразу бросается в глаза. Ради этого капсулы НЕ пишут в общий
-        буфер глубины - иначе они закрыли бы собой то, что мы и хотим с ними сравнить.
-        Бампер кладётся только по просьбе: он вчетверо больше любой части тела.
+        The point of the transparency is that both shells are seen at once: where a capsule
+        lies inside the body it shows through the skin, and where it pokes out it lands
+        straight on the background and catches the eye. That is why the capsules do NOT
+        write into the shared depth buffer - they would otherwise hide the very thing we
+        want to compare them with. The bumper is laid down only when asked for: it is four
+        times the size of any part of the body.
         """
         view = self.bench.view
         chunks = [self.bench.collider_mesh()]
@@ -221,7 +224,7 @@ class Raster:
         return path
 
     def contact_sheet(self, out_dir, views=None, prefix="view") -> list[Path]:
-        """Несколько ракурсов подряд — обычный способ посмотреть, что получилось."""
+        """Several views one after another - the usual way of seeing what came out."""
         out_dir = Path(out_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
         names = list(views) if views else self.bench.view.preset_names()

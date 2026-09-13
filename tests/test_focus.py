@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Наведение камеры: смотреть на кость, морф или часть — числами, центром и радиусом.
+"""Aiming the camera: look at a bone, a morph or a shape - as numbers, a centre and a radius.
 
-Тело — кожа 4×4 на z=0 и оболочка 4×4 на z=1; кости лежат по столбцам, поэтому охват каждой
-цели считается в уме. Ловит: подстроку, сработавшую вместо точного имени (в кадр попадает
-«NPC Handle» вместо «NPC Hand»), наведение, пережившее открытие другого меша, запас кадра,
-не взятый из настроек, и типы numpy, просочившиеся в as_dict().
+The body is a 4x4 skin at z=0 and a 4x4 shell at z=1; the bones lie along the columns, so the
+extent of every target can be worked out in your head. Catches: a substring that fired instead
+of an exact name (`NPC Handle` landing in frame instead of `NPC Hand`), an aim that survived
+opening another mesh, frame padding not taken from the settings, and numpy types that leaked
+into as_dict().
 """
 import json
 import math
@@ -43,7 +44,7 @@ def build(tmpdir, **overrides):
 class TestSphere(unittest.TestCase):
 
     def test_known_points(self):
-        """Центр — середина охвата, радиус — до самой дальней точки."""
+        """The centre is the middle of the extent, the radius reaches the farthest point."""
         centre, radius = sphere_of(np.array([[0, 0, 0], [2, 0, 0], [0, 4, 0]], np.float32))
         self.assertEqual(centre.tolist(), [1.0, 2.0, 0.0])
         self.assertAlmostEqual(radius, math.sqrt(5.0), places=6)
@@ -73,23 +74,23 @@ class TestFocus(unittest.TestCase):
         self.assertEqual(focus["radius"], round(radius, 2))
 
     def test_bone_exact(self):
-        """Кость по точному имени: столбец 2 кожи — x=2, y=0..3."""
+        """A bone by its exact name: column 2 of the skin - x=2, y=0..3."""
         state = self.bench.focus_bone("NPC Finger00")
         self.assertSphere(state["focus"], (2.0, 1.5, 0.0), 1.5, "bone:NPC Finger00")
         self.assertEqual(state, self.bench.view_state())
         self.assertTrue(self.bench.view.has_focus)
 
     def test_bone_substring_joins_bones(self):
-        """По подстроке без учёта регистра собираются оба пальца: столбцы 2-3."""
+        """A substring with the case ignored gathers both fingers: columns 2-3."""
         focus = self.bench.focus_bone("finger")["focus"]
         self.assertSphere(focus, (2.5, 1.5, 0.0), math.sqrt(2.5), "bone:finger")
 
     def test_exact_name_wins_over_substring(self):
-        """«NPC Hand» есть точно — значит «NPC Handle» в кадр не попадает. Обе части:
-        кожа z=0 и оболочка z=1, столбцы 0-1."""
+        """`NPC Hand` is there exactly - so `NPC Handle` does not get into frame. Both
+        shapes: the skin at z=0 and the shell at z=1, columns 0-1."""
         focus = self.bench.focus_bone("NPC Hand")["focus"]
         self.assertSphere(focus, (0.5, 1.5, 0.5), math.sqrt(2.75), "bone:NPC Hand")
-        # А по подстроке «hand» — уже и Handle: вся оболочка плюс половина кожи.
+        # By the substring `hand`, though, Handle as well: the whole shell plus half the skin.
         focus = self.bench.focus_bone("hand")["focus"]
         self.assertSphere(focus, (1.5, 1.5, 0.5), math.sqrt(4.75), "bone:hand")
 
@@ -105,8 +106,8 @@ class TestFocus(unittest.TestCase):
         self.assertIsNone(self.focus())
 
     def test_morph(self):
-        """Область морфа по всем частям: столбцы 2-3 кожи и оболочки, по исходным
-        координатам, без учёта сдвига."""
+        """The area of a morph across every shape: columns 2-3 of the skin and of the shell,
+        by the original coordinates, with the shift left out."""
         focus = self.bench.focus_morph("Up")["focus"]
         self.assertSphere(focus, (2.5, 1.5, 0.5), math.sqrt(2.75), "morph:Up")
         with self.assertRaises(KeyError):
@@ -128,8 +129,8 @@ class TestFocus(unittest.TestCase):
         self.assertFalse(self.bench.view.has_focus)
 
     def test_framing(self):
-        """Без наведения кадр — то, что передал рисующий слой; с наведением — сфера цели
-        с запасом focusPadding из настроек (по умолчанию 1.25)."""
+        """With no aim the frame is what the drawing layer passed in; with an aim it is the
+        sphere of the target plus the focusPadding from the settings (1.25 by default)."""
         centre, half = self.bench.view.framing([9.0, 9.0, 9.0], 42.0)
         self.assertEqual(centre.tolist(), [9.0, 9.0, 9.0])
         self.assertEqual(half, 42.0)
@@ -146,7 +147,8 @@ class TestFocus(unittest.TestCase):
         self.assertAlmostEqual(bench.view.framing([0, 0, 0], 1.0)[1], math.sqrt(4.5) * 2.0, places=5)
 
     def test_as_dict_rounded_and_plain(self):
-        """Центр и радиус округлены до сотых, типы — обычные, json их принимает."""
+        """The centre and the radius are rounded to hundredths, and the types are plain ones -
+        json takes them."""
         self.bench.focus_bone("finger")
         focus = self.focus()
         self.assertEqual(set(focus), {"name", "centre", "radius"})
@@ -156,7 +158,7 @@ class TestFocus(unittest.TestCase):
         json.dumps(self.bench.view_state())
 
     def test_radius_floor(self):
-        """Наведение на точку не даёт нулевой сферы: радиус не меньше 0.001."""
+        """Aiming at a point gives no sphere of zero: the radius is never under 0.001."""
         self.bench.view.focus_on([1.0, 1.0, 1.0], 0.0, "point")
         self.assertEqual(self.bench.view.focus_radius, 1e-3)
 
@@ -169,7 +171,7 @@ class TestFocus(unittest.TestCase):
         self.assertIsNone(self.focus())
 
     def test_open_resets_focus(self):
-        """open() тоже сбрасывает наведение; нужен настоящий меш — пишется PyNifly."""
+        """open() clears the aim as well; it needs a real mesh, so PyNifly writes one."""
         pynifly = common.load_pynifly(self.bench.cfg)
         nif = common.write_nif(pynifly, Path(self.tmp.name) / "tiny.nif", {"body": {
             "verts": [(0, 0, 0), (1, 0, 0), (0, 1, 0)], "tris": [(0, 1, 2)],
@@ -181,14 +183,14 @@ class TestFocus(unittest.TestCase):
         self.assertIsNone(summary["tri"])
 
     def test_targets(self):
-        """Перечень целей: все кости (по всем частям), непустые морфы, все части; у каждой
-        центр и радиус те же, что даст наведение на неё."""
-        t = self.bench.focus_targets()
-        self.assertEqual([b["name"] for b in t["bones"]],
+        """The list of targets: every bone (across every shape), the morphs that are not
+        empty, every shape; each with the centre and the radius that aiming at it would give."""
+        targets = self.bench.focus_targets()
+        self.assertEqual([b["name"] for b in targets["bones"]],
                          ["NPC Finger00", "NPC Finger01", "NPC Hand", "NPC Handle"])
-        self.assertEqual([m["name"] for m in t["morphs"]], ["Up"])
-        self.assertEqual([s["name"] for s in t["shapes"]], ["body", "fur"])
-        by_name = {kind: common.by_key(t[kind], "name") for kind in t}
+        self.assertEqual([m["name"] for m in targets["morphs"]], ["Up"])
+        self.assertEqual([s["name"] for s in targets["shapes"]], ["body", "fur"])
+        by_name = {kind: common.by_key(targets[kind], "name") for kind in targets}
         for bone in by_name["bones"]:
             focus = self.bench.focus_bone(bone)["focus"]
             self.assertEqual((focus["centre"], focus["radius"]),
@@ -199,7 +201,7 @@ class TestFocus(unittest.TestCase):
         focus = self.bench.focus_shape("fur")["focus"]
         self.assertEqual((focus["centre"], focus["radius"]),
                          (by_name["shapes"]["fur"]["centre"], by_name["shapes"]["fur"]["radius"]))
-        self.assertTrue(common.is_plain(t))
+        self.assertTrue(common.is_plain(targets))
 
     def test_targets_without_morphs(self):
         bench = common.bench(self.tmp.name, self.bench.model, None)
@@ -207,7 +209,8 @@ class TestFocus(unittest.TestCase):
 
 
 class TestViewStateAlone(unittest.TestCase):
-    """ViewState без фасада: наведение — просто сфера, ей всё равно, что это."""
+    """ViewState without the facade: an aim is just a sphere, and what the sphere is does not
+    matter to it."""
 
     def test_focus_on_and_dict(self):
         with tempfile.TemporaryDirectory() as tmp:

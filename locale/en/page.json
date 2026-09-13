@@ -1,5 +1,6 @@
 {
   "#": "The viewer page: section titles, buttons, notes and script refusals.",
+  "#frameFile": "page.frameFile is a file name inside the mb.py render line the panel shows, not a text: it stays frame.png in every language.",
   "page.allHidden": "every shape is hidden - the rasteriser has nothing to draw.",
   "page.browseFolder": "browse folder",
   "page.btnBrowse": "browse",
@@ -11,7 +12,6 @@
   "page.btnZoom11": "zoom 1:1",
   "page.cannotStart": "The viewer could not start: ",
   "page.capsulesNote": "translucent over the body; colour and opacity - colliderColour and colliderOpacity from the settings",
-  "page.capsulesOf": " · capsules ",
   "page.chooseMesh": "pick a mesh from the list on the panel",
   "page.colourMorphNote": "morph for the modes",
   "page.errAllHidden": "nothing to show: every shape of the mesh is hidden",

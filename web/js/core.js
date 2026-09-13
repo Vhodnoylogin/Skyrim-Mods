@@ -1,29 +1,30 @@
 "use strict";
 
-// ---- данные страницы и подстановка надписей ----------------------------------------------
+// ---- page data and the substitution of texts ----------------------------------------------
 const DATA = JSON.parse(document.getElementById("mb-data").textContent);
-// Надписи страницы приходят готовыми из словаря языка: в скрипте их нет, как и в ядре.
+// The page's texts arrive ready-made from the language catalogue: the script carries none of
+// them, and neither does the core.
 const T = DATA.texts;
-// Подстановка ИМЕНАМИ, а не по месту: в другом языке порядок слов другой.
+// Substitution BY NAME, not by position: another language puts the words in another order.
 function say(text, values) {
   return String(text).replace(/%\((\w+)\)s/g, (whole, name) =>
     name in values ? String(values[name]) : whole);
 }
 
-// ---- вспомогательное --------------------------------------------------------------------
+// ---- helpers ------------------------------------------------------------------------------
 const mod360 = (x) => ((x % 360) + 360) % 360;
 const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
-// Округление как у round() в Python - к ближайшему чётному на ровной половине, - чтобы
-// as_dict страницы и ядра давали одни и те же числа.
+// Rounding as Python's round() does it - half to even on an exact half - so that as_dict of
+// the page and of the core print the same numbers.
 const rnd = (x, digits) => {
   const k = Math.pow(10, digits), s = x * k;
   if (Number.isInteger(s * 2) && !Number.isInteger(s)) {
-    // Точная двоичная половина (0.125, 22.25): к чётному, как round() в Python.
+    // An exact binary half (0.125, 22.25): to the even side, as Python's round() does.
     const f = Math.floor(s);
     return (f % 2 === 0 ? f : f + 1) / k;
   }
-  // Остальное - к ближайшему по десятичной записи: toFixed округляет верно там, где
-  // произведение x·k уже наврало бы в последнем знаке.
+  // Everything else - to the nearest by its decimal spelling: toFixed rounds correctly where
+  // the product x * k would already have lied in the last digit.
   return Number(x.toFixed(digits));
 };
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -43,9 +44,9 @@ function el(tag, attrs, children) {
   return node;
 }
 
-// ---- распаковка вложенных массивов ------------------------------------------------------
-// Каждый массив приходит строкой base64; раскладывается в свежий буфер, поэтому смещение
-// нулевое и типизированное представление ложится на него без выравнивания.
+// ---- unpacking the embedded arrays --------------------------------------------------------
+// Every array arrives as a base64 string; it is laid out into a fresh buffer, so the offset is
+// zero and the typed view sits on it without any alignment trouble.
 const Codec = {
   bytes(b64) {
     const bin = atob(b64), n = bin.length, out = new Uint8Array(n);
@@ -62,12 +63,12 @@ const Codec = {
   },
 };
 
-// ---- палитры: перенос из presenters/raster.py один в один --------------------------------
+// ---- palettes: carried over from presenters/raster.py one for one -------------------------
 const Palette = {
   NO_BONE: [0.30, 0.30, 0.33],
   SHADE: 0.72,
 
-  // colorsys.hsv_to_rgb из стандартной библиотеки Python, чтобы цвета сошлись до бита.
+  // colorsys.hsv_to_rgb out of Python's standard library, so the colours agree to the bit.
   hsvToRgb(h, s, v) {
     if (s === 0.0) return [v, v, v];
     let i = Math.trunc(h * 6.0);
@@ -82,7 +83,7 @@ const Palette = {
     return [v, p, q];
   },
 
-  // Разные кости - заметно разные цвета: золотой угол по кругу оттенков.
+  // Different bones want plainly different colours: the golden angle around the hue circle.
   bones(count) {
     const n = Math.max(count, 1), out = new Float32Array(n * 3);
     for (let i = 0; i < n; i++) {
@@ -95,8 +96,8 @@ const Palette = {
     return out;
   },
 
-  // Серое - ноль, дальше жёлтое и красное; нормировка на максимум переданного признака -
-  // как в растеризаторе, где признак берётся по одной части меша.
+  // Grey is zero, then yellow, then red; scaled against the largest of the values handed in -
+  // as in the rasteriser, where the value is taken over one shape of the mesh.
   heat(values) {
     const n = values.length, out = new Float32Array(n * 3);
     let top = 0.0;
@@ -111,10 +112,10 @@ const Palette = {
   },
 };
 
-// ---- зеркало morphbench/model.py: vertex_normals ------------------------------------------
-// Нормаль в каждой вершине: сумма нормалей прилегающих треугольников, взвешенных их площадью
-// (длина векторного произведения - удвоенная площадь, вес выходит сам собой), приведённая
-// к единичной длине. Вершина без треугольников смотрит вверх, (0, 0, 1).
+// ---- mirror of morphbench/model.py: vertex_normals ----------------------------------------
+// The normal at a vertex: the normals of the triangles around it summed with their areas as
+// weights (the length of the cross product is twice the area, so the weight falls out on its
+// own), then brought to unit length. A vertex with no triangles looks up, (0, 0, 1).
 function vertexNormals(pos, tris, out) {
   out.fill(0);
   for (let t = 0, n = tris.length; t < n; t += 3) {

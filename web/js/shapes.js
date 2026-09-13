@@ -1,23 +1,24 @@
 "use strict";
 
-// ---- данные ядра, как они вложены в страницу ----------------------------------------------
+// ---- the core's data, in the shape it was embedded into the page --------------------------
 class Shape {
   constructor(raw) {
     this.name = raw.name;
-    this.base = Codec.f32(raw.vertices);          // исходные вершины, не трогаются
-    this.pos = new Float32Array(this.base);        // вершины с применёнными ползунками
-    this.nrm = new Float32Array(this.base.length); // нормали вершин по деформированным позициям
+    this.base = Codec.f32(raw.vertices);          // the vertices as they came, never touched
+    this.pos = new Float32Array(this.base);        // the vertices with the sliders applied
+    this.nrm = new Float32Array(this.base.length); // vertex normals over the deformed positions
     this.count = raw.vertexCount;
     this.tris = Codec.index(raw.triangles, raw.indexType);
     this.triCount = this.tris.length / 3;
     this.boneKey = Codec.i16(raw.boneKey);
     this.boneNames = raw.boneNames;
-    this.heldBones = raw.heldBones;      // кости с вершинами: по ним видимость капсул
+    this.heldBones = raw.heldBones;      // bones that hold vertices: they decide which capsules show
   }
 }
 
 class Deltas {
-  // Смещения одного морфа на одной части: номера вершин и int16-векторы с общим множителем.
+  // The offsets of one morph on one shape: vertex numbers and int16 vectors with one shared
+  // multiplier.
   constructor(raw) {
     this.indices = Codec.index(raw.indices, raw.indexType);
     this.q = Codec.i16(raw.offsets);
@@ -52,10 +53,11 @@ class Strain {
   }
 }
 
-// Кусок капсул - капсулы одной кости либо бампер, - как его отдают collider_meshes() и
-// bumper_mesh() фасада: уже в мировых координатах, без морфов, поэтому ползунки его
-// не трогают и нормали считаются один раз. Поля те же, что у Shape, - рисующему всё равно;
-// bone - кость, на которой висит кусок (у бампера null).
+// A chunk of collider geometry - the capsules of one bone, or the bumper - exactly as the
+// facade's collider_meshes() and bumper_mesh() hand it over: already in world coordinates and
+// without morphs, so the sliders never move it and its normals are computed once. The fields
+// are the same as Shape's - the renderer does not care which of the two it got; `bone` is the
+// bone the chunk hangs on (null for the bumper).
 class ColliderMesh {
   constructor(name, raw, bone) {
     this.name = name;
