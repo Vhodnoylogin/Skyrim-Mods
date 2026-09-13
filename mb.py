@@ -526,6 +526,10 @@ def cmd_serve(args) -> int:
         raise
     if args.nif:
         bench.open(args.nif, args.tri, getattr(args, "skeleton", None))
+    if getattr(args, "parent", None):
+        # Уйти вместе с тем, кто поднял: иначе жёстко снятое окно оставляет невидимый
+        # сервер на живой подмене MO2, к которому следующий запуск молча подключится.
+        server.watch_parent(args.parent)
     _out(args, {"started": True, "url": server.url,
                 "root": None if server.root is None else str(server.root),
                 "insideMo2": bench.environment()["insideMo2"]} if args.json else
@@ -762,6 +766,8 @@ def main(argv=None) -> int:
     p.add_argument("--all", action="store_true", help="и меши без файла морфов")
     p.add_argument("--no-browser", dest="no_browser", action="store_true",
                    help="не открывать браузер самому")
+    p.add_argument("--parent", type=int, default=None,
+                   help="номер процесса, за которым сервер уходит; без него сторожа нет")
     p.add_argument("--status", action="store_true", help="жив ли сервер на этом адресе")
     p.add_argument("--stop", action="store_true", help="остановить поднятый сервер")
     p.add_argument("--json", action="store_true", default=argparse.SUPPRESS)

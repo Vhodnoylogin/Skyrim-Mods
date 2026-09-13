@@ -12,7 +12,9 @@ import contextlib
 import json
 import os
 import sys
+import subprocess
 import tempfile
+import time
 import unittest
 import urllib.error
 import urllib.parse
@@ -254,6 +256,77 @@ class TestDeadJournal(unittest.TestCase):
             lines = "\n".join(kept.lines)
             self.assertIn("/api/catalog", lines)
             self.assertIn("выбыл", lines)
+
+
+@unittest.skipIf(WebServer is None, "нет presenters/serve.py")
+class TestParentWatch(unittest.TestCase):
+    """Сервер уходит вместе с тем, кто его поднял.
+
+    Мирно закрытое окно останавливает сервер само; снятое жёстко — не успевает, и остаётся
+    невидимый процесс на живой подмене MO2, к которому следующий запуск молча подключится,
+    потому что точка входа идемпотентна. Поэтому сервер ждёт родителя сам.
+    """
+
+    @staticmethod
+    def child(seconds: float):
+        """Короткоживущий процесс вместо окна запуска."""
+        return subprocess.Popen([sys.executable, "-c", "import time; time.sleep(%r)" % seconds],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def test_process_alive_and_wait(self):
+        from morphbench.environment import process_alive, wait_process
+        p = self.child(1.0)
+        self.assertTrue(process_alive(p.pid))
+        wait_process(p.pid)                       # возвращается ровно когда процесс умер
+        self.assertFalse(process_alive(p.pid))
+        p.wait(timeout=5)
+        self.assertFalse(process_alive(999999))   # несуществующий номер - не жив
+        self.assertFalse(process_alive(0))
+
+    def test_server_leaves_with_the_parent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bench = MorphBench(common.config(tmp))
+            with quiet():
+                server = WebServer(bench, root=tmp, host="127.0.0.1", port=0).start()
+            base = server.url.rstrip("/")
+            parent = self.child(1.5)
+            try:
+                server.watch_parent(parent.pid)
+                self.assertEqual(get(base + "/api/environment")[0], 200)
+                parent.wait(timeout=15)
+                # Отказ бывает разный — отказано в соединении, разорвано хозяином, —
+                # и все они OSError; важно, что ответа больше нет.
+                for _ in range(60):               # сторож просыпается на смерти родителя
+                    try:
+                        get(base + "/api/environment")
+                    except OSError:
+                        break
+                    time.sleep(0.2)
+                # Порт отпущен, а не оставлен слушать без ответа.
+                with self.assertRaises(OSError):
+                    get(base + "/api/environment")
+            finally:
+                server.stop()
+                server.close()
+
+    def test_no_pid_means_no_watch(self):
+        """Прежнее поведение сохранено: без номера процесса сторожа нет вовсе."""
+        with tempfile.TemporaryDirectory() as tmp:
+            bench = MorphBench(common.config(tmp))
+            with quiet():
+                server = WebServer(bench, root=tmp, host="127.0.0.1", port=0).start()
+            try:
+                server.watch_parent(0)
+                self.assertIsNone(server._watcher)
+                # Умерший родитель сервер не роняет, а только предупреждает.
+                p = self.child(0.1)
+                p.wait(timeout=5)
+                server.watch_parent(p.pid)
+                self.assertIsNone(server._watcher)
+                self.assertEqual(get(server.url.rstrip("/") + "/api/environment")[0], 200)
+            finally:
+                server.stop()
+                server.close()
 
 
 if __name__ == "__main__":
