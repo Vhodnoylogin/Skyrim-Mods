@@ -209,6 +209,11 @@ class Pipeline:
             return str(self.built(body[4:]))
         if body.startswith("recipe:"):
             return str(ROOT / "recipes" / body[7:])
+        if body.startswith("asset:"):
+            # Невосстановимое, сделанное руками: скульпт, готовый плагин. Рецептом
+            # такое не выражается, поэтому лежит в assets\ под Git LFS и в сборку
+            # только копируется. См. assets/README.md.
+            return str(ROOT / "assets" / body[6:])
         return str(self.source(body))
 
     # ---- проверки ------------------------------------------------------------------
@@ -300,6 +305,23 @@ class Pipeline:
                                            else _diff_nif(shipped, built))})
                 except Exception as e:                      # noqa: BLE001
                     rows.append({**row, "state": "сверить нечем: %s" % e})
+            # Файлы в КОРНЕ мода - плагины и прочее, что не ложится под `under`.
+            # Сверяются побайтово намеренно: они не экспортируются, а копируются,
+            # и значит обязаны совпасть точно, в отличие от мешей.
+            for name, src in mod.get("rootFiles", {}).items():
+                # Источником может быть и файл сборки, и готовый файл из assets\:
+                # плагин никто не собирает, он лежит под LFS и только копируется.
+                built = Path(self.resolve(src)) if src.startswith("@") else self.built(src)
+                shipped = self.mods / mod["name"] / name
+                row = {"mod": key, "file": name}
+                if not built.is_file():
+                    rows.append({**row, "state": "НЕ СОБРАН"})
+                elif not shipped.is_file():
+                    rows.append({**row, "state": "мода ещё нет", "new": True})
+                else:
+                    same = built.read_bytes() == shipped.read_bytes()
+                    rows.append({**row, "state": "совпал" if same else "РАЗОШЁЛСЯ",
+                                 "bytes": built.stat().st_size})
         # Наборы обязаны стоять на ОДНОЙ геометрии: пропуск ползунков её не трогает.
         for a, b in self.spec.get("sameGeometry", []):
             pa, pb = self.built(a), self.built(b)
@@ -380,9 +402,14 @@ def main(argv: list[str]) -> int:
                 built = pipe.built(src)
                 if built.is_file():
                     shutil.copyfile(built, target / name)
+            for name, src in mod.get("rootFiles", {}).items():
+                built = Path(pipe.resolve(src)) if src.startswith("@") else pipe.built(src)
+                if built.is_file():
+                    shutil.copyfile(built, Path(P.mods) / mod["name"] / name)
             shutil.copyfile(out / "claw-build.json",
                             Path(P.mods) / mod["name"] / "claw-build.json")
-            print("положено в мод: %s (%d файлов)" % (mod["name"], len(mod["files"])))
+            print("положено в мод: %s (%d файлов)"
+                  % (mod["name"], len(mod["files"]) + len(mod.get("rootFiles", {}))))
     return 0
 
 
