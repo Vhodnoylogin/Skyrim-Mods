@@ -1,5 +1,7 @@
 # Envoy Framework
 
+*In Russian: [README.ru.md](README.ru.md). English is the source language; the other is a translation.*
+
 A bridge between Skyrim and outside models. The microphone and the voice are owned by one part
 for the whole game; mods subscribe to its result instead of raising an engine of their own.
 
@@ -58,8 +60,9 @@ translation files - `Interface\Translations\Envoy*_<language>.txt`. English is t
 language and ships inside the mod; every other language is a mod of its own with a single folder
 in it, so adding a language means adding a mod.
 
-The log is deliberately left out of this and stays English. Its lines travel into other people's
-bug reports, and a log in a language the author cannot read is a log nobody can answer.
+The log is no exception: its lines are keys too. Exactly one thing stays as it came - **the
+recognised speech**. Translating what a person said would be meaningless; it is data, not a
+message.
 
 The tables are written as UTF-8 in `localization/` of each module and turned into what the game
 reads by `bridge/tools/build-localization.py`, which the bridge publishes in its SDK for exactly
