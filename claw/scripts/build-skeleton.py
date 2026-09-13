@@ -41,7 +41,9 @@ def load(recipe: Path) -> dict:
 def resolve(spec: dict, key: str) -> Path:
     """Путь из рецепта. Мод указывается именем, а не абсолютным путём: у другой машины
     инстанс MO2 лежит иначе, и корень выводится модулем tools\\paths."""
-    sys.path.insert(0, str(ROOT.parent.parent / "tools"))
+    sys.path.insert(0, str(HERE))
+    from locate import project_tools                # noqa: WPS433
+    sys.path.insert(0, str(project_tools(HERE)))
     from paths import P                                  # noqa: WPS433
     node = spec[key]
     return Path(P.mods) / node["mod"] / node["path"]
@@ -79,9 +81,9 @@ def main(argv: list[str]) -> int:
     donor = resolve(spec, "donor")
     body = resolve(spec, "body")
     out = Path(argv[argv.index("--out") + 1]) if "--out" in argv else resolve(spec, "output")
-    bench = ROOT.parent / "morphbench" / "mb.py"
-    if not bench.is_file():
-        raise SystemExit("не найден верстак: %s" % bench)
+    sys.path.insert(0, str(HERE))
+    from locate import morphbench                   # noqa: WPS433
+    bench = morphbench(HERE)
 
     print("донор : %s" % donor)
     print("тело  : %s" % body)
