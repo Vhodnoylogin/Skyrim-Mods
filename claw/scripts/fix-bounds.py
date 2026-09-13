@@ -31,10 +31,9 @@ ROOT = HERE.parent
 
 
 def bench() -> Path:
-    path = ROOT.parent / "morphbench" / "mb.py"
-    if not path.is_file():
-        raise SystemExit("не найден верстак: %s" % path)
-    return path
+    sys.path.insert(0, str(HERE))
+    from locate import morphbench                   # noqa: WPS433
+    return morphbench(HERE)
 
 
 def fix(nif: Path, tri: Path | None, margin: str | None, dry: bool) -> int:

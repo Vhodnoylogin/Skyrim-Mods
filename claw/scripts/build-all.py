@@ -41,7 +41,9 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
-sys.path.insert(0, str(ROOT.parent.parent / "tools"))
+sys.path.insert(0, str(HERE))
+from locate import project_tools           # noqa: E402
+sys.path.insert(0, str(project_tools(HERE)))
 from paths import P                                        # noqa: E402
 
 
