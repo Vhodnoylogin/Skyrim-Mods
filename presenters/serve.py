@@ -50,6 +50,7 @@ from morphbench.environment import process_alive, wait_process
 from morphbench.i18n import t
 from morphbench.journal import Journal, from_config
 
+from .assets import PREFIX, PageAssets
 from .web import WebPage
 
 _TRUE = ("1", "true", "yes", "on", "да")
@@ -155,6 +156,9 @@ class WebServer:
         # Свой передают проверки и слои, которым журнал нужен в руках.
         self.journal = journal if journal is not None else from_config(self.cfg, "serve")
         self.with_morphs = bool(with_morphs)
+        # Файлы страницы сервер раздаёт по одному: правка скрипта видна по перезагрузке,
+        # а средства браузера показывают настоящий файл с настоящими номерами строк.
+        self.assets = PageAssets()
         self.host = str(host or self.cfg["serveHost"])
         self.lock = threading.Lock()
         self.root: Path | None = None
@@ -325,7 +329,7 @@ class WebServer:
                 shown_root = None if self.root is None else str(self.root)
             page = WebPage(bench, server=True, catalog=catalog, environment=bench.environment(),
                            root=shown_root, with_morphs=with_morphs, error=error)
-            return page.html(), status
+            return page.html(linked=True), status
 
     def __repr__(self) -> str:
         return "WebServer(%s, корень=%s)" % (self.url, self.root or "не задан")
@@ -465,6 +469,9 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(owner.api_root(query))
             elif url.path == "/api/shutdown":
                 self._send_json(owner.api_shutdown())
+            elif url.path.startswith(PREFIX):
+                body, kind = owner.assets.blob(url.path[len(PREFIX):])
+                self._send(body, kind)
             elif url.path == "/favicon.ico":
                 # Значок у страницы встроенный; браузеры всё равно спрашивают - молча пусто.
                 self.send_response(204)

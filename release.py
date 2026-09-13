@@ -48,6 +48,9 @@ CONTENT = [
     "morphbench/*.py",
     "presenters/*.py",
     "locale/*/*.json",
+    "web/*.html",
+    "web/*.css",
+    "web/js/*.js",
     "docs/*.md",
 ]
 #: Что не кладём, даже если оно подошло под образец выше.
