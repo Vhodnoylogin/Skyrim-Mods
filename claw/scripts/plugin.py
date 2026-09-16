@@ -2,17 +2,28 @@
 
 Запись .esp двоичная: git хранил бы её полной копией на каждую правку и не показал бы
 ни одного различия. Поэтому исходником плагина считается ТЕКСТ, который раскладывает
-Spriggit: папка `claw\\plugins\\<имя>\\` с одним `.yaml` на запись. Его видно в различиях,
-его можно править руками и сливать.
+Spriggit: папка с одним `.yaml` на запись. Его видно в различиях, его можно править
+руками и сливать.
 
 Сам .esp при этом тоже хранится - в LFS, независимо от веса, - потому что он входит
 в выпуск: без него мод не собрать на машине, где Spriggit не поставлен.
+
+Деревьев два, и они не смешиваются:
+
+    claw\\plugins\\<имя>\\            исходники ВЫПУСКАЕМЫХ плагинов
+    claw\\assets\\plugins\\*.esp      их продукты
+
+    claw\\tests\\plugins\\<имя>\\       исходники ПРОВЕРОЧНЫХ плагинов
+    claw\\tests\\assets\\plugins\\*.esp  их продукты
+
+Проверочное живёт отдельно, потому что в выпуск оно не идёт никогда: его собирают ради
+одного прогона и выбрасывают. Имена проверочных плагинов начинаются с `test_`.
 
     python claw/scripts/plugin.py dump  [имя]   .esp  ->  текст
     python claw/scripts/plugin.py build [имя]   текст ->  .esp
     python claw/scripts/plugin.py check [имя]   собрать во временное и сверить с хранимым
 
-Без имени берутся все плагины сразу. Имя - название папки в `claw\\plugins\\`.
+Без имени берутся все плагины обоих деревьев.
 
 ВАЖНО про сверку. Обратный ход Spriggit **не побайтовый**: он переписывает заголовок
 плагина по-своему (счётчик записей, следующий свободный номер). Поэтому `check` сверяет
@@ -33,12 +44,14 @@ from locate import project_tools                        # noqa: E402
 sys.path.insert(0, str(project_tools(HERE)))
 from paths import P                                     # noqa: E402
 
-SOURCES = ROOT / "plugins"
-BUILT = ROOT / "assets" / "plugins"
+TREES = (
+    ("выпуск", ROOT / "plugins", ROOT / "assets" / "plugins"),
+    ("проверка", ROOT / "tests" / "plugins", ROOT / "tests" / "assets" / "plugins"),
+)
 WRAPPER = (P.mods / "Skyrim-Claude Code Modder's Toolkit" / "tools" / "spriggit-cli.sh")
 
 # Раскладка Spriggit: пакет задаёт формат текста, выпуск - набор полей записи.
-# Плагин собран под SkyrimSE даже для VR: формат записей у них общий, а флаг ESL
+# Плагины собраны под SkyrimSE даже для VR: формат записей у них общий, а флаг ESL
 # читает мод Skyrim VR ESL Support.
 PACKAGE = "Spriggit.Yaml"
 RELEASE = "SkyrimSE"
@@ -91,20 +104,50 @@ class Spriggit:
         self._run("deserialize", "--InputPath", folder, "--OutputPath", esp)
 
 
-def names(argv):
-    """Имена плагинов: заданные доводом либо все папки исходников."""
+class Plugin:
+    """Плагин - это пара «папка текста» и «файл .esp», а не одно из двух."""
+
+    def __init__(self, tree, name, sources, built):
+        self.tree = tree
+        self.name = name
+        self.source = sources / name
+        self.esp = built / ("%s.esp" % name)
+
+    def __str__(self):
+        return "%-28s [%s]" % (self.name, self.tree)
+
+
+def collect(argv):
+    """Плагины обоих деревьев, заданные доводом или все.
+
+    Плагин опознаётся по ЛЮБОЙ из двух половин: по папке текста или по файлу .esp.
+    Искать только по тексту нельзя - тогда `dump` не нашёл бы плагин, у которого
+    текста ещё нет, а это ровно тот случай, ради которого `dump` и нужен.
+    """
+    found = []
+    for tree, sources, built in TREES:
+        names = set()
+        if sources.is_dir():
+            names.update(p.name for p in sources.iterdir() if p.is_dir())
+        if built.is_dir():
+            names.update(p.stem for p in built.glob("*.esp"))
+        for name in sorted(names):
+            found.append(Plugin(tree, name, sources, built))
     if argv:
-        return argv
-    if not SOURCES.is_dir():
-        raise SystemExit("нет папки исходников: %s" % SOURCES)
-    return sorted(p.name for p in SOURCES.iterdir() if p.is_dir())
+        chosen = [p for p in found if p.name in argv]
+        missing = set(argv) - {p.name for p in chosen}
+        if missing:
+            raise SystemExit("нет таких плагинов: %s" % ", ".join(sorted(missing)))
+        return chosen
+    if not found:
+        raise SystemExit("не найдено ни одного исходника плагина")
+    return found
 
 
 def differs(left, right):
     """Различия двух деревьев текста - списком путей, а не первым попавшимся."""
     out = []
-    cmp = filecmp.dircmp(str(left), str(right))
-    stack = [("", cmp)]
+    stack = [("", filecmp.dircmp(str(left), str(right)))]
     while stack:
         prefix, node = stack.pop()
         for name in node.left_only:
@@ -118,50 +161,40 @@ def differs(left, right):
     return out
 
 
-def cmd_dump(sp, name):
-    esp = BUILT / ("%s.esp" % name)
-    if not esp.is_file():
-        raise SystemExit("нет плагина: %s" % esp)
-    folder = SOURCES / name
-    if folder.exists():
-        shutil.rmtree(folder)
-    sp.dump(esp, folder)
-    print("   %-24s .esp -> текст (%d файлов)" % (name, len(list(folder.rglob("*")))))
+def cmd_dump(sp, plugin):
+    if not plugin.esp.is_file():
+        raise SystemExit("нет плагина: %s" % plugin.esp)
+    if plugin.source.exists():
+        shutil.rmtree(plugin.source)
+    sp.dump(plugin.esp, plugin.source)
+    print("   %s .esp -> текст (%d файлов)" % (plugin, len(list(plugin.source.rglob("*")))))
     return True
 
 
-def cmd_build(sp, name):
-    folder = SOURCES / name
-    if not folder.is_dir():
-        raise SystemExit("нет исходника: %s" % folder)
-    BUILT.mkdir(parents=True, exist_ok=True)
-    esp = BUILT / ("%s.esp" % name)
-    sp.build(folder, esp)
-    print("   %-24s текст -> .esp (%d байт)" % (name, esp.stat().st_size))
+def cmd_build(sp, plugin):
+    plugin.esp.parent.mkdir(parents=True, exist_ok=True)
+    sp.build(plugin.source, plugin.esp)
+    print("   %s текст -> .esp (%d байт)" % (plugin, plugin.esp.stat().st_size))
     return True
 
 
-def cmd_check(sp, name):
+def cmd_check(sp, plugin):
     """Собрать во временное, разложить обратно и сверить текст с текстом."""
-    folder = SOURCES / name
-    if not folder.is_dir():
-        raise SystemExit("нет исходника: %s" % folder)
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
-        esp = tmp / ("%s.esp" % name)
-        sp.build(folder, esp)
+        esp = tmp / ("%s.esp" % plugin.name)
+        sp.build(plugin.source, esp)
         again = tmp / "again"
         sp.dump(esp, again)
-        bad = differs(folder, again)
+        bad = differs(plugin.source, again)
     if bad:
-        print("   %-24s РАЗОШЁЛСЯ:" % name)
+        print("   %s РАЗОШЁЛСЯ:" % plugin)
         for line in bad:
             print("      %s" % line)
         return False
-    stored = BUILT / ("%s.esp" % name)
-    mark = "" if stored.is_file() else "   (хранимого .esp нет!)"
-    print("   %-24s текст сходится%s" % (name, mark))
-    return stored.is_file()
+    mark = "" if plugin.esp.is_file() else "   (хранимого .esp нет!)"
+    print("   %s текст сходится%s" % (plugin, mark))
+    return plugin.esp.is_file()
 
 
 CMDS = {"dump": cmd_dump, "build": cmd_build, "check": cmd_check}
@@ -173,7 +206,7 @@ def main(argv):
     action, rest = CMDS[argv[0]], argv[1:]
     sp = Spriggit(WRAPPER)
     print("%s:" % argv[0])
-    ok = all([action(sp, name) for name in names(rest)])
+    ok = all([action(sp, plugin) for plugin in collect(rest)])
     print("итог: %s" % ("сошлось" if ok else "ЕСТЬ РАСХОЖДЕНИЯ"))
     return 0 if ok else 1
 

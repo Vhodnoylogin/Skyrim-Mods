@@ -1,7 +1,7 @@
 SpriggitSource:
   PackageName: Spriggit.Yaml.Skyrim
   Version: 0.41
-ModKey: CLAW - Companion.esp
+ModKey: test_CLAW - Companion.esp
 GameRelease: SkyrimSE
 ModHeader:
   Flags:

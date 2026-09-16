@@ -1,5 +1,5 @@
-FormKey: 000800:CLAW - Companion.esp
-EditorID: CLAWCompanionUlva
+FormKey: 000801:test_CLAW - Companion.esp
+EditorID: CLAWCompanionUlvaBeast
 Configuration:
   Flags:
   - Female
@@ -10,14 +10,11 @@ Configuration:
     Level: 10
   CalcMinLevel: 5
   CalcMaxLevel: 60
-  TemplateFlags:
-  - Traits
 Factions:
 - Faction: 05C84D:Skyrim.esm
   Fluff: 0x000000
-Template: 0A2C8E:Skyrim.esm
+Race: 0CDD84:Skyrim.esm
 Class: 013176:Skyrim.esm
 Name:
   TargetLanguage: English
-  Value: Ulva
-DefaultOutfit: 01DC10:Skyrim.esm
+  Value: Ulva, Beast Form

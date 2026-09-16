@@ -1,4 +1,4 @@
-FormKey: 000803:CLAW - Companion.esp
+FormKey: 000803:test_CLAW - Companion.esp
 EditorID: CLAWBeastFormSpell
 Name:
   TargetLanguage: English
@@ -10,6 +10,6 @@ Description:
 CastType: FireAndForget
 TargetType: Aimed
 Effects:
-- BaseEffect: 000802:CLAW - Companion.esp
+- BaseEffect: 000802:test_CLAW - Companion.esp
   Data:
     Duration: 1
