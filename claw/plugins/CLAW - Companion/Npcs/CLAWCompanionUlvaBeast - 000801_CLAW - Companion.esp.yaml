@@ -10,11 +10,11 @@ Configuration:
     Level: 10
   CalcMinLevel: 5
   CalcMaxLevel: 60
+Factions:
+- Faction: 05C84D:Skyrim.esm
+  Fluff: 0x000000
+Race: 0CDD84:Skyrim.esm
+Class: 013176:Skyrim.esm
 Name:
   TargetLanguage: English
   Value: Ulva, Beast Form
-Race: 0CDD84:Skyrim.esm
-Class: 013176:Skyrim.esm
-Factions:
-- Faction: 05C84D:Skyrim.esm
-  Rank: 0

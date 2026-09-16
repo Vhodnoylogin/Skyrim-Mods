@@ -5,19 +5,19 @@ Configuration:
   - Female
   - Essential
   - Unique
-  TemplateFlags:
-  - Traits
   Level:
     MutagenObjectType: NpcLevel
     Level: 10
   CalcMinLevel: 5
   CalcMaxLevel: 60
+  TemplateFlags:
+  - Traits
+Factions:
+- Faction: 05C84D:Skyrim.esm
+  Fluff: 0x000000
+Template: 0A2C8E:Skyrim.esm
+Class: 013176:Skyrim.esm
 Name:
   TargetLanguage: English
   Value: Ulva
-Template: 0A2C8E:Skyrim.esm
-Class: 013176:Skyrim.esm
 DefaultOutfit: 01DC10:Skyrim.esm
-Factions:
-- Faction: 05C84D:Skyrim.esm
-  Rank: 0

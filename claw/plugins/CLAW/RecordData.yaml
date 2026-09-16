@@ -1,0 +1,13 @@
+SpriggitSource:
+  PackageName: Spriggit.Yaml.Skyrim
+  Version: 0.41
+ModKey: CLAW.esp
+GameRelease: SkyrimSE
+ModHeader:
+  Flags:
+  - Small
+  FormVersion: 39
+  Author: Claude
+  MasterReferences:
+  - Master: Skyrim.esm
+    FileSize: 0
