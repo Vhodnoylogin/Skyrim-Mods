@@ -1,0 +1,39 @@
+# A PLAIN CLONE MUST NOT DOWNLOAD THE WEIGHTS.
+#
+# GitHub gives 10 GiB of LFS bandwidth a month. The weights of this module are
+# 2.1 GB before quantisation and about 1.05 GiB after; a hundred clones would
+# exceed the month's allowance and the repository would start refusing everyone,
+# including whoever is trying to work in it. And `git clone` was never meant to
+# be the player's download channel: what a player installs is the archive
+# tools/package.ps1 builds.
+#
+# So the default is to fetch POINTERS and nothing else. A few lines of text
+# arrive where a gigabyte would have, and whoever actually wants the bytes asks
+# for them by name.
+#
+#   git lfs pull --exclude="" --include="speechbroker/model-whisper-ru/weights/whisper-ru-small"
+#
+# THE TRAP, WRITTEN OUT VERBATIM BECAUSE IT FAILS SILENTLY: `--include` DOES
+# NOTHING on its own here. The exclude below wins over it, and git-lfs reports
+# success while fetching nothing at all. `--exclude=""` on the same command line
+# is what clears it. Anybody who has ever run `git lfs pull --include=...`, seen
+# it finish in a second and concluded the files were already there has met this.
+#
+# ---------------------------------------------------------------------------
+# WHY THIS FILE IS AT THE ROOT AND NOT IN THE MODULE THAT OWNS THE RULE.
+#
+# git-lfs reads .lfsconfig from the ROOT OF THE WORKING TREE ONLY. It is not
+# per-directory the way .gitattributes is, and a copy in a module folder is read
+# by nobody at all. The module states the rule in its own README; the setting
+# that actually holds has to live here.
+#
+# AND IT NAMES THE WEIGHTS RATHER THAN EXCLUDING EVERYTHING. `fetchexclude = *`
+# was the first spelling and it is wrong in a way that does not announce itself:
+# every plugin in this repository goes through LFS as well, an .esp is a few
+# hundred bytes, and a clone that fetched pointers instead of them would lay a
+# POINTER FILE into the build and look like a broken plugin rather than a
+# missing download. Only what is genuinely too big to fetch by default is here.
+# ---------------------------------------------------------------------------
+
+[lfs]
+	fetchexclude = speechbroker/model-whisper-ru/weights/**
