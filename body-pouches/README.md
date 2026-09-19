@@ -64,14 +64,22 @@ and the core has no need to know.
     cmake -S . -B build                                       # the mod itself, fetches CommonLibSSE-NG
     cmake --build build --config Release --target BodyPouches
     tools\package.ps1 -Apply                                  # archive into downloads, installed through the MO2 bridge
+    tools\slots-mod.ps1 -Apply                                # overlay mod: switch the slot on in vrikslots.ini
 
 The settings file and the table of text are written by the plugin on first run into
 `Data\SKSE\Plugins\bodypouches\`, so the mod itself is one library.
 
 ## State
 
-The simple variant is written and builds. One pouch shows one bottle, the contents come
-straight from the pack, and setting up is done by hand.
+The simple variant is written and builds. One pouch, on the stomach (slot 13), shows one
+bottle, the contents come straight from the pack, and setting up is done by hand.
+
+The slot needs two things at once, and that is not a choice but a consequence of how VRIK
+works: a slot allowing no weapon type is not detected at all ("set all weapon types to 0 to
+disable a slot" is its author's own comment in `vrikslots.ini`), and the slots a build leaves
+free are switched off in exactly that way. So the overlay mod switches the slot on and the
+plugin suspends it straight away: VRIK sees the hand but neither puts anything there nor
+draws from it.
 
 It has never been run in the game. The first session settles these:
 

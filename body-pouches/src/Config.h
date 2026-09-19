@@ -26,14 +26,22 @@ namespace BodyPouches
 		std::string               logLevel{ "info" };
 		std::vector<PouchSetting> pouches;
 
-		// Left Hip and Right Hip. VRIK counts its fourteen slots
+		// One pouch, on the stomach. VRIK counts its fourteen slots
 		//   1 Left Hip     2 Right Hip     3 Left Thigh    4 Right Thigh
 		//   5 Left Calf    6 Right Calf    7 Left Upper Arm 8 Right Upper Arm
 		//   9 Left Forearm 10 Right Forearm 11 Left Shoulder 12 Right Shoulder
 		//   13 Stomach     14 Chest
-		// and the two hip slots are where a belt actually is. Shared rather than
-		// exclusive on purpose: on a build that keeps a weapon there, a shared pouch
-		// steps aside instead of taking the slot away.
+		// and 13 is the belt buckle, reachable by either hand and used for a weapon by
+		// almost nobody.
+		//
+		// Exclusive, not shared, and that pair of decisions goes together. VRIK ignores
+		// a slot that allows no weapon type at all, so an unused slot is a slot nothing
+		// can be done with - the hand is never even noticed there. The slot therefore
+		// has to be switched on in vrikslots.ini (that is what the overlay mod built by
+		// tools\slots-mod.ps1 does), and then suspended by us, so that VRIK sees the
+		// hand but neither draws from the slot nor puts anything into it. Shared would
+		// mean leaving it switched on for weapons as well, and then a hand reaching for
+		// a potion could come back with a dagger.
 		static Settings Defaults();
 
 		[[nodiscard]] static Core::Mode ModeFromText(const std::string& a_text) noexcept;

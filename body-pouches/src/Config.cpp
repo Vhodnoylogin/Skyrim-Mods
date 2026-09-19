@@ -41,8 +41,7 @@ namespace BodyPouches
 	{
 		Settings settings;
 		settings.pouches = {
-			{ 1, "shared" },
-			{ 2, "shared" },
+			{ 13, "exclusive" },
 		};
 		return settings;
 	}
