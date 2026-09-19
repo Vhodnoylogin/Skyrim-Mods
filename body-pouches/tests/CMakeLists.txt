@@ -7,7 +7,8 @@ project(BodyPouchesTests LANGUAGES CXX)
 
 add_executable(bodypouches_tests
     "${CMAKE_CURRENT_SOURCE_DIR}/Harness.h"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test_pouch.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/FakePack.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test_filter.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/test_pouchset.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp"
 )

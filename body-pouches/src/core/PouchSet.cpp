@@ -9,6 +9,13 @@ namespace BodyPouches::Core
 		}
 	}
 
+	void PouchSet::Clear() noexcept
+	{
+		_pouches.clear();
+		_hands[0] = {};
+		_hands[1] = {};
+	}
+
 	const Pouch* PouchSet::Find(int a_slot) const noexcept
 	{
 		const auto it = _pouches.find(a_slot);
@@ -25,92 +32,156 @@ namespace BodyPouches::Core
 	{
 		std::vector<int> slots;
 		for (const auto& [slot, pouch] : _pouches) {
-			if (pouch.IsConfigured() && pouch.PouchMode() == Mode::Exclusive) {
+			if (pouch.PouchMode() == Mode::Exclusive) {
 				slots.push_back(slot);
 			}
 		}
 		return slots;
 	}
 
-	Decision PouchSet::Answer(const Reach& a_reach, Act a_act, Reason a_reason, ItemKey a_item)
+	Decision PouchSet::Answer(int a_slot, bool a_leftHand, Act a_act, Reason a_reason, FormKey a_item)
 	{
 		Decision d;
 		d.act = a_act;
 		d.reason = a_reason;
-		d.slot = a_reach.slot;
-		d.leftHand = a_reach.leftHand;
+		d.slot = a_slot;
+		d.leftHand = a_leftHand;
 		d.item = std::move(a_item);
 		return d;
 	}
 
-	Decision PouchSet::Decide(const Reach& a_reach) const
+	const Item* PouchSet::Choose(const std::vector<Item>& a_candidates)
 	{
-		const Pouch* pouch = Find(a_reach.slot);
-
-		// Not a pouch at all, or a pouch nobody has filled in: VRIK was here first
-		// and this is still its slot.
-		if (pouch == nullptr || !pouch->IsConfigured()) {
-			return Answer(a_reach, Act::PassToVrik, Reason::NotOurs);
-		}
-
-		const bool exclusive = pouch->PouchMode() == Mode::Exclusive;
-
-		// A full hand is a reach to put something away, not to take something out.
-		// We cannot yet say whether it belongs here - that is OfferStow's question -
-		// but we can already say whose event it is, and for a shared slot with no
-		// room it is VRIK's: let it holster the sword as it always did.
-		if (a_reach.handOccupied) {
-			if (!pouch->HasRoom()) {
-				return exclusive
-					? Answer(a_reach, Act::Refuse, Reason::PouchFull)
-					: Answer(a_reach, Act::PassToVrik, Reason::NotOurs);
+		for (const auto& item : a_candidates) {
+			if (item.count > 0) {
+				return &item;
 			}
-			return Answer(a_reach, Act::Stow, Reason::HandBusy);
 		}
-
-		// An empty hand reaching for an empty pouch. In a shared slot we step aside
-		// so that whatever VRIK keeps there still works; in an exclusive one we do
-		// not, because the player set that slot aside for this and a sword coming
-		// out of it would be a surprise.
-		if (!pouch->HasSomethingToGive()) {
-			return exclusive
-				? Answer(a_reach, Act::Refuse, Reason::PouchEmpty)
-				: Answer(a_reach, Act::PassToVrik, Reason::NotOurs);
-		}
-
-		// There is something to give and a hand to give it to - but HIGGS may be
-		// unable to take it this frame. Refusing is right and passing to VRIK is
-		// not: the pouch is not empty, and VRIK drawing a weapon here instead would
-		// be the wrong thing happening rather than nothing happening.
-		if (!a_reach.handCanHold) {
-			return Answer(a_reach, Act::Refuse, Reason::HandUnavailable);
-		}
-
-		return Answer(a_reach, Act::Draw, Reason::Drawn, pouch->Item());
+		return nullptr;
 	}
 
-	Decision PouchSet::OfferStow(int a_slot, const ItemKey& a_item, ItemKind a_kind) const
+	Decision PouchSet::Decide(const Reach& a_reach, const Pack& a_pack) const
 	{
-		Reach reach;
-		reach.slot = a_slot;
-		reach.handOccupied = true;
+		const Pouch* pouch = Find(a_reach.slot);
+		const bool   exclusive = pouch != nullptr && pouch->PouchMode() == Mode::Exclusive;
 
+		// Not a pouch at all: VRIK was here first and this is still its slot.
+		if (pouch == nullptr) {
+			return Answer(a_reach.slot, a_reach.leftHand, Act::PassToVrik, Reason::NotOurs);
+		}
+
+		// A pouch nobody has set up yet. With a full hand this is how it gets set up -
+		// push a bottle in and the pouch takes its meaning from it. With an empty hand
+		// there is nothing to take, so the slot goes on working as VRIK's.
+		if (!pouch->IsAssigned()) {
+			return a_reach.handOccupied
+				? Answer(a_reach.slot, a_reach.leftHand, Act::Assign, Reason::NotAssigned)
+				: Answer(a_reach.slot, a_reach.leftHand, Act::PassToVrik, Reason::NotAssigned);
+		}
+
+		// A full hand is a reach to put something away. We cannot yet say whether it
+		// belongs here - that is Offer's question - but we can already say whose event
+		// it is.
+		if (a_reach.handOccupied) {
+			return Answer(a_reach.slot, a_reach.leftHand, Act::Stow, Reason::HandBusy);
+		}
+
+		const auto  candidates = a_pack.Matching(pouch->PouchFilter());
+		const Item* chosen = Choose(candidates);
+
+		// Set up, but the pack has run out. A shared slot steps aside so that whatever
+		// VRIK keeps there still works; an exclusive one does not, because the player
+		// set that slot aside for this and a sword coming out of it would be a surprise.
+		if (chosen == nullptr) {
+			return exclusive
+				? Answer(a_reach.slot, a_reach.leftHand, Act::Refuse, Reason::NothingInPack)
+				: Answer(a_reach.slot, a_reach.leftHand, Act::PassToVrik, Reason::NothingInPack);
+		}
+
+		// There is something to give and a hand to give it to - but HIGGS may be unable
+		// to take it this frame. Refusing is right and passing to VRIK is not: the pouch
+		// is not empty, and VRIK drawing a weapon here instead would be the wrong thing
+		// happening rather than nothing happening.
+		if (!a_reach.handCanHold) {
+			return Answer(a_reach.slot, a_reach.leftHand, Act::Refuse, Reason::HandUnavailable);
+		}
+
+		return Answer(a_reach.slot, a_reach.leftHand, Act::Draw, Reason::Drawn, chosen->key);
+	}
+
+	Decision PouchSet::Offer(int a_slot, bool a_leftHand, const Item& a_item) const
+	{
 		const Pouch* pouch = Find(a_slot);
-		if (pouch == nullptr || !pouch->IsConfigured()) {
-			return Answer(reach, Act::PassToVrik, Reason::NotOurs);
+		if (pouch == nullptr) {
+			return Answer(a_slot, a_leftHand, Act::PassToVrik, Reason::NotOurs);
 		}
-		if (!pouch->Accepts(a_item)) {
-			// The kind is carried for the log and for the adapter's own use; the
-			// pouch decides by identity, because "a potion" is not a thing a player
-			// puts in a pouch - a particular potion is.
-			(void)a_kind;
+
+		if (!pouch->IsAssigned()) {
+			// Setting up by hand. A poison is turned away here as everywhere else: a
+			// pouch that would never hand its contents back is not a pouch.
+			return a_item.harmful
+				? Answer(a_slot, a_leftHand, Act::Refuse, Reason::WrongItem)
+				: Answer(a_slot, a_leftHand, Act::Assign, Reason::Assigned, a_item.key);
+		}
+
+		if (!pouch->PouchFilter().Matches(a_item)) {
+			// In a shared slot the wrong item is VRIK's business after all - let it
+			// holster the sword as it always did. In an exclusive one the slot is
+			// suspended, so passing it on would mean nothing happens at all, and saying
+			// no out loud is the honest answer.
 			return pouch->PouchMode() == Mode::Exclusive
-				? Answer(reach, Act::Refuse, Reason::WrongItem)
-				: Answer(reach, Act::PassToVrik, Reason::WrongItem);
+				? Answer(a_slot, a_leftHand, Act::Refuse, Reason::WrongItem)
+				: Answer(a_slot, a_leftHand, Act::PassToVrik, Reason::WrongItem);
 		}
-		if (!pouch->HasRoom()) {
-			return Answer(reach, Act::Refuse, Reason::PouchFull);
+
+		return Answer(a_slot, a_leftHand, Act::Stow, Reason::Stowed, a_item.key);
+	}
+
+	bool PouchSet::Assign(int a_slot, const Item& a_item)
+	{
+		Pouch* pouch = Find(a_slot);
+		if (pouch == nullptr || pouch->IsAssigned() || a_item.harmful) {
+			return false;
 		}
-		return Answer(reach, Act::Stow, Reason::Stowed, a_item);
+		pouch->Assign(Filter::FromItem(a_item));
+		return true;
+	}
+
+	Shown PouchSet::Display(int a_slot, const Pack& a_pack) const
+	{
+		Shown shown;
+		const Pouch* pouch = Find(a_slot);
+		if (pouch == nullptr || !pouch->IsAssigned()) {
+			return shown;
+		}
+
+		const auto candidates = a_pack.Matching(pouch->PouchFilter());
+		for (const auto& item : candidates) {
+			shown.count += item.count;
+		}
+		if (const Item* chosen = Choose(candidates); chosen != nullptr) {
+			shown.anything = true;
+			shown.item = chosen->key;
+		}
+		return shown;
+	}
+
+	void PouchSet::NoteDrawn(bool a_leftHand, int a_slot, FormKey a_item)
+	{
+		auto& hand = _hands[a_leftHand ? 0 : 1];
+		hand.holding = true;
+		hand.slot = a_slot;
+		hand.item = std::move(a_item);
+	}
+
+	void PouchSet::NoteSettled(bool a_leftHand) noexcept
+	{
+		_hands[a_leftHand ? 0 : 1] = {};
+	}
+
+	std::optional<int> PouchSet::SlotOfHand(bool a_leftHand) const noexcept
+	{
+		const auto& hand = _hands[a_leftHand ? 0 : 1];
+		return hand.holding ? std::optional<int>{ hand.slot } : std::nullopt;
 	}
 }
