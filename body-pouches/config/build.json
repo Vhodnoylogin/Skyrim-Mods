@@ -1,0 +1,27 @@
+{
+  "deploy": {
+    "modsRoot": "D:/Skyrim VR Modding/MO2/ModOrganizer/Skyrim VR/mods",
+    "modName": "Body Pouches",
+    "version": "0.1.0",
+    "dll": "{root}/build/Release/BodyPouches.dll",
+    "dllTargetRel": "SKSE/Plugins",
+    "settings": "{root}/bodypouches.json",
+    "settingsTargetRel": "SKSE/Plugins/bodypouches",
+    "localization": {
+      "name": "BodyPouches",
+      "base": "english",
+      "source": "{root}/localization",
+      "header": "{root}/src/LocStrings.h"
+    },
+    "docs": [
+      "{root}/README.md",
+      "{root}/README.ru.md"
+    ],
+    "downloadsRoot": "D:/Skyrim VR Modding/MO2/ModOrganizer/Skyrim VR/downloads",
+    "sevenZip": "C:/Program Files/7-Zip/7z.exe",
+    "indexScript": "D:/Skyrim VR Modding/Claude Skyrim VR/wt-claude-projects/claude-skyrim-vr/index/update-index.ps1",
+    "indexOwner": "potion-pouches",
+    "bridgeUrl": "http://127.0.0.1:8930",
+    "bridgeToken": "D:/Skyrim VR Modding/MO2/plugins/mo2aibridge/mo2aibridge-token.txt"
+  }
+}

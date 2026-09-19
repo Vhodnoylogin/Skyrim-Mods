@@ -1,0 +1,16 @@
+# Everything a build leaves behind. build-core/ is the configure that leaves the
+# plugin out - core and checks only, no network, no CommonLib.
+build/
+build-core/
+dist/
+out/
+.vs/
+.cache/
+vcpkg_installed/
+*.user
+__pycache__/
+
+# Paths local to this machine, and housekeeping
+build.local.json
+*.log
+*-token.txt
