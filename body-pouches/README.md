@@ -64,7 +64,6 @@ and the core has no need to know.
     cmake -S . -B build                                       # the mod itself, fetches CommonLibSSE-NG
     cmake --build build --config Release --target BodyPouches
     tools\package.ps1 -Apply                                  # archive into downloads, installed through the MO2 bridge
-    tools\slots-mod.ps1 -Apply                                # overlay mod: switch the slot on in vrikslots.ini
 
 The settings file and the table of text are written by the plugin on first run into
 `Data\SKSE\Plugins\bodypouches\`, so the mod itself is one library.
@@ -77,14 +76,20 @@ bottle, the contents come straight from the pack, and setting up is done by hand
 The slot needs two things at once, and that is not a choice but a consequence of how VRIK
 works: a slot allowing no weapon type is not detected at all ("set all weapon types to 0 to
 disable a slot" is its author's own comment in `vrikslots.ini`), and the slots a build leaves
-free are switched off in exactly that way. So the overlay mod switches the slot on and the
-plugin suspends it straight away: VRIK sees the hand but neither puts anything there nor
-draws from it.
+free are switched off in exactly that way. So the plugin switches the slot on itself through
+`setSettingDouble` after every load and suspends it straight away: VRIK sees the hand but
+neither puts anything there nor draws from it.
+
+**No file of anybody else's is changed.** VRIK's settings are altered in memory only - its
+contract says plainly that "files are not saved automatically", and `saveSettings()` is never
+called. No second mod is needed alongside: a mod this one cannot work without would not be a
+second mod, it would be part of this one.
 
 It has never been run in the game. The first session settles these:
 
 | What | Why it is unknown |
 |---|---|
+| whether switching the slot on at runtime takes effect | `setSettingDouble` changes the setting in memory, but whether VRIK rereads it without waiting for a recalibration is not visible in the code |
 | whether VRIK will draw a potion in a slot | `VrikSetSlotForArt` takes an art object, but what it does with something that is not a weapon is not visible in the code |
 | whether "secondary hand" is read correctly | VRIK says secondary, HIGGS and the game say left; the translation is made from the left-handed setting and is untested |
 | which node the bottle appears at | `LeftWandNode`, the hand, the finger are tried in turn - which exists in VR shows only in the game |

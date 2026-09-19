@@ -53,7 +53,9 @@ namespace BodyPouches
 		bool TakeBack(int a_slot, bool a_isLeft, bool a_assigning);
 
 		void BuildPouches(const Settings& a_settings);
-		void ApplySuspension();
+		// Switch on the slots the pouches sit in, then suspend the exclusive ones. Runs
+		// after every load: both halves live in VRIK's memory and not in its files.
+		void ApplySlots();
 
 		// VRIK says "the secondary hand"; HIGGS and the game say "the left hand". The
 		// two only agree for a right-handed player, so the translation is made once,

@@ -39,6 +39,7 @@ namespace BodyPouches
 				{ Keys::kPouchWrongItem, "pouch {0} does not hold that" },
 				{ Keys::kPouchHandBusy, "the {0} hand is not free" },
 				{ Keys::kPouchSuspended, "slot {0} suspended in VRIK" },
+				{ Keys::kSlotSwitchedOn, "slot {0} was switched off in VRIK and has been switched on in memory - the ini on disk is not touched" },
 				{ Keys::kPouchConsumed, "what came from pouch {0} was drunk" },
 				{ Keys::kPouchReturned, "what came from pouch {0} went back to the pack" },
 				{ Keys::kPouchLost, "what came from pouch {0} was dropped and is lying where it fell" },

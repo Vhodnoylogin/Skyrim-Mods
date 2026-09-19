@@ -41,6 +41,27 @@ namespace BodyPouches::VR
 		// thing about this mod that cannot be settled outside the game.
 		void SetArt(int a_slot, RE::BGSArtObject* a_art);
 
+		// VRIK's own settings, the ones that live in vrikslots.ini and vrik.ini.
+		//
+		// IN MEMORY ONLY. The contract says it plainly - "files are not saved
+		// automatically" - and saveSettings(), the call that would write them out, is
+		// deliberately not wrapped here. A mod that quietly rewrote somebody's VRIK
+		// configuration on disk would be doing the very thing we refuse to do by hand.
+		[[nodiscard]] double GetSetting(const char* a_name);
+		void                 SetSetting(const char* a_name, double a_value);
+
+		// Make a slot exist as far as VRIK is concerned.
+		//
+		// VRIK ignores a slot that allows no weapon type at all - "set all weapon types
+		// to 0 to disable a slot", says its author in the file - and the slots a build
+		// leaves free for a pouch are switched off in exactly that way. So one type is
+		// allowed and the slot is made visible; the plugin then suspends it, and nothing
+		// is ever actually holstered there.
+		//
+		// A slot that is already on is left alone: somebody put a weapon there on
+		// purpose, and that is their arrangement, not ours to overwrite.
+		bool EnsureDetectable(int a_slot);
+
 	private:
 		vrikPluginApi::IVrikInterface001* _api{ nullptr };
 		unsigned int                      _build{ 0 };

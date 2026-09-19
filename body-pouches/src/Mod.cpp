@@ -58,7 +58,7 @@ namespace BodyPouches
 
 	void Mod::OnGameLoaded()
 	{
-		ApplySuspension();
+		ApplySlots();
 	}
 
 	void Mod::BuildPouches(const Settings& a_settings)
@@ -70,12 +70,23 @@ namespace BodyPouches
 		}
 	}
 
-	void Mod::ApplySuspension()
+	void Mod::ApplySlots()
 	{
 		if (!Working()) {
 			return;
 		}
 		std::scoped_lock guard(_lock);
+
+		// Every pouch, shared or exclusive, needs its slot to be one VRIK looks at -
+		// an off slot raises no event and a pouch there would simply be dead. This
+		// changes VRIK's settings in memory only; nothing is written to its ini.
+		for (std::size_t i = 0; i < _settings.pouches.size(); ++i) {
+			_vrik.EnsureDetectable(_settings.pouches[i].slot);
+		}
+
+		// And then the exclusive ones are suspended, so that VRIK detects the hand but
+		// neither draws a weapon from the slot nor holsters one into it. Suspension is
+		// runtime-only by its author's design, which is why this runs after every load.
 		for (const int slot : _pouches.SlotsToSuspend()) {
 			_vrik.SetSuspended(slot, true);
 		}

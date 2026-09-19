@@ -34,6 +34,7 @@ namespace BodyPouches::Keys
 	inline constexpr auto kPouchWrongItem = "pouch.wrong_item";
 	inline constexpr auto kPouchHandBusy = "pouch.hand_busy";
 	inline constexpr auto kPouchSuspended = "pouch.suspended";
+	inline constexpr auto kSlotSwitchedOn = "slot.switched_on";
 	inline constexpr auto kPouchConsumed = "pouch.consumed";
 	inline constexpr auto kPouchReturned = "pouch.returned";
 	inline constexpr auto kPouchLost = "pouch.lost";

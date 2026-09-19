@@ -3,6 +3,9 @@
 #include "Loc.h"
 #include "vr/Handshake.h"
 
+#include <array>
+#include <format>
+
 namespace BodyPouches::VR
 {
 	namespace
@@ -69,5 +72,49 @@ namespace BodyPouches::VR
 		// The contract declares its own BGSArtObject - it was written against another
 		// SDK - so the pointer changes vocabulary here and nowhere else.
 		_api->VrikSetSlotForArt(a_slot, reinterpret_cast<::BGSArtObject*>(a_art));
+	}
+
+	double VrikLink::GetSetting(const char* a_name)
+	{
+		return Ready() && a_name != nullptr ? _api->getSettingDouble(a_name) : 0.0;
+	}
+
+	void VrikLink::SetSetting(const char* a_name, double a_value)
+	{
+		if (Ready() && a_name != nullptr) {
+			_api->setSettingDouble(a_name, a_value);
+		}
+	}
+
+	bool VrikLink::EnsureDetectable(int a_slot)
+	{
+		if (!Ready() || a_slot < 1 || a_slot > 14) {
+			return false;
+		}
+
+		// The six kinds of thing a VRIK slot can be told to accept. A slot that accepts
+		// none of them is off.
+		static constexpr std::array kTypes{ "Small", "Medium", "Large", "Ranged", "Shield", "Torch" };
+
+		bool anyAllowed = false;
+		for (const char* type : kTypes) {
+			if (GetSetting(std::format("allow{}Slot{}", type, a_slot).c_str()) > 0.0) {
+				anyAllowed = true;
+				break;
+			}
+		}
+
+		if (!anyAllowed) {
+			// Small is the least disruptive of the six: it is the one kind a build is
+			// least likely to be short of places for, and the slot is about to be
+			// suspended anyway, so nothing will ever be holstered here.
+			SetSetting(std::format("allowSmallSlot{}", a_slot).c_str(), 1.0);
+			Loc::Info(Keys::kSlotSwitchedOn, a_slot);
+		}
+
+		if (GetSetting(std::format("visibleSlot{}", a_slot).c_str()) <= 0.0) {
+			SetSetting(std::format("visibleSlot{}", a_slot).c_str(), 1.0);
+		}
+		return true;
 	}
 }
