@@ -50,17 +50,19 @@ namespace BodyPouches::VR
 		[[nodiscard]] double GetSetting(const char* a_name);
 		void                 SetSetting(const char* a_name, double a_value);
 
-		// Make a slot exist as far as VRIK is concerned.
+		// Does VRIK look at this slot at all?
 		//
-		// VRIK ignores a slot that allows no weapon type at all - "set all weapon types
-		// to 0 to disable a slot", says its author in the file - and the slots a build
-		// leaves free for a pouch are switched off in exactly that way. So one type is
-		// allowed and the slot is made visible; the plugin then suspends it, and nothing
-		// is ever actually holstered there.
-		//
-		// A slot that is already on is left alone: somebody put a weapon there on
-		// purpose, and that is their arrangement, not ours to overwrite.
-		bool EnsureDetectable(int a_slot);
+		// A slot that allows no weapon type is off - "set all weapon types to 0 to
+		// disable a slot", says its author in the file - and an off slot raises no
+		// event, so a pouch there is simply dead.
+		[[nodiscard]] bool IsDetectable(int a_slot);
+
+		// Switch a slot on. NOT called unless the player has asked for it in our own
+		// settings: VRIK's configuration belongs to VRIK and to whoever set it, and a
+		// mod that quietly changes it - even in memory, even reversibly - leaves that
+		// person looking at one thing in their menu and getting another in the game.
+		// Returns false when the slot was already on, so the caller can stay quiet.
+		bool SwitchOn(int a_slot);
 
 	private:
 		vrikPluginApi::IVrikInterface001* _api{ nullptr };

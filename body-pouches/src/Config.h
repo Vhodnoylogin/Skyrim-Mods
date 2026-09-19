@@ -26,6 +26,16 @@ namespace BodyPouches
 		std::string               logLevel{ "info" };
 		std::vector<PouchSetting> pouches;
 
+		// May this mod switch a VRIK slot on by itself?
+		//
+		// Off by default, and that is the whole point. VRIK's settings belong to VRIK
+		// and to whoever arranged them; a mod that changes them behind the player's
+		// back - even in memory, even reversibly - leaves somebody looking at one thing
+		// in their menu and getting another in the game, and leaves two mods quietly
+		// overwriting each other. So by default the mod only says what is wrong and
+		// where to fix it, and this flag is how a player says "go ahead, do it for me".
+		bool mayEnableSlots{ false };
+
 		// One pouch, on the stomach. VRIK counts its fourteen slots
 		//   1 Left Hip     2 Right Hip     3 Left Thigh    4 Right Thigh
 		//   5 Left Calf    6 Right Calf    7 Left Upper Arm 8 Right Upper Arm

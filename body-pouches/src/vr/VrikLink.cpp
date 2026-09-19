@@ -86,35 +86,38 @@ namespace BodyPouches::VR
 		}
 	}
 
-	bool VrikLink::EnsureDetectable(int a_slot)
+	namespace
+	{
+		// The six kinds of thing a VRIK slot can be told to accept. A slot that accepts
+		// none of them is off.
+		constexpr std::array kWeaponTypes{ "Small", "Medium", "Large", "Ranged", "Shield", "Torch" };
+	}
+
+	bool VrikLink::IsDetectable(int a_slot)
 	{
 		if (!Ready() || a_slot < 1 || a_slot > 14) {
 			return false;
 		}
-
-		// The six kinds of thing a VRIK slot can be told to accept. A slot that accepts
-		// none of them is off.
-		static constexpr std::array kTypes{ "Small", "Medium", "Large", "Ranged", "Shield", "Torch" };
-
-		bool anyAllowed = false;
-		for (const char* type : kTypes) {
+		for (const char* type : kWeaponTypes) {
 			if (GetSetting(std::format("allow{}Slot{}", type, a_slot).c_str()) > 0.0) {
-				anyAllowed = true;
-				break;
+				return true;
 			}
 		}
+		return false;
+	}
 
-		if (!anyAllowed) {
-			// Small is the least disruptive of the six: it is the one kind a build is
-			// least likely to be short of places for, and the slot is about to be
-			// suspended anyway, so nothing will ever be holstered here.
-			SetSetting(std::format("allowSmallSlot{}", a_slot).c_str(), 1.0);
-			Loc::Info(Keys::kSlotSwitchedOn, a_slot);
+	bool VrikLink::SwitchOn(int a_slot)
+	{
+		if (IsDetectable(a_slot)) {
+			return false;
 		}
 
-		if (GetSetting(std::format("visibleSlot{}", a_slot).c_str()) <= 0.0) {
-			SetSetting(std::format("visibleSlot{}", a_slot).c_str(), 1.0);
-		}
+		// Small is the least disruptive of the six: it is the kind a build is least
+		// likely to be short of places for, and the slot is about to be suspended
+		// anyway, so nothing will ever actually be holstered here.
+		SetSetting(std::format("allowSmallSlot{}", a_slot).c_str(), 1.0);
+		SetSetting(std::format("visibleSlot{}", a_slot).c_str(), 1.0);
+		Loc::Warn(Keys::kSlotSwitchedOn, a_slot);
 		return true;
 	}
 }

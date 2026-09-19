@@ -20,6 +20,7 @@ namespace BodyPouches
 			return nlohmann::json{
 				{ "language", a_settings.language },
 				{ "logLevel", a_settings.logLevel },
+				{ "mayEnableSlots", a_settings.mayEnableSlots },
 				{ "pouches", pouches },
 			};
 		}
@@ -72,6 +73,7 @@ namespace BodyPouches
 
 			settings.language = json.value("language", settings.language);
 			settings.logLevel = json.value("logLevel", settings.logLevel);
+			settings.mayEnableSlots = json.value("mayEnableSlots", settings.mayEnableSlots);
 			for (const auto& entry : json.value("pouches", nlohmann::json::array())) {
 				Settings::PouchSetting pouch;
 				pouch.slot = entry.value("slot", 0);

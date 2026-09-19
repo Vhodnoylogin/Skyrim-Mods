@@ -77,11 +77,23 @@ namespace BodyPouches
 		}
 		std::scoped_lock guard(_lock);
 
-		// Every pouch, shared or exclusive, needs its slot to be one VRIK looks at -
-		// an off slot raises no event and a pouch there would simply be dead. This
-		// changes VRIK's settings in memory only; nothing is written to its ini.
-		for (std::size_t i = 0; i < _settings.pouches.size(); ++i) {
-			_vrik.EnsureDetectable(_settings.pouches[i].slot);
+		// Every pouch needs its slot to be one VRIK looks at - an off slot raises no
+		// event and a pouch there would simply be dead. But switching it on is not ours
+		// to do: it is VRIK's setting, arranged by whoever arranged it, and changing it
+		// behind their back is how two mods come to overwrite each other and how a
+		// player comes to see one thing in the menu and get another in the game.
+		//
+		// So by default we only say what is wrong and where it is fixed, and act only
+		// when the player has said we may.
+		for (const auto& pouch : _settings.pouches) {
+			if (_vrik.IsDetectable(pouch.slot)) {
+				continue;
+			}
+			if (_settings.mayEnableSlots) {
+				_vrik.SwitchOn(pouch.slot);
+			} else {
+				Loc::Warn(Keys::kSlotOff, pouch.slot);
+			}
 		}
 
 		// And then the exclusive ones are suspended, so that VRIK detects the hand but

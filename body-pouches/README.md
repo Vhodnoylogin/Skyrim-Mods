@@ -76,14 +76,19 @@ bottle, the contents come straight from the pack, and setting up is done by hand
 The slot needs two things at once, and that is not a choice but a consequence of how VRIK
 works: a slot allowing no weapon type is not detected at all ("set all weapon types to 0 to
 disable a slot" is its author's own comment in `vrikslots.ini`), and the slots a build leaves
-free are switched off in exactly that way. So the plugin switches the slot on itself through
-`setSettingDouble` after every load and suspends it straight away: VRIK sees the hand but
-neither puts anything there nor draws from it.
+free are switched off in exactly that way.
 
-**No file of anybody else's is changed.** VRIK's settings are altered in memory only - its
-contract says plainly that "files are not saved automatically", and `saveSettings()` is never
-called. No second mod is needed alongside: a mod this one cannot work without would not be a
-second mod, it would be part of this one.
+**The mod does not change VRIK's settings.** It reads them, and when a slot is off it says so in
+the log and names where it is switched on: VRIK's MCM, the Weapon / Leg / Body / Arm Holsters
+pages, any one weapon type for that slot. Somebody else's setting is not ours to change on their
+behalf - not even in memory, not even reversibly: another mod may be arranging the same value,
+and the player would see one thing in the menu and get another in the game.
+
+Anyone who would rather the mod did it sets `mayEnableSlots: true` in `bodypouches.json`; the
+slot is then switched on from code and every such change is written to the log. Off by default.
+
+Suspension is unaffected: a slot given over to a pouch entirely is suspended after every load -
+that state VRIK keeps for plugins and, by its author's design, never saves.
 
 It has never been run in the game. The first session settles these:
 
