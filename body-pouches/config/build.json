@@ -5,14 +5,6 @@
     "version": "0.1.0",
     "dll": "{root}/build/Release/BodyPouches.dll",
     "dllTargetRel": "SKSE/Plugins",
-    "settings": "{root}/bodypouches.json",
-    "settingsTargetRel": "SKSE/Plugins/bodypouches",
-    "localization": {
-      "name": "BodyPouches",
-      "base": "english",
-      "source": "{root}/localization",
-      "header": "{root}/src/LocStrings.h"
-    },
     "docs": [
       "{root}/README.md",
       "{root}/README.ru.md"

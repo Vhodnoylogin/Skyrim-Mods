@@ -55,6 +55,29 @@ The core builds and is checked without SKSE and without the game — the game is
 above. That buys a second way out as well: in flat Skyrim a slot may hand the item over differently,
 and the core has no need to know.
 
+## Building
+
+    cmake -S . -B build-core -DBODYPOUCHES_BUILD_PLUGIN=OFF   # core and checks, no network
+    cmake --build build-core --config Release
+    build-core\tests\Release\bodypouches_tests.exe
+
+    cmake -S . -B build                                       # the mod itself, fetches CommonLibSSE-NG
+    cmake --build build --config Release --target BodyPouches
+    tools\deploy.ps1 -Apply                                   # lay out into mods\Body Pouches
+
+The settings file and the table of text are written by the plugin on first run into
+`Data\SKSE\Plugins\bodypouches\`, so the mod itself is one library.
+
 ## State
 
-A skeleton. The core and the adapters are not written yet.
+The simple variant is written and builds. One pouch shows one bottle, the contents come
+straight from the pack, and setting up is done by hand.
+
+It has never been run in the game. The first session settles these:
+
+| What | Why it is unknown |
+|---|---|
+| whether VRIK will draw a potion in a slot | `VrikSetSlotForArt` takes an art object, but what it does with something that is not a weapon is not visible in the code |
+| whether "secondary hand" is read correctly | VRIK says secondary, HIGGS and the game say left; the translation is made from the left-handed setting and is untested |
+| which node the bottle appears at | `LeftWandNode`, the hand, the finger are tried in turn - which exists in VR shows only in the game |
+| whether HIGGS lets go of a bottle we put back in the pack | the reference is deleted out of its hand, and nothing says how it takes that |

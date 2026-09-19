@@ -104,9 +104,11 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(CommonLibSSE)
 
 # ------------------------------------------------------------------- the mod
-# contract/ holds the headers of VRIK and HIGGS as their authors published them.
-# vrikinterface001.cpp is part of that contract - it is the handshake itself - so
-# it is compiled in rather than copied into our own sources.
+# contract/ holds the headers of VRIK and HIGGS exactly as their authors published
+# them, and src/compat supplies the SKSE64 names those headers were written against -
+# see src/compat/skse64/PluginAPI.h. The authors' own handshake .cpp files are NOT
+# compiled in: they call the old messaging interface, and ours goes through
+# CommonLibSSE instead (src/vr/Handshake.h).
 file(GLOB_RECURSE BODYPOUCHES_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
 file(GLOB_RECURSE BODYPOUCHES_HEADERS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h")
 list(REMOVE_ITEM BODYPOUCHES_SOURCES ${BODYPOUCHES_CORE_SOURCES})
@@ -115,7 +117,6 @@ list(REMOVE_ITEM BODYPOUCHES_HEADERS ${BODYPOUCHES_CORE_HEADERS})
 add_library(BodyPouches SHARED
     ${BODYPOUCHES_SOURCES}
     ${BODYPOUCHES_HEADERS}
-    "${CMAKE_CURRENT_SOURCE_DIR}/contract/vrikinterface001.cpp"
 )
 
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" FILES ${BODYPOUCHES_SOURCES} ${BODYPOUCHES_HEADERS})
@@ -137,6 +138,7 @@ target_compile_definitions(BodyPouches PRIVATE
 
 target_include_directories(BodyPouches PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/compat"
     "${CMAKE_CURRENT_SOURCE_DIR}/contract"
     "${RAPIDCSV_INCLUDE_DIRS}"
 )
@@ -146,7 +148,3 @@ target_link_libraries(BodyPouches PRIVATE
     CommonLibSSE::CommonLibSSE
     nlohmann_json::nlohmann_json
 )
-
-if(BODYPOUCHES_BUILD_TESTS AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt")
-    add_subdirectory(tests)
-endif()
