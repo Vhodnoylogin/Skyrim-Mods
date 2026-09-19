@@ -63,7 +63,7 @@ and the core has no need to know.
 
     cmake -S . -B build                                       # the mod itself, fetches CommonLibSSE-NG
     cmake --build build --config Release --target BodyPouches
-    tools\deploy.ps1 -Apply                                   # lay out into mods\Body Pouches
+    tools\package.ps1 -Apply                                  # archive into downloads, installed through the MO2 bridge
 
 The settings file and the table of text are written by the plugin on first run into
 `Data\SKSE\Plugins\bodypouches\`, so the mod itself is one library.

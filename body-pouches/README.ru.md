@@ -62,7 +62,7 @@ virtual void AddHolsterAttemptCallback(HolsterAttemptCallback callback) = 0;
 
     cmake -S . -B build                                       # сам мод, тянет CommonLibSSE-NG
     cmake --build build --config Release --target BodyPouches
-    tools\deploy.ps1 -Apply                                   # разложить в mods\Body Pouches
+    tools\package.ps1 -Apply                                  # архив в downloads + установка через мост MO2
 
 Настройки и таблица текста пишутся самим плагином при первом запуске
 в `Data\SKSE\Plugins\bodypouches\`, поэтому в моде лежит одна библиотека.
