@@ -27,9 +27,13 @@ namespace BodyPouches
 
 				{ Keys::kHiggsFound, "HIGGS found, build {0}" },
 				{ Keys::kHiggsMissing, "HIGGS not found: pouches need it to put a bottle in the hand" },
+				{ Keys::kVrikSubscribed, "VRIK took the holster callback: every reach for a slot now comes here first" },
+				{ Keys::kHiggsSubscribed, "HIGGS took the consumed, stashed and dropped callbacks" },
+				{ Keys::kConnectGaveUp, "the mod stays idle and nothing else will be logged: VRIK = {0}, HIGGS = {1}" },
 
 				{ Keys::kConfigWritten, "settings written to {0}" },
 				{ Keys::kConfigRead, "settings read from {0}: {1} pouches" },
+				{ Keys::kPouchConfigured, "pouch on slot {0}, mode {1}" },
 				{ Keys::kConfigBad, "settings at {0} could not be read ({1}); built-in defaults are used" },
 
 				{ Keys::kPouchAssigned, "pouch {0} set up from what was put in it" },
@@ -50,9 +54,20 @@ namespace BodyPouches
 				{ Keys::kNotArranging, "no pouches are arranged: VRIK ready = {0}, HIGGS ready = {1}" },
 				{ Keys::kSlotDetectable, "slot {0} is one VRIK looks at" },
 				{ Keys::kHolsterOffered, "VRIK offers slot {0}: secondaryHand = {1}, handOccupied = {2}" },
+				{ Keys::kDecision, "slot {0}: act = {1}, reason = {2}, {3} hand, VRIK acts = {4}" },
+				{ Keys::kTaskQueued, "slot {0}: the doing of it is queued for the game's next task" },
+				{ Keys::kNoTasks, "slot {0}: SKSE gave no task interface, so nothing can be done" },
+				{ Keys::kDrawStart, "slot {0}: drawing into the {1} hand" },
+				{ Keys::kGrabAsked, "HIGGS asked to close the {0} hand on the bottle" },
+				{ Keys::kStowStart, "slot {0}: the {1} hand offers what it holds" },
+				{ Keys::kNothingHeld, "the {0} hand holds nothing HIGGS knows of" },
+				{ Keys::kHeldNotPotion, "what the {0} hand holds is not a potion" },
+				{ Keys::kHiggsEvent, "HIGGS says {0}, {1} hand" },
+				{ Keys::kIdleHere, "a reach came in while the mod is idle; VRIK keeps the slot" },
 
 				{ Keys::kItemNotFound, "{0}|{1:08X} is not in this load order" },
 				{ Keys::kHandNotFound, "the {0} hand has no node to put a bottle at" },
+				{ Keys::kHandNode, "the {0} hand is at node {1}" },
 				{ Keys::kDropFailed, "the game would not put the bottle into the world" },
 			};
 			return table;

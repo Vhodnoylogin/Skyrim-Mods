@@ -20,11 +20,15 @@ namespace BodyPouches::Keys
 	inline constexpr auto kVrikNoCallback = "vrik.no_callback";
 	inline constexpr auto kHiggsFound = "higgs.found";
 	inline constexpr auto kHiggsMissing = "higgs.missing";
+	inline constexpr auto kVrikSubscribed = "vrik.subscribed";
+	inline constexpr auto kHiggsSubscribed = "higgs.subscribed";
+	inline constexpr auto kConnectGaveUp = "connect.gave_up";
 
 	// Settings
 	inline constexpr auto kConfigWritten = "config.written";
 	inline constexpr auto kConfigRead = "config.read";
 	inline constexpr auto kConfigBad = "config.bad";
+	inline constexpr auto kPouchConfigured = "config.pouch";
 
 	// The pouches at work
 	inline constexpr auto kPouchAssigned = "pouch.assigned";
@@ -47,9 +51,20 @@ namespace BodyPouches::Keys
 	inline constexpr auto kNotArranging = "game.not_arranging";
 	inline constexpr auto kSlotDetectable = "slot.detectable";
 	inline constexpr auto kHolsterOffered = "holster.offered";
+	inline constexpr auto kDecision = "decide.result";
+	inline constexpr auto kTaskQueued = "task.queued";
+	inline constexpr auto kNoTasks = "task.no_interface";
+	inline constexpr auto kDrawStart = "draw.start";
+	inline constexpr auto kGrabAsked = "draw.grab_asked";
+	inline constexpr auto kStowStart = "stow.start";
+	inline constexpr auto kNothingHeld = "stow.nothing_held";
+	inline constexpr auto kHeldNotPotion = "stow.not_a_potion";
+	inline constexpr auto kHiggsEvent = "higgs.event";
+	inline constexpr auto kIdleHere = "mod.idle_here";
 
 	// Things that can go wrong at the boundary with the game
 	inline constexpr auto kItemNotFound = "item.not_found";
 	inline constexpr auto kHandNotFound = "hand.not_found";
+	inline constexpr auto kHandNode = "hand.node";
 	inline constexpr auto kDropFailed = "drop.failed";
 }

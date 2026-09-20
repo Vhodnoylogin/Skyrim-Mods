@@ -35,7 +35,9 @@ namespace BodyPouches
 		if (!vrik || !higgs) {
 			// Both are needed and neither can be replaced: VRIK owns the places on the
 			// body, HIGGS owns the hands. Without either, the mod does nothing at all
-			// rather than half of something.
+			// rather than half of something. Said out loud, because from here on the log
+			// falls silent and silence on its own explains nothing.
+			Loc::Warn(Keys::kConnectGaveUp, vrik, higgs);
 			return;
 		}
 
@@ -44,9 +46,12 @@ namespace BodyPouches
 			return;
 		}
 
+		Loc::Info(Keys::kVrikSubscribed);
+
 		_higgs.OnConsumed(&Mod::OnConsumed);
 		_higgs.OnStashed(&Mod::OnStashed);
 		_higgs.OnDropped(&Mod::OnDropped);
+		Loc::Info(Keys::kHiggsSubscribed);
 	}
 
 	void Mod::OnDataLoaded()
@@ -72,6 +77,7 @@ namespace BodyPouches
 		_pouches.Clear();
 		for (const auto& setting : a_settings.pouches) {
 			_pouches.Set(Core::Pouch(setting.slot, Settings::ModeFromText(setting.mode)));
+			Loc::Info(Keys::kPouchConfigured, setting.slot, setting.mode);
 		}
 	}
 
@@ -136,6 +142,7 @@ namespace BodyPouches
 		for (const char* name : (a_isLeft ? std::span<const char* const>(kLeftNodes) : std::span<const char* const>(kRightNodes))) {
 			if (auto* node = root->GetObjectByName(name); node != nullptr) {
 				a_out = node->world.translate;
+				Loc::Info(Keys::kHandNode, HandName(a_isLeft), name);
 				return true;
 			}
 		}
@@ -146,6 +153,8 @@ namespace BodyPouches
 
 	bool Mod::Draw(int a_slot, bool a_isLeft, const Core::FormKey& a_item)
 	{
+		Loc::Info(Keys::kDrawStart, a_slot, HandName(a_isLeft));
+
 		auto* object = Game::PlayerPack::Held(a_item);
 		if (object == nullptr) {
 			Loc::Warn(Keys::kItemNotFound, a_item.plugin, a_item.localId);
@@ -174,6 +183,7 @@ namespace BodyPouches
 		}
 
 		_higgs.Grab(dropped.get(), a_isLeft);
+		Loc::Info(Keys::kGrabAsked, HandName(a_isLeft));
 		_pouches.NoteDrawn(a_isLeft, a_slot, a_item);
 		Loc::Info(Keys::kPouchDrawn, a_slot, HandName(a_isLeft));
 		return true;
@@ -181,14 +191,18 @@ namespace BodyPouches
 
 	bool Mod::TakeBack(int a_slot, bool a_isLeft, bool a_assigning)
 	{
+		Loc::Info(Keys::kStowStart, a_slot, HandName(a_isLeft));
+
 		auto* held = _higgs.Held(a_isLeft);
 		if (held == nullptr) {
+			Loc::Info(Keys::kNothingHeld, HandName(a_isLeft));
 			return false;
 		}
 
 		auto* base = held->GetBaseObject();
 		auto* potion = base != nullptr ? base->As<RE::AlchemyItem>() : nullptr;
 		if (potion == nullptr) {
+			Loc::Info(Keys::kHeldNotPotion, HandName(a_isLeft));
 			return false;
 		}
 
@@ -233,6 +247,7 @@ namespace BodyPouches
 
 		auto& mod = GetSingleton();
 		if (!mod.Working()) {
+			Loc::Debug(Keys::kIdleHere);
 			return true;  // not our business: let VRIK do what it always did
 		}
 
@@ -250,6 +265,11 @@ namespace BodyPouches
 			decision = mod._pouches.Decide(reach, mod._pack);
 		}
 
+		// The whole point of the core is in this one value, so it is said before anything
+		// is done with it: act, reason, hand, and the bool VRIK is about to be given.
+		Loc::Info(Keys::kDecision, decision.slot, Core::Name(decision.act),
+			Core::Name(decision.reason), HandName(isLeft), decision.LetVrikAct());
+
 		// VRIK is waiting for an answer this very frame, so the decision is made here
 		// and the doing is put on the game's task queue. Removing an item from the
 		// inventory and placing a reference is not work to start inside somebody else's
@@ -260,6 +280,9 @@ namespace BodyPouches
 				tasks->AddTask([slot = decision.slot, isLeft, item = decision.item]() {
 					GetSingleton().Draw(slot, isLeft, item);
 				});
+				Loc::Info(Keys::kTaskQueued, decision.slot);
+			} else {
+				Loc::Error(Keys::kNoTasks, decision.slot);
 			}
 			break;
 
@@ -270,6 +293,9 @@ namespace BodyPouches
 				tasks->AddTask([slot = decision.slot, isLeft, assigning]() {
 					GetSingleton().TakeBack(slot, isLeft, assigning);
 				});
+				Loc::Info(Keys::kTaskQueued, decision.slot);
+			} else {
+				Loc::Error(Keys::kNoTasks, decision.slot);
 			}
 			break;
 
@@ -289,6 +315,8 @@ namespace BodyPouches
 
 	void Mod::OnConsumed(bool a_isLeft, ::TESForm*)
 	{
+		Loc::Info(Keys::kHiggsEvent, "consumed", HandName(a_isLeft));
+
 		auto& mod = GetSingleton();
 		std::scoped_lock guard(mod._lock);
 		if (const auto slot = mod._pouches.SlotOfHand(a_isLeft); slot.has_value()) {
@@ -299,6 +327,8 @@ namespace BodyPouches
 
 	void Mod::OnStashed(bool a_isLeft, ::TESForm*)
 	{
+		Loc::Info(Keys::kHiggsEvent, "stashed", HandName(a_isLeft));
+
 		auto& mod = GetSingleton();
 		std::scoped_lock guard(mod._lock);
 		if (const auto slot = mod._pouches.SlotOfHand(a_isLeft); slot.has_value()) {
@@ -309,6 +339,8 @@ namespace BodyPouches
 
 	void Mod::OnDropped(bool a_isLeft, ::TESObjectREFR*)
 	{
+		Loc::Info(Keys::kHiggsEvent, "dropped", HandName(a_isLeft));
+
 		auto& mod = GetSingleton();
 		std::scoped_lock guard(mod._lock);
 		if (const auto slot = mod._pouches.SlotOfHand(a_isLeft); slot.has_value()) {

@@ -37,6 +37,38 @@ namespace BodyPouches::Core
 		HandUnavailable
 	};
 
+	// The names of the two vocabularies above, for the log and for nothing else. They
+	// are identifiers, not sentences: a line that says what the core decided is looked
+	// up by key and translated like every other, and these fill its placeholders the
+	// way a slot number does.
+	[[nodiscard]] constexpr const char* Name(Act a_act) noexcept
+	{
+		switch (a_act) {
+		case Act::PassToVrik: return "pass-to-vrik";
+		case Act::Draw:       return "draw";
+		case Act::Stow:       return "stow";
+		case Act::Assign:     return "assign";
+		case Act::Refuse:     return "refuse";
+		default:              return "?";
+		}
+	}
+
+	[[nodiscard]] constexpr const char* Name(Reason a_reason) noexcept
+	{
+		switch (a_reason) {
+		case Reason::NotOurs:         return "not-ours";
+		case Reason::Drawn:           return "drawn";
+		case Reason::Stowed:          return "stowed";
+		case Reason::Assigned:        return "assigned";
+		case Reason::NothingInPack:   return "nothing-in-pack";
+		case Reason::NotAssigned:     return "not-assigned";
+		case Reason::WrongItem:       return "wrong-item";
+		case Reason::HandBusy:        return "hand-busy";
+		case Reason::HandUnavailable: return "hand-unavailable";
+		default:                      return "?";
+		}
+	}
+
 	struct Decision
 	{
 		Act     act{ Act::PassToVrik };
