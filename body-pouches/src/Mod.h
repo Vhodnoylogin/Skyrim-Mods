@@ -6,7 +6,9 @@
 #include "vr/HiggsLink.h"
 #include "vr/VrikLink.h"
 
+#include <atomic>
 #include <mutex>
+#include <thread>
 
 namespace BodyPouches
 {
@@ -61,7 +63,10 @@ namespace BodyPouches
 		//
 		// It re-queues itself on the game's task queue, so it runs on the game's own
 		// thread and stops costing anything the moment the mod is idle.
+		// One reading, on the game's thread. Never re-queues itself: see PollReach.
 		static void PollReach();
+		// The pace, on a thread of its own - sleep, hand over one reading, sleep.
+		static void PollLoop();
 		void        NoteReach();
 		void        StartPolling();
 		// Switch on the slots the pouches sit in, then suspend the exclusive ones. Runs
@@ -79,7 +84,7 @@ namespace BodyPouches
 		// What the last poll saw, so that only changes are said.
 		int  _reach[2]{ 0, 0 };
 		bool _slotsArranged{ false };
-		bool _polling{ false };
+		std::atomic<bool> _polling{ false };
 
 		Core::PouchSet   _pouches;
 		Game::PlayerPack _pack;

@@ -8,7 +8,9 @@
 #include <SKSE/SKSE.h>
 
 #include <array>
+#include <chrono>
 #include <span>
+#include <thread>
 
 namespace BodyPouches
 {
@@ -72,26 +74,43 @@ namespace BodyPouches
 		if (auto* tasks = SKSE::GetTaskInterface(); tasks != nullptr) {
 			_polling = true;
 			Loc::Info(Keys::kReachWatch);
-			tasks->AddTask(&Mod::PollReach);
+			std::thread(&Mod::PollLoop).detach();
 		}
 	}
 
 	void Mod::PollReach()
 	{
+		// WHAT NOT TO DO HERE, LEARNED THE HARD WAY.
+		//
+		// This function used to end by putting itself back on the game's task queue,
+		// with a comment claiming that made it run once a frame. It does not. The game
+		// drains that queue before it finishes the frame, so a task that re-adds itself
+		// is drained forever and the frame never ends. Version 0.1.4 hung Skyrim VR on
+		// the loading screen twice, with a hundred WaitForTrackingData timeouts in the
+		// compositor's log and no crash: the game was alive and never gave a frame back.
+		//
+		// The pace therefore comes from a thread that sleeps, and this task only ever
+		// does one reading and returns.
 		auto& mod = GetSingleton();
-		if (!mod.Working()) {
-			mod._polling = false;
-			return;
+		if (mod.Working()) {
+			mod.NoteReach();
 		}
+	}
 
-		mod.NoteReach();
+	void Mod::PollLoop()
+	{
+		using namespace std::chrono_literals;
 
-		// Put back on the queue rather than looped: this way it runs once per frame on
-		// the game's own thread, which is the only thread VRIK may be asked anything on.
-		if (auto* tasks = SKSE::GetTaskInterface(); tasks != nullptr) {
-			tasks->AddTask(&Mod::PollReach);
-		} else {
-			mod._polling = false;
+		auto& mod = GetSingleton();
+		while (mod._polling) {
+			std::this_thread::sleep_for(250ms);
+
+			// VRIK may only be asked anything on the game's own thread, so this thread
+			// asks nothing itself - it hands over one reading and goes back to sleep.
+			// Four times a second is far more than a hand moving to a holster needs.
+			if (auto* tasks = SKSE::GetTaskInterface(); tasks != nullptr) {
+				tasks->AddTask(&Mod::PollReach);
+			}
 		}
 	}
 
