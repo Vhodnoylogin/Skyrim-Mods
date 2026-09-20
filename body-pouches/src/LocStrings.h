@@ -34,11 +34,19 @@ namespace BodyPouches::Keys
 	inline constexpr auto kPouchWrongItem = "pouch.wrong_item";
 	inline constexpr auto kPouchHandBusy = "pouch.hand_busy";
 	inline constexpr auto kPouchSuspended = "pouch.suspended";
+	inline constexpr auto kSuspendRefused = "pouch.suspend_refused";
 	inline constexpr auto kSlotSwitchedOn = "slot.switched_on";
 	inline constexpr auto kSlotOff = "slot.off";
 	inline constexpr auto kPouchConsumed = "pouch.consumed";
 	inline constexpr auto kPouchReturned = "pouch.returned";
 	inline constexpr auto kPouchLost = "pouch.lost";
+
+	// What the mod is doing. A log that says nothing cannot be told from a mod that was
+	// never called, and telling those two apart is worth a few lines of its own.
+	inline constexpr auto kGameLoaded = "game.loaded";
+	inline constexpr auto kNotArranging = "game.not_arranging";
+	inline constexpr auto kSlotDetectable = "slot.detectable";
+	inline constexpr auto kHolsterOffered = "holster.offered";
 
 	// Things that can go wrong at the boundary with the game
 	inline constexpr auto kItemNotFound = "item.not_found";

@@ -39,11 +39,17 @@ namespace BodyPouches
 				{ Keys::kPouchWrongItem, "pouch {0} does not hold that" },
 				{ Keys::kPouchHandBusy, "the {0} hand is not free" },
 				{ Keys::kPouchSuspended, "slot {0} suspended in VRIK" },
+				{ Keys::kSuspendRefused, "VRIK would not suspend slot {0}: the pouch there cannot take the slot over" },
 				{ Keys::kSlotSwitchedOn, "slot {0} was off in VRIK and has been switched on in memory because mayEnableSlots is set - VRIK's own files are not touched, but its menu will disagree with the game until you set it there too" },
 				{ Keys::kSlotOff, "slot {0} allows no weapon type, so VRIK never looks at it and the pouch there cannot work. Allow any one weapon type for it in VRIK's MCM (the Weapon / Leg / Body / Arm Holsters pages), or set mayEnableSlots in bodypouches.json to let this mod do it" },
 				{ Keys::kPouchConsumed, "what came from pouch {0} was drunk" },
 				{ Keys::kPouchReturned, "what came from pouch {0} went back to the pack" },
 				{ Keys::kPouchLost, "what came from pouch {0} was dropped and is lying where it fell" },
+
+				{ Keys::kGameLoaded, "a game was loaded: arranging {0} pouches" },
+				{ Keys::kNotArranging, "no pouches are arranged: VRIK ready = {0}, HIGGS ready = {1}" },
+				{ Keys::kSlotDetectable, "slot {0} is one VRIK looks at" },
+				{ Keys::kHolsterOffered, "VRIK offers slot {0}: secondaryHand = {1}, handOccupied = {2}" },
 
 				{ Keys::kItemNotFound, "{0}|{1:08X} is not in this load order" },
 				{ Keys::kHandNotFound, "the {0} hand has no node to put a bottle at" },
@@ -81,6 +87,19 @@ namespace BodyPouches
 			const auto last = a_text.find_last_not_of(" \t\r\n");
 			return std::string(a_text.substr(first, last - first + 1));
 		}
+	}
+
+	void Loc::SetLevel(const std::string& a_level)
+	{
+		// An unreadable name must not silence the log: spdlog answers "off" for anything
+		// it does not know, and a mod whose log is off by a typo cannot be diagnosed at
+		// all. Only the word "off" itself is allowed to mean off.
+		auto level = spdlog::level::from_str(a_level);
+		if (level == spdlog::level::off && a_level != "off") {
+			level = spdlog::level::info;
+		}
+		spdlog::set_level(level);
+		spdlog::flush_on(level);
 	}
 
 	void Loc::Load()

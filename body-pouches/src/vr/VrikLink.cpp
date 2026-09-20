@@ -48,7 +48,11 @@ namespace BodyPouches::VR
 			return false;
 		}
 		const bool done = _api->SetSlotSuspended(a_slot, a_suspended);
-		if (done && a_suspended) {
+		if (!done && a_suspended) {
+			// A refusal used to return quietly, which left a run unable to tell a slot
+			// VRIK would not give up from a slot nobody ever asked it about.
+			Loc::Error(Keys::kSuspendRefused, a_slot);
+		} else if (done && a_suspended) {
 			Loc::Info(Keys::kPouchSuspended, a_slot);
 		}
 		return done;

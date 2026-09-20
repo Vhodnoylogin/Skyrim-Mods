@@ -52,12 +52,17 @@ namespace BodyPouches
 	void Mod::OnDataLoaded()
 	{
 		_settings = LoadSettings();
+		Loc::SetLevel(_settings.logLevel);
 		Loc::Load(Paths::LangDir(), _settings.language);
 		BuildPouches(_settings);
 	}
 
 	void Mod::OnGameLoaded()
 	{
+		// Said out loud on purpose. A run of this mod once ended with a log that stopped
+		// after the settings were read, and nothing in it could tell "the message never
+		// arrived" from "it arrived and every step of it quietly did nothing".
+		Loc::Info(Keys::kGameLoaded, _settings.pouches.size());
 		ApplySlots();
 	}
 
@@ -73,6 +78,7 @@ namespace BodyPouches
 	void Mod::ApplySlots()
 	{
 		if (!Working()) {
+			Loc::Warn(Keys::kNotArranging, _vrik.Ready(), _higgs.Ready());
 			return;
 		}
 		std::scoped_lock guard(_lock);
@@ -87,6 +93,7 @@ namespace BodyPouches
 		// when the player has said we may.
 		for (const auto& pouch : _settings.pouches) {
 			if (_vrik.IsDetectable(pouch.slot)) {
+				Loc::Info(Keys::kSlotDetectable, pouch.slot);
 				continue;
 			}
 			if (_settings.mayEnableSlots) {
@@ -218,6 +225,12 @@ namespace BodyPouches
 
 	bool Mod::OnHolsterAttempt(int a_slot, bool a_secondaryHand, bool a_handOccupied)
 	{
+		// Before anything is decided, so that the log answers the first question any run
+		// asks: was this callback called at all? Said at info and not at debug on
+		// purpose - a line that only appears when somebody remembered to raise the log
+		// level is a line that is missing from the run that needed it.
+		Loc::Info(Keys::kHolsterOffered, a_slot, a_secondaryHand, a_handOccupied);
+
 		auto& mod = GetSingleton();
 		if (!mod.Working()) {
 			return true;  // not our business: let VRIK do what it always did

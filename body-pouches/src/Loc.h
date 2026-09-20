@@ -30,6 +30,10 @@ namespace BodyPouches
 		static void Load();
 		static void Load(const std::filesystem::path& a_dir, const std::string& a_language);
 
+		// Set from the settings once they are read, so that a run can be asked for more
+		// detail without a new build.
+		static void SetLevel(const std::string& a_level);
+
 		[[nodiscard]] static const char*        Get(const char* a_key);
 		[[nodiscard]] static const std::string& Language();
 
