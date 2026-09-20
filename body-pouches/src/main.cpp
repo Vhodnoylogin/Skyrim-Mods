@@ -111,7 +111,7 @@ extern "C" __declspec(dllexport) bool SKSEAPI SKSEPlugin_Query(const SKSE::Query
 
 extern "C" __declspec(dllexport) constinit auto SKSEPlugin_Version = []() {
 	SKSE::PluginVersionData v;
-	v.PluginVersion(REL::Version{ 0, 1, 5 });
+	v.PluginVersion(REL::Version{ 0, 1, 6 });
 	v.PluginName(PLUGIN_NAME);
 	v.AuthorName(PLUGIN_AUTHOR);
 	v.UsesAddressLibrary(true);

@@ -59,6 +59,8 @@ namespace BodyPouches::Keys
 	inline constexpr auto kStowStart = "stow.start";
 	inline constexpr auto kNothingHeld = "stow.nothing_held";
 	inline constexpr auto kHeldNotPotion = "stow.not_a_potion";
+	inline constexpr auto kHeldIs = "stow.held_is";
+	inline constexpr auto kHeldNoBase = "stow.no_base";
 	inline constexpr auto kHiggsEvent = "higgs.event";
 	inline constexpr auto kSkseMessage = "skse.message";
 	inline constexpr auto kReachWatch = "reach.watch";

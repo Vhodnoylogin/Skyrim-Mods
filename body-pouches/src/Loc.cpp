@@ -62,6 +62,8 @@ namespace BodyPouches
 				{ Keys::kStowStart, "slot {0}: the {1} hand offers what it holds" },
 				{ Keys::kNothingHeld, "the {0} hand holds nothing HIGGS knows of" },
 				{ Keys::kHeldNotPotion, "what the {0} hand holds is not a potion" },
+				{ Keys::kHeldIs, "the {0} hand holds \"{1}\", form type {2}, form {3:08X}, reference {4:08X}" },
+				{ Keys::kHeldNoBase, "what the {0} hand holds has no base object at all, reference {1:08X}" },
 				{ Keys::kHiggsEvent, "HIGGS says {0}, {1} hand" },
 				{ Keys::kSkseMessage, "SKSE message {0} (number {1}) from {2}, {3} bytes of data" },
 				{ Keys::kReachWatch, "watching, frame by frame, which slot each hand reaches" },

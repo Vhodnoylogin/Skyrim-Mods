@@ -275,7 +275,20 @@ namespace BodyPouches
 		}
 
 		auto* base = held->GetBaseObject();
-		auto* potion = base != nullptr ? base->As<RE::AlchemyItem>() : nullptr;
+		if (base == nullptr) {
+			Loc::Warn(Keys::kHeldNoBase, HandName(a_isLeft), held->GetFormID());
+			return false;
+		}
+
+		// Said whether the thing turns out to be a potion or not. Run 5 got as far as
+		// here and stopped at "not a potion", and that line alone could not tell a real
+		// sword in the hand from a stale reference HIGGS had already let go of - which
+		// is why what is in the hand is now named outright.
+		const auto* name = base->GetName();
+		Loc::Info(Keys::kHeldIs, HandName(a_isLeft), name != nullptr ? name : "",
+			RE::FormTypeToString(base->GetFormType()), base->GetFormID(), held->GetFormID());
+
+		auto* potion = base->As<RE::AlchemyItem>();
 		if (potion == nullptr) {
 			Loc::Info(Keys::kHeldNotPotion, HandName(a_isLeft));
 			return false;
