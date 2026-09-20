@@ -90,7 +90,11 @@ slot is then switched on from code and every such change is written to the log. 
 Suspension is unaffected: a slot given over to a pouch entirely is suspended after every load -
 that state VRIK keeps for plugins and, by its author's design, never saves.
 
-It has never been run in the game. The first session settles these:
+The first session in the game, on 20 September, settled nothing about the pouches and one thing
+about the handshake: the interfaces were asked for at `kPostLoad`, and both dispatches returned
+false because at that moment neither VRIK nor HIGGS had registered a listener yet. Load order
+decides who is ready first, so that moment is a race. The request now goes out at
+`kPostPostLoad`, and everything below is still what the next session settles:
 
 | What | Why it is unknown |
 |---|---|

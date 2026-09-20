@@ -39,9 +39,15 @@ namespace
 			return;
 		}
 		switch (a_message->type) {
-		case SKSE::MessagingInterface::kPostLoad:
-			// Every plugin is loaded: this is the earliest moment VRIK and HIGGS can
-			// be asked for their interfaces, and the only one their authors sanction.
+		case SKSE::MessagingInterface::kPostPostLoad:
+			// Every plugin has answered kPostLoad by now, which is the first moment every
+			// plugin that replies to messages is certain to have registered its listener.
+			//
+			// Both the VRIK and the HIGGS header say to ask "after kPostLoad", and taking
+			// them at their word is what the first run in the game died of: Dispatch simply
+			// returned false for both, because at kPostLoad neither of them was listening
+			// yet. Load order decides who is ready first, so kPostLoad is a race - and one
+			// this plugin loses whenever it is loaded before the plugin it is asking.
 			BodyPouches::Mod::GetSingleton().Connect();
 			break;
 		case SKSE::MessagingInterface::kDataLoaded:
@@ -79,7 +85,7 @@ extern "C" __declspec(dllexport) bool SKSEAPI SKSEPlugin_Query(const SKSE::Query
 
 extern "C" __declspec(dllexport) constinit auto SKSEPlugin_Version = []() {
 	SKSE::PluginVersionData v;
-	v.PluginVersion(REL::Version{ 0, 1, 0 });
+	v.PluginVersion(REL::Version{ 0, 1, 1 });
 	v.PluginName(PLUGIN_NAME);
 	v.AuthorName(PLUGIN_AUTHOR);
 	v.UsesAddressLibrary(true);

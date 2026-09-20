@@ -13,7 +13,7 @@ cmake_minimum_required(VERSION 3.24)
 #
 # The split is not decoration: the whole of the reasoning sits in the half that can
 # be run in a second, and the half that needs a headset holds no reasoning at all.
-project(BodyPouches VERSION 0.1.0 LANGUAGES CXX)
+project(BodyPouches VERSION 0.1.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

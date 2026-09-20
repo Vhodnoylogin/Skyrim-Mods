@@ -2,7 +2,7 @@
   "deploy": {
     "modsRoot": "D:/Skyrim VR Modding/MO2/ModOrganizer/Skyrim VR/mods",
     "modName": "test_Body Pouches",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "dll": "{root}/build/Release/BodyPouches.dll",
     "dllTargetRel": "SKSE/Plugins",
     "docs": [
