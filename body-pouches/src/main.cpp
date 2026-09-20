@@ -59,7 +59,36 @@ namespace
 	}
 }
 
-SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
+// HOW A PLUGIN INTRODUCES ITSELF, AND WHY THERE ARE THREE OF THESE.
+//
+// SKSE VR is the 1.4.15 branch and knows only the old handshake: it looks for an exported
+// SKSEPlugin_Query, and a library without one is refused outright with "does not appear to
+// be an SKSE plugin" - which is exactly what happened to the first build of this mod. Later
+// Skyrim reads SKSEPlugin_Version instead. Both are declared so that one library serves
+// both, which is the point of building on CommonLibSSE-NG at all.
+//
+// The convenience macro SKSEPluginLoad() writes only the modern pair. In VR that is a
+// plugin the game never even looks inside.
+extern "C" __declspec(dllexport) bool SKSEAPI SKSEPlugin_Query(const SKSE::QueryInterface* a_skse, SKSE::PluginInfo* a_info)
+{
+	a_info->infoVersion = SKSE::PluginInfo::kVersion;
+	a_info->name = PLUGIN_NAME;
+	a_info->version = 1;
+	return !a_skse->IsEditor();
+}
+
+extern "C" __declspec(dllexport) constinit auto SKSEPlugin_Version = []() {
+	SKSE::PluginVersionData v;
+	v.PluginVersion(REL::Version{ 0, 1, 0 });
+	v.PluginName(PLUGIN_NAME);
+	v.AuthorName(PLUGIN_AUTHOR);
+	v.UsesAddressLibrary(true);
+	v.UsesStructsPost629(true);
+	v.CompatibleVersions({ SKSE::RUNTIME_SSE_LATEST });
+	return v;
+}();
+
+extern "C" __declspec(dllexport) bool SKSEAPI SKSEPlugin_Load(const SKSE::LoadInterface* a_skse)
 {
 	SKSE::Init(a_skse);
 	SetUpLog();
