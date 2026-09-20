@@ -2,6 +2,7 @@
 
 #include "Loc.h"
 #include "Paths.h"
+#include "core/SlotPlan.h"
 #include "game/Forms.h"
 
 #include <SKSE/SKSE.h>
@@ -89,31 +90,37 @@ namespace BodyPouches
 		}
 		std::scoped_lock guard(_lock);
 
-		// Every pouch needs its slot to be one VRIK looks at - an off slot raises no
-		// event and a pouch there would simply be dead. But switching it on is not ours
-		// to do: it is VRIK's setting, arranged by whoever arranged it, and changing it
-		// behind their back is how two mods come to overwrite each other and how a
-		// player comes to see one thing in the menu and get another in the game.
-		//
-		// So by default we only say what is wrong and where it is fixed, and act only
-		// when the player has said we may.
-		for (const auto& pouch : _settings.pouches) {
-			if (_vrik.IsDetectable(pouch.slot)) {
-				Loc::Info(Keys::kSlotDetectable, pouch.slot);
+		// What to do with each slot is decided in the core, which can be tried without
+		// VRIK and without the game; all that happens here is the doing of it. The three
+		// steps are independent on purpose: a slot that is off and that we are allowed
+		// to switch on is switched on AND then taken over, in that order.
+		for (const auto& setting : _settings.pouches) {
+			const auto* pouch = _pouches.Find(setting.slot);
+			if (pouch == nullptr) {
 				continue;
 			}
-			if (_settings.mayEnableSlots) {
-				_vrik.SwitchOn(pouch.slot);
-			} else {
-				Loc::Warn(Keys::kSlotOff, pouch.slot);
-			}
-		}
 
-		// And then the exclusive ones are suspended, so that VRIK detects the hand but
-		// neither draws a weapon from the slot nor holsters one into it. Suspension is
-		// runtime-only by its author's design, which is why this runs after every load.
-		for (const int slot : _pouches.SlotsToSuspend()) {
-			_vrik.SetSuspended(slot, true);
+			Core::SlotFacts facts;
+			facts.slot = setting.slot;
+			facts.detectable = _vrik.SeeSlot(setting.slot).detectable;
+			facts.exclusive = pouch->PouchMode() == Core::Mode::Exclusive;
+			facts.maySwitchOn = _settings.mayEnableSlots;
+
+			const auto plan = Core::PlanFor(facts);
+			if (plan.switchOn) {
+				_vrik.SwitchOn(setting.slot);
+			}
+			if (plan.complain) {
+				// VRIK's setting, arranged by whoever arranged it. We say what is wrong
+				// and where it is fixed, and leave it alone.
+				Loc::Warn(Keys::kSlotOff, setting.slot);
+			}
+			if (plan.suspend) {
+				// So that VRIK detects the hand but neither draws a weapon from the slot
+				// nor holsters one into it. Suspension is runtime-only by its author's
+				// design, which is why this runs after every load.
+				_vrik.SetSuspended(setting.slot, true);
+			}
 		}
 	}
 

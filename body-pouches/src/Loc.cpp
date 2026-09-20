@@ -52,7 +52,7 @@ namespace BodyPouches
 
 				{ Keys::kGameLoaded, "a game was loaded: arranging {0} pouches" },
 				{ Keys::kNotArranging, "no pouches are arranged: VRIK ready = {0}, HIGGS ready = {1}" },
-				{ Keys::kSlotDetectable, "slot {0} is one VRIK looks at" },
+				{ Keys::kSlotSeen, "slot {0} as VRIK reads it: small={1} medium={2} large={3} ranged={4} shield={5} torch={6}, visible={7}, watched={8}" },
 				{ Keys::kHolsterOffered, "VRIK offers slot {0}: secondaryHand = {1}, handOccupied = {2}" },
 				{ Keys::kDecision, "slot {0}: act = {1}, reason = {2}, {3} hand, VRIK acts = {4}" },
 				{ Keys::kTaskQueued, "slot {0}: the doing of it is queued for the game's next task" },

@@ -237,15 +237,3 @@ TEST(the_hand_remembers_which_pouch_it_drew_from)
 	CHECK(!set.SlotOfHand(true).has_value());
 }
 
-// Suspension is runtime state inside somebody else's mod, so we ask for exactly as
-// much of it as the settings call for and not one slot more.
-TEST(only_exclusive_pouches_are_asked_to_be_suspended)
-{
-	PouchSet set;
-	set.Set(Pouch(kHip, Filter::FromItem(Healing()), Mode::Shared));
-	set.Set(Pouch(kChest, Filter::FromItem(Magicka()), Mode::Exclusive));
-
-	const auto slots = set.SlotsToSuspend();
-	CHECK_EQ(slots.size(), std::size_t{ 1 });
-	CHECK_EQ(slots.front(), kChest);
-}

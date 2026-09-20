@@ -28,17 +28,6 @@ namespace BodyPouches::Core
 		return it == _pouches.end() ? nullptr : &it->second;
 	}
 
-	std::vector<int> PouchSet::SlotsToSuspend() const
-	{
-		std::vector<int> slots;
-		for (const auto& [slot, pouch] : _pouches) {
-			if (pouch.PouchMode() == Mode::Exclusive) {
-				slots.push_back(slot);
-			}
-		}
-		return slots;
-	}
-
 	Decision PouchSet::Answer(int a_slot, bool a_leftHand, Act a_act, Reason a_reason, FormKey a_item)
 	{
 		Decision d;

@@ -49,7 +49,7 @@ namespace BodyPouches::Keys
 	// never called, and telling those two apart is worth a few lines of its own.
 	inline constexpr auto kGameLoaded = "game.loaded";
 	inline constexpr auto kNotArranging = "game.not_arranging";
-	inline constexpr auto kSlotDetectable = "slot.detectable";
+	inline constexpr auto kSlotSeen = "slot.seen";
 	inline constexpr auto kHolsterOffered = "holster.offered";
 	inline constexpr auto kDecision = "decide.result";
 	inline constexpr auto kTaskQueued = "task.queued";

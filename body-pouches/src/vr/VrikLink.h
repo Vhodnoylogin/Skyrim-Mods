@@ -4,8 +4,22 @@
 
 #include <RE/Skyrim.h>
 
+#include <array>
+
 namespace BodyPouches::VR
 {
+	// What VRIK's settings say about one slot, as the mod read them. Kept whole rather
+	// than boiled down to a yes/no so that the log can show the grounds along with the
+	// verdict: six zeroes because the slot really is off reads the same as six zeroes
+	// because we asked VRIK for a name it does not know, and those need telling apart.
+	struct SlotView
+	{
+		// small, medium, large, ranged, shield, torch - in that order.
+		std::array<double, 6> allows{};
+		double                visible{};
+		bool                  detectable{};
+	};
+
 	// Our side of VRIK.
 	//
 	// VRIK owns the places on the body: where a slot is, whether a hand is near it, what
@@ -57,6 +71,10 @@ namespace BodyPouches::VR
 		// event, so a pouch there is simply dead.
 		[[nodiscard]] bool IsDetectable(int a_slot);
 
+		// The same reading, said out loud. One line per slot, with every value it was
+		// decided from.
+		SlotView SeeSlot(int a_slot);
+
 		// Switch a slot on. NOT called unless the player has asked for it in our own
 		// settings: VRIK's configuration belongs to VRIK and to whoever set it, and a
 		// mod that quietly changes it - even in memory, even reversibly - leaves that
@@ -65,6 +83,9 @@ namespace BodyPouches::VR
 		bool SwitchOn(int a_slot);
 
 	private:
+		// The reading itself, silent: SeeSlot says it, IsDetectable only asks.
+		[[nodiscard]] SlotView Read(int a_slot);
+
 		vrikPluginApi::IVrikInterface001* _api{ nullptr };
 		unsigned int                      _build{ 0 };
 	};

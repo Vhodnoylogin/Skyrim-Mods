@@ -97,17 +97,34 @@ namespace BodyPouches::VR
 		constexpr std::array kWeaponTypes{ "Small", "Medium", "Large", "Ranged", "Shield", "Torch" };
 	}
 
-	bool VrikLink::IsDetectable(int a_slot)
+	SlotView VrikLink::Read(int a_slot)
 	{
+		SlotView view;
 		if (!Ready() || a_slot < 1 || a_slot > 14) {
-			return false;
+			return view;
 		}
-		for (const char* type : kWeaponTypes) {
-			if (GetSetting(std::format("allow{}Slot{}", type, a_slot).c_str()) > 0.0) {
-				return true;
+
+		for (std::size_t i = 0; i < kWeaponTypes.size(); ++i) {
+			view.allows[i] = GetSetting(std::format("allow{}Slot{}", kWeaponTypes[i], a_slot).c_str());
+			if (view.allows[i] > 0.0) {
+				view.detectable = true;
 			}
 		}
-		return false;
+		view.visible = GetSetting(std::format("visibleSlot{}", a_slot).c_str());
+		return view;
+	}
+
+	bool VrikLink::IsDetectable(int a_slot)
+	{
+		return Read(a_slot).detectable;
+	}
+
+	SlotView VrikLink::SeeSlot(int a_slot)
+	{
+		const auto view = Read(a_slot);
+		Loc::Info(Keys::kSlotSeen, a_slot, view.allows[0], view.allows[1], view.allows[2],
+			view.allows[3], view.allows[4], view.allows[5], view.visible, view.detectable);
+		return view;
 	}
 
 	bool VrikLink::SwitchOn(int a_slot)

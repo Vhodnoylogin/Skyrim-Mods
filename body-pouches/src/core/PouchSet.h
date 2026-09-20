@@ -53,11 +53,6 @@ namespace BodyPouches::Core
 		[[nodiscard]] Pouch*       Find(int a_slot) noexcept;
 		[[nodiscard]] std::size_t  Size() const noexcept { return _pouches.size(); }
 
-		// The slots the adapter must suspend in VRIK, and only those: suspension is
-		// runtime state inside somebody else's mod, so we ask for as little of it as
-		// the settings actually call for.
-		[[nodiscard]] std::vector<int> SlotsToSuspend() const;
-
 		// The fast answer, the one VRIK is waiting for.
 		[[nodiscard]] Decision Decide(const Reach& a_reach, const Pack& a_pack) const;
 
