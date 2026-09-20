@@ -61,6 +61,52 @@ namespace BodyPouches
 		Loc::SetLevel(_settings.logLevel);
 		Loc::Load(Paths::LangDir(), _settings.language);
 		BuildPouches(_settings);
+		StartPolling();
+	}
+
+	void Mod::StartPolling()
+	{
+		if (_polling || !Working()) {
+			return;
+		}
+		if (auto* tasks = SKSE::GetTaskInterface(); tasks != nullptr) {
+			_polling = true;
+			Loc::Info(Keys::kReachWatch);
+			tasks->AddTask(&Mod::PollReach);
+		}
+	}
+
+	void Mod::PollReach()
+	{
+		auto& mod = GetSingleton();
+		if (!mod.Working()) {
+			mod._polling = false;
+			return;
+		}
+
+		mod.NoteReach();
+
+		// Put back on the queue rather than looped: this way it runs once per frame on
+		// the game's own thread, which is the only thread VRIK may be asked anything on.
+		if (auto* tasks = SKSE::GetTaskInterface(); tasks != nullptr) {
+			tasks->AddTask(&Mod::PollReach);
+		} else {
+			mod._polling = false;
+		}
+	}
+
+	void Mod::NoteReach()
+	{
+		for (int hand = 0; hand < 2; ++hand) {
+			const bool secondary = hand == 1;
+			const int  slot = _vrik.SlotInReach(secondary);
+			if (slot == _reach[hand]) {
+				continue;  // only changes are worth a line; this runs every frame
+			}
+			_reach[hand] = slot;
+			Loc::Info(Keys::kReachChanged, HandName(IsLeftHand(secondary)), slot,
+				_vrik.CanBeHolstered(secondary));
+		}
 	}
 
 	void Mod::OnGameLoaded()
@@ -70,6 +116,7 @@ namespace BodyPouches
 		// arrived" from "it arrived and every step of it quietly did nothing".
 		Loc::Info(Keys::kGameLoaded, _settings.pouches.size());
 		ApplySlots();
+		StartPolling();
 	}
 
 	void Mod::BuildPouches(const Settings& a_settings)
@@ -106,7 +153,7 @@ namespace BodyPouches
 			facts.exclusive = pouch->PouchMode() == Core::Mode::Exclusive;
 			facts.maySwitchOn = _settings.mayEnableSlots;
 
-			const auto plan = Core::PlanFor(facts);
+				const auto plan = Core::PlanFor(facts);
 			if (plan.switchOn) {
 				_vrik.SwitchOn(setting.slot);
 			}
@@ -122,6 +169,8 @@ namespace BodyPouches
 				_vrik.SetSuspended(setting.slot, true);
 			}
 		}
+
+		_slotsArranged = true;
 	}
 
 	bool Mod::IsLeftHand(bool a_secondaryHand)
@@ -256,6 +305,21 @@ namespace BodyPouches
 		if (!mod.Working()) {
 			Loc::Debug(Keys::kIdleHere);
 			return true;  // not our business: let VRIK do what it always did
+		}
+
+		// Run 3 ended with the slots never arranged, because neither kNewGame nor
+		// kPostLoadGame ever reached this plugin. Whatever the reason for that turns out
+		// to be, a reach proves a game is running, and it is a better moment to notice
+		// than never.
+		if (!mod._slotsArranged) {
+			if (auto* tasks = SKSE::GetTaskInterface(); tasks != nullptr) {
+				Loc::Warn(Keys::kSlotsLate);
+				tasks->AddTask([]() {
+					auto& late = GetSingleton();
+					late.ApplySlots();
+					late.StartPolling();
+				});
+			}
 		}
 
 		const bool isLeft = IsLeftHand(a_secondaryHand);

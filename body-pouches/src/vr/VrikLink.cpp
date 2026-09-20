@@ -119,6 +119,16 @@ namespace BodyPouches::VR
 		return Read(a_slot).detectable;
 	}
 
+	int VrikLink::SlotInReach(bool a_secondaryHand)
+	{
+		return Ready() ? _api->GetHolsterSlotInReach(a_secondaryHand) : 0;
+	}
+
+	bool VrikLink::CanBeHolstered(bool a_secondaryHand)
+	{
+		return Ready() && _api->CanBeHolstered(a_secondaryHand);
+	}
+
 	SlotView VrikLink::SeeSlot(int a_slot)
 	{
 		const auto view = Read(a_slot);

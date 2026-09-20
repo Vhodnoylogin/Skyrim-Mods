@@ -33,11 +33,37 @@ namespace
 		spdlog::set_pattern("[%H:%M:%S.%e] [%l] %v");
 	}
 
+	// Every message SKSE has, by name. Run 3 ended without the slots ever being
+	// arranged because neither kNewGame nor kPostLoadGame reached this plugin, and a
+	// bare number in the log would have left the next reader doing this lookup by hand.
+	const char* MessageName(std::uint32_t a_type)
+	{
+		switch (a_type) {
+		case SKSE::MessagingInterface::kPostLoad:      return "kPostLoad";
+		case SKSE::MessagingInterface::kPostPostLoad:  return "kPostPostLoad";
+		case SKSE::MessagingInterface::kPreLoadGame:   return "kPreLoadGame";
+		case SKSE::MessagingInterface::kPostLoadGame:  return "kPostLoadGame";
+		case SKSE::MessagingInterface::kSaveGame:      return "kSaveGame";
+		case SKSE::MessagingInterface::kDeleteGame:    return "kDeleteGame";
+		case SKSE::MessagingInterface::kInputLoaded:   return "kInputLoaded";
+		case SKSE::MessagingInterface::kNewGame:       return "kNewGame";
+		case SKSE::MessagingInterface::kDataLoaded:    return "kDataLoaded";
+		default:                                       return "unknown";
+		}
+	}
+
 	void OnMessage(SKSE::MessagingInterface::Message* a_message)
 	{
 		if (a_message == nullptr) {
 			return;
 		}
+
+		// Said for every message, whether or not this plugin does anything about it: the
+		// question "did it arrive at all" has cost two runs already.
+		BodyPouches::Loc::Info(BodyPouches::Keys::kSkseMessage, MessageName(a_message->type),
+			a_message->type, a_message->sender != nullptr ? a_message->sender : "SKSE",
+			a_message->dataLen);
+
 		switch (a_message->type) {
 		case SKSE::MessagingInterface::kPostPostLoad:
 			// Every plugin has answered kPostLoad by now, which is the first moment every
@@ -85,7 +111,7 @@ extern "C" __declspec(dllexport) bool SKSEAPI SKSEPlugin_Query(const SKSE::Query
 
 extern "C" __declspec(dllexport) constinit auto SKSEPlugin_Version = []() {
 	SKSE::PluginVersionData v;
-	v.PluginVersion(REL::Version{ 0, 1, 3 });
+	v.PluginVersion(REL::Version{ 0, 1, 4 });
 	v.PluginName(PLUGIN_NAME);
 	v.AuthorName(PLUGIN_AUTHOR);
 	v.UsesAddressLibrary(true);

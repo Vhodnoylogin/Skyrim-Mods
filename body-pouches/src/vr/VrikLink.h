@@ -75,6 +75,14 @@ namespace BodyPouches::VR
 		// decided from.
 		SlotView SeeSlot(int a_slot);
 
+		// Which slot VRIK thinks this hand has reached, and whether it would holster
+		// there. VRIK answers these whether or not it decides to raise a holster
+		// attempt, which is why they are worth asking: a slot that never raises an
+		// attempt but does show up here is a slot VRIK sees the hand at and chooses to
+		// do nothing about. Zero means no slot.
+		[[nodiscard]] int  SlotInReach(bool a_secondaryHand);
+		[[nodiscard]] bool CanBeHolstered(bool a_secondaryHand);
+
 		// Switch a slot on. NOT called unless the player has asked for it in our own
 		// settings: VRIK's configuration belongs to VRIK and to whoever set it, and a
 		// mod that quietly changes it - even in memory, even reversibly - leaves that

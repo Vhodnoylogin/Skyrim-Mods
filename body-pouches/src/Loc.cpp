@@ -63,6 +63,10 @@ namespace BodyPouches
 				{ Keys::kNothingHeld, "the {0} hand holds nothing HIGGS knows of" },
 				{ Keys::kHeldNotPotion, "what the {0} hand holds is not a potion" },
 				{ Keys::kHiggsEvent, "HIGGS says {0}, {1} hand" },
+				{ Keys::kSkseMessage, "SKSE message {0} (number {1}) from {2}, {3} bytes of data" },
+				{ Keys::kReachWatch, "watching, frame by frame, which slot each hand reaches" },
+				{ Keys::kReachChanged, "the {0} hand reaches slot {1} (VRIK would holster there: {2})" },
+				{ Keys::kSlotsLate, "no load message ever arrived, so the slots are being arranged now, at the first reach" },
 				{ Keys::kIdleHere, "a reach came in while the mod is idle; VRIK keeps the slot" },
 
 				{ Keys::kItemNotFound, "{0}|{1:08X} is not in this load order" },

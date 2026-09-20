@@ -53,6 +53,17 @@ namespace BodyPouches
 		bool TakeBack(int a_slot, bool a_isLeft, bool a_assigning);
 
 		void BuildPouches(const Settings& a_settings);
+
+		// Ask VRIK, every frame, which slot each hand has reached, and say so whenever
+		// the answer changes. This is how a hand held at a slot that raises no holster
+		// attempt can be told from a hand VRIK does not see at that slot at all - the
+		// two look exactly alike from the callback, and look nothing alike from here.
+		//
+		// It re-queues itself on the game's task queue, so it runs on the game's own
+		// thread and stops costing anything the moment the mod is idle.
+		static void PollReach();
+		void        NoteReach();
+		void        StartPolling();
 		// Switch on the slots the pouches sit in, then suspend the exclusive ones. Runs
 		// after every load: both halves live in VRIK's memory and not in its files.
 		void ApplySlots();
@@ -64,6 +75,11 @@ namespace BodyPouches
 
 		// Where to put a bottle so that a hand can close around it.
 		[[nodiscard]] static bool HandPosition(bool a_isLeft, RE::NiPoint3& a_out);
+
+		// What the last poll saw, so that only changes are said.
+		int  _reach[2]{ 0, 0 };
+		bool _slotsArranged{ false };
+		bool _polling{ false };
 
 		Core::PouchSet   _pouches;
 		Game::PlayerPack _pack;

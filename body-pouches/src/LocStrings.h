@@ -60,6 +60,10 @@ namespace BodyPouches::Keys
 	inline constexpr auto kNothingHeld = "stow.nothing_held";
 	inline constexpr auto kHeldNotPotion = "stow.not_a_potion";
 	inline constexpr auto kHiggsEvent = "higgs.event";
+	inline constexpr auto kSkseMessage = "skse.message";
+	inline constexpr auto kReachWatch = "reach.watch";
+	inline constexpr auto kReachChanged = "reach.changed";
+	inline constexpr auto kSlotsLate = "slots.late";
 	inline constexpr auto kIdleHere = "mod.idle_here";
 
 	// Things that can go wrong at the boundary with the game
