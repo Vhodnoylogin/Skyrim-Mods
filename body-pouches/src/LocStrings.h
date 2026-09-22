@@ -66,6 +66,14 @@ namespace BodyPouches::Keys
 	inline constexpr auto kReachWatch = "reach.watch";
 	inline constexpr auto kReachChanged = "reach.changed";
 	inline constexpr auto kSlotsLate = "slots.late";
+
+	// The mechanic as it actually works: VRIK gives the place, HIGGS and the controller
+	// give the moment. VRIK's own holster event never fires for anything but weapons.
+	inline constexpr auto kInputWatch = "input.watch";
+	inline constexpr auto kButtonAtPouch = "input.button_at_pouch";
+	inline constexpr auto kDropAtPouch = "drop.at_pouch";
+	inline constexpr auto kDropTaken = "drop.taken";
+	inline constexpr auto kDropNotOurs = "drop.not_ours";
 	inline constexpr auto kIdleHere = "mod.idle_here";
 
 	// Things that can go wrong at the boundary with the game

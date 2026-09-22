@@ -69,6 +69,11 @@ namespace BodyPouches
 				{ Keys::kReachWatch, "watching, frame by frame, which slot each hand reaches" },
 				{ Keys::kReachChanged, "the {0} hand reaches slot {1} (VRIK would holster there: {2})" },
 				{ Keys::kSlotsLate, "no load message ever arrived, so the slots are being arranged now, at the first reach" },
+				{ Keys::kInputWatch, "watching the controllers: button {0} at a pouch takes a bottle out" },
+				{ Keys::kButtonAtPouch, "the {0} hand pressed button {1} at slot {2}" },
+				{ Keys::kDropAtPouch, "the {0} hand let go of something at slot {1}" },
+				{ Keys::kDropTaken, "slot {0} took in what the {1} hand let go of" },
+				{ Keys::kDropNotOurs, "what the {0} hand let go of at slot {1} does not belong in that pouch" },
 				{ Keys::kIdleHere, "a reach came in while the mod is idle; VRIK keeps the slot" },
 
 				{ Keys::kItemNotFound, "{0}|{1:08X} is not in this load order" },

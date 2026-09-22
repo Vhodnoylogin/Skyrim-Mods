@@ -9,6 +9,7 @@
 
 #include <array>
 #include <chrono>
+#include <cstdint>
 #include <span>
 #include <thread>
 
@@ -17,6 +18,14 @@ namespace BodyPouches
 	namespace
 	{
 		const char* HandName(bool a_isLeft) { return a_isLeft ? "left" : "right"; }
+
+		// Milliseconds since the mod started. Only differences are ever used.
+		std::int64_t Now()
+		{
+			using namespace std::chrono;
+			static const auto start = steady_clock::now();
+			return duration_cast<milliseconds>(steady_clock::now() - start).count();
+		}
 
 		// Where a bottle is put so that the hand can close on it. The first node that
 		// exists wins; the VR wand nodes are tried first because in VR they are where
@@ -116,16 +125,57 @@ namespace BodyPouches
 
 	void Mod::NoteReach()
 	{
+		const auto now = Now();
+
 		for (int hand = 0; hand < 2; ++hand) {
 			const bool secondary = hand == 1;
 			const int  slot = _vrik.SlotInReach(secondary);
+
+			// Remembered while the hand is there, because the moment that matters comes
+			// afterwards: a bottle let go of at the stomach lands a beat later, by which
+			// time the hand has usually moved on.
+			if (slot != 0) {
+				std::scoped_lock guard(_lock);
+				if (_pouches.Find(slot) != nullptr) {
+					_lastPouch[hand] = slot;
+					_lastPouchAt[hand] = now;
+				}
+			}
+
 			if (slot == _reach[hand]) {
-				continue;  // only changes are worth a line; this runs every frame
+				continue;  // only changes are worth a line; this runs four times a second
 			}
 			_reach[hand] = slot;
 			Loc::Info(Keys::kReachChanged, HandName(IsLeftHand(secondary)), slot,
 				_vrik.CanBeHolstered(secondary));
 		}
+	}
+
+	int Mod::PouchAtHand(bool a_isLeft, bool a_remember)
+	{
+		const int hand = IsSecondaryHand(a_isLeft) ? 1 : 0;
+
+		if (_reach[hand] != 0) {
+			std::scoped_lock guard(_lock);
+			if (_pouches.Find(_reach[hand]) != nullptr) {
+				return _reach[hand];
+			}
+		}
+
+		if (!a_remember || _lastPouch[hand] == 0) {
+			return 0;
+		}
+		return (Now() - _lastPouchAt[hand]) <= _settings.reachMemoryMs ? _lastPouch[hand] : 0;
+	}
+
+	bool Mod::IsSecondaryHand(bool a_isLeft)
+	{
+		// The way back from IsLeftHand, and by the same setting.
+		static const bool leftHanded = [] {
+			const auto* setting = RE::GetINISetting("bLeftHandedMode:VRInput");
+			return setting != nullptr && setting->GetBool();
+		}();
+		return leftHanded ? !a_isLeft : a_isLeft;
 	}
 
 	void Mod::OnGameLoaded()
@@ -325,6 +375,165 @@ namespace BodyPouches
 		return true;
 	}
 
+	void Mod::DrawAt(int a_slot, bool a_isLeft)
+	{
+		Core::Reach reach;
+		reach.slot = a_slot;
+		reach.leftHand = a_isLeft;
+		reach.handOccupied = _higgs.IsHolding(a_isLeft);
+		reach.handCanHold = _higgs.CanGrab(a_isLeft);
+
+		Core::Decision decision;
+		{
+			std::scoped_lock guard(_lock);
+			decision = _pouches.Decide(reach, _pack);
+		}
+
+		Loc::Info(Keys::kDecision, decision.slot, Core::Name(decision.act),
+			Core::Name(decision.reason), HandName(a_isLeft), decision.LetVrikAct());
+
+		switch (decision.act) {
+		case Core::Act::Draw:
+			Draw(decision.slot, a_isLeft, decision.item);
+			break;
+		case Core::Act::Refuse:
+			if (decision.reason == Core::Reason::NothingInPack) {
+				Loc::Info(Keys::kPouchEmpty, decision.slot);
+			}
+			break;
+		default:
+			break;
+		}
+	}
+
+	void Mod::StowDropped(int a_slot, bool a_isLeft, RE::TESObjectREFR* a_object)
+	{
+		if (a_object == nullptr) {
+			return;
+		}
+
+		auto* base = a_object->GetBaseObject();
+		if (base == nullptr) {
+			Loc::Warn(Keys::kHeldNoBase, HandName(a_isLeft), a_object->GetFormID());
+			return;
+		}
+
+		const auto* name = base->GetName();
+		Loc::Info(Keys::kHeldIs, HandName(a_isLeft), name != nullptr ? name : "",
+			RE::FormTypeToString(base->GetFormType()), base->GetFormID(), a_object->GetFormID());
+
+		auto* potion = base->As<RE::AlchemyItem>();
+		if (potion == nullptr) {
+			// Not ours: it stays on the ground, exactly where it was let go of.
+			Loc::Info(Keys::kHeldNotPotion, HandName(a_isLeft));
+			return;
+		}
+
+		auto item = Game::Describe(potion);
+		item.count = 1;
+
+		bool taken = false;
+		{
+			std::scoped_lock guard(_lock);
+			const auto decision = _pouches.Offer(a_slot, a_isLeft, item);
+			if (decision.act == Core::Act::Assign) {
+				if (_pouches.Assign(a_slot, item)) {
+					Loc::Info(Keys::kPouchAssigned, a_slot);
+					taken = true;
+				}
+			} else if (decision.act == Core::Act::Stow) {
+				taken = true;
+			}
+		}
+
+		if (!taken) {
+			Loc::Info(Keys::kDropNotOurs, HandName(a_isLeft), a_slot);
+			return;
+		}
+
+		auto* player = RE::PlayerCharacter::GetSingleton();
+		auto* bound = base->As<RE::TESBoundObject>();
+		if (player == nullptr || bound == nullptr) {
+			return;
+		}
+
+		// Into the pack, and the bottle in the world is gone. The pouch keeps no count
+		// of its own, so there is nothing else to put right.
+		player->AddObjectToContainer(bound, nullptr, 1, nullptr);
+		a_object->Disable();
+		a_object->SetDelete(true);
+
+		{
+			std::scoped_lock guard(_lock);
+			_pouches.NoteSettled(a_isLeft);
+		}
+		Loc::Info(Keys::kDropTaken, a_slot, HandName(a_isLeft));
+	}
+
+	void Mod::OnInputLoaded()
+	{
+		auto* manager = RE::BSInputDeviceManager::GetSingleton();
+		if (manager == nullptr) {
+			return;
+		}
+		manager->AddEventSink(&_input);
+		Loc::Info(Keys::kInputWatch, _settings.drawButton);
+	}
+
+	RE::BSEventNotifyControl Mod::Input::ProcessEvent(RE::InputEvent* const* a_event,
+		RE::BSTEventSource<RE::InputEvent*>*)
+	{
+		if (a_event == nullptr) {
+			return RE::BSEventNotifyControl::kContinue;
+		}
+
+		auto& mod = GetSingleton();
+		if (!mod.Working()) {
+			return RE::BSEventNotifyControl::kContinue;
+		}
+
+		for (auto* event = *a_event; event != nullptr; event = event->next) {
+			auto* button = event->AsButtonEvent();
+			if (button == nullptr || !button->IsDown()) {
+				continue;
+			}
+
+			bool isLeft = false;
+			switch (event->GetDevice()) {
+			case RE::INPUT_DEVICE::kVRLeft:
+				isLeft = true;
+				break;
+			case RE::INPUT_DEVICE::kVRRight:
+				isLeft = false;
+				break;
+			default:
+				continue;  // keyboard, mouse, gamepad: not a hand at a pouch
+			}
+
+			// Only presses made at a pouch are of any interest, and only those are said
+			// out loud - with the id in the line, so that the button can be named from a
+			// run instead of guessed at from a table.
+			const int slot = mod.PouchAtHand(isLeft, false);
+			if (slot == 0) {
+				continue;
+			}
+
+			const int id = static_cast<int>(button->GetIDCode());
+			Loc::Info(Keys::kButtonAtPouch, HandName(isLeft), id, slot);
+			if (id != mod._settings.drawButton) {
+				continue;
+			}
+
+			// Out of the input handler and onto the game queue: taking an item out of
+			// the inventory is not work to start inside an event of somebody else.
+			if (auto* tasks = SKSE::GetTaskInterface(); tasks != nullptr) {
+				tasks->AddTask([slot, isLeft]() { GetSingleton().DrawAt(slot, isLeft); });
+			}
+		}
+
+		return RE::BSEventNotifyControl::kContinue;
+	}
+
 	bool Mod::OnHolsterAttempt(int a_slot, bool a_secondaryHand, bool a_handOccupied)
 	{
 		// Before anything is decided, so that the log answers the first question any run
@@ -440,11 +649,33 @@ namespace BodyPouches
 		}
 	}
 
-	void Mod::OnDropped(bool a_isLeft, ::TESObjectREFR*)
+	void Mod::OnDropped(bool a_isLeft, ::TESObjectREFR* a_refr)
 	{
 		Loc::Info(Keys::kHiggsEvent, "dropped", HandName(a_isLeft));
 
 		auto& mod = GetSingleton();
+		if (!mod.Working()) {
+			return;
+		}
+
+		// Letting go of something at a pouch is how something goes into it. This is the
+		// event VRIK never gives: its holster callback is part of its weapon logic and
+		// stays silent for a hand holding a potion, however long the hand is held there.
+		if (const int slot = mod.PouchAtHand(a_isLeft, true); slot != 0 && a_refr != nullptr) {
+			Loc::Info(Keys::kDropAtPouch, HandName(a_isLeft), slot);
+
+			// By id and not by pointer: the reference is handed to a task that runs
+			// later, and what HIGGS let go of may be gone by then.
+			const auto id = reinterpret_cast<RE::TESObjectREFR*>(a_refr)->GetFormID();
+			if (auto* tasks = SKSE::GetTaskInterface(); tasks != nullptr) {
+				tasks->AddTask([slot, a_isLeft, id]() {
+					GetSingleton().StowDropped(slot, a_isLeft,
+						RE::TESForm::LookupByID<RE::TESObjectREFR>(id));
+				});
+			}
+			return;
+		}
+
 		std::scoped_lock guard(mod._lock);
 		if (const auto slot = mod._pouches.SlotOfHand(a_isLeft); slot.has_value()) {
 			// It stays where it fell. That is the whole of it: the bottle is an

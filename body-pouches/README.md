@@ -21,6 +21,27 @@ place on the body comes from VRIK, handing the item over and drinking come from 
 belongs to the mod is only the rule of what lies in this slot and what to do when somebody reaches
 for it.
 
+## Where the mechanic comes from
+
+VRIK owns the place on the body, and `GetHolsterSlotInReach(secondaryHand)` answers for any hand
+whatever it holds - that part is flawless and is what this mod leans on. What VRIK does not give
+is a moment. Its holster callback is part of its weapon logic: it fires when a weapon could be
+drawn or put away, and for a pouch of potions that is never. Six sessions in the game settled it:
+
+| what the hand held | slot 13 in reach | holster callback |
+|---|---|---|
+| a two-hander | yes | yes, twice |
+| a potion, either hand, four tries | yes, every time | never |
+| nothing, at an empty slot | yes, six times | never |
+
+So the place comes from VRIK and the moment comes from elsewhere:
+
+    putting in   HIGGS lets go of something while the hand is at a pouch
+    taking out   a button is pressed by a hand at a pouch (grip by default)
+
+Neither needs anything of VRIK beyond the question "which slot is this hand at", and the pouch
+keeps working the day VRIK starts raising an event of its own.
+
 ## What made it possible
 
 The VRIK holster mechanic lived in Papyrus and was not exposed. Build 80700 (VRIK 0.8.7) ships a

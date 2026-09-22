@@ -76,6 +76,11 @@ namespace
 			// this plugin loses whenever it is loaded before the plugin it is asking.
 			BodyPouches::Mod::GetSingleton().Connect();
 			break;
+		case SKSE::MessagingInterface::kInputLoaded:
+			// The controllers exist from here on, and a press at a pouch is how a bottle
+			// is taken out - VRIK raises no event for that.
+			BodyPouches::Mod::GetSingleton().OnInputLoaded();
+			break;
 		case SKSE::MessagingInterface::kDataLoaded:
 			BodyPouches::Mod::GetSingleton().OnDataLoaded();
 			break;
@@ -111,7 +116,7 @@ extern "C" __declspec(dllexport) bool SKSEAPI SKSEPlugin_Query(const SKSE::Query
 
 extern "C" __declspec(dllexport) constinit auto SKSEPlugin_Version = []() {
 	SKSE::PluginVersionData v;
-	v.PluginVersion(REL::Version{ 0, 1, 6 });
+	v.PluginVersion(REL::Version{ 0, 1, 7 });
 	v.PluginName(PLUGIN_NAME);
 	v.AuthorName(PLUGIN_AUTHOR);
 	v.UsesAddressLibrary(true);

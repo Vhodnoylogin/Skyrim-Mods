@@ -36,6 +36,20 @@ namespace BodyPouches
 		// where to fix it, and this flag is how a player says "go ahead, do it for me".
 		bool mayEnableSlots{ false };
 
+		// Which controller button takes a bottle out of a pouch.
+		//
+		// VRIK raises no event for an empty hand at an empty slot - its holster callback
+		// is part of its weapon logic and never fires for anything else - so drawing is
+		// on us, and a press is the only thing a hand at the stomach can be said to have
+		// done. The number is the VR button id; 2 is the grip, the same squeeze that
+		// picks things up in HIGGS.
+		int drawButton{ 2 };
+
+		// How long after a hand leaves a slot a release still counts as happening there,
+		// in milliseconds. The hand is read four times a second, and a bottle dropped at
+		// the stomach usually lands a moment after the hand has already moved on.
+		int reachMemoryMs{ 1200 };
+
 		// One pouch, on the stomach. VRIK counts its fourteen slots
 		//   1 Left Hip     2 Right Hip     3 Left Thigh    4 Right Thigh
 		//   5 Left Calf    6 Right Calf    7 Left Upper Arm 8 Right Upper Arm

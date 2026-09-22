@@ -7,6 +7,7 @@
 #include "vr/VrikLink.h"
 
 #include <atomic>
+#include <cstdint>
 #include <mutex>
 #include <thread>
 
@@ -35,6 +36,11 @@ namespace BodyPouches
 		// The game's data is up: settings can be read and pouches built.
 		void OnDataLoaded();
 
+		// The controllers exist: the mod can start listening for the press that draws
+		// from a pouch. VRIK's holster event is part of its weapon logic and never fires
+		// for a hand holding a potion, so the press is ours to notice.
+		void OnInputLoaded();
+
 		// A save was loaded or a new game started. Suspension in VRIK is runtime-only
 		// state by its author's design, so it has to be asked for again every time.
 		void OnGameLoaded();
@@ -43,6 +49,24 @@ namespace BodyPouches
 
 	private:
 		Mod() = default;
+
+		// WHERE THE MECHANIC ACTUALLY COMES FROM.
+		//
+		// VRIK owns the place on the body and answers GetHolsterSlotInReach for any hand
+		// and any contents - that part is flawless. What it does not do is raise an
+		// event: its holster callback fires only when a weapon could be drawn or put
+		// away, which for a pouch of potions means never. Six runs in the game settled
+		// that beyond doubt.
+		//
+		// So the place comes from VRIK and the moment comes from elsewhere: putting
+		// something in is HIGGS letting go of it at a slot, and taking something out is
+		// a button pressed by an empty hand at a slot.
+		class Input final : public RE::BSTEventSink<RE::InputEvent*>
+		{
+		public:
+			RE::BSEventNotifyControl ProcessEvent(RE::InputEvent* const* a_event,
+				RE::BSTEventSource<RE::InputEvent*>*) override;
+		};
 
 		// --- what the two mods call, and the only functions that may be static ---
 		static bool OnHolsterAttempt(int a_slot, bool a_secondaryHand, bool a_handOccupied);
@@ -53,6 +77,19 @@ namespace BodyPouches
 		// --- the work itself, always on the game's own thread ---
 		bool Draw(int a_slot, bool a_isLeft, const Core::FormKey& a_item);
 		bool TakeBack(int a_slot, bool a_isLeft, bool a_assigning);
+
+		// A hand reached a pouch and pressed: give it what the pouch holds.
+		void DrawAt(int a_slot, bool a_isLeft);
+		// A hand let go of something at a pouch: take it in, or set the pouch up with it.
+		void StowDropped(int a_slot, bool a_isLeft, RE::TESObjectREFR* a_object);
+
+		// Which pouch this hand is at, or 0. Answers from the last reading while the
+		// hand is still there, and for a short while after it has left - a bottle let go
+		// of at the stomach lands a moment later, by which time the hand has moved on.
+		[[nodiscard]] int PouchAtHand(bool a_isLeft, bool a_remember);
+
+		// VRIK says "secondary hand", HIGGS says "left". This is the way back.
+		[[nodiscard]] static bool IsSecondaryHand(bool a_isLeft);
 
 		void BuildPouches(const Settings& a_settings);
 
@@ -81,8 +118,12 @@ namespace BodyPouches
 		// Where to put a bottle so that a hand can close around it.
 		[[nodiscard]] static bool HandPosition(bool a_isLeft, RE::NiPoint3& a_out);
 
-		// What the last poll saw, so that only changes are said.
-		int  _reach[2]{ 0, 0 };
+		// What the last poll saw, so that only changes are said. Indexed by hand the way
+		// VRIK counts them: [0] primary, [1] secondary.
+		int                 _reach[2]{ 0, 0 };
+		int                 _lastPouch[2]{ 0, 0 };
+		std::int64_t        _lastPouchAt[2]{ 0, 0 };
+		Input               _input;
 		bool _slotsArranged{ false };
 		std::atomic<bool> _polling{ false };
 
