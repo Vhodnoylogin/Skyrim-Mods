@@ -12,7 +12,6 @@
 #include <chrono>
 #include <cstdint>
 #include <span>
-#include <thread>
 
 namespace BodyPouches
 {
@@ -34,16 +33,10 @@ namespace BodyPouches
 		constexpr std::array kLeftNodes{ "LeftWandNode", "NPC L Hand [LHnd]", "NPC L Finger02 [LF02]" };
 		constexpr std::array kRightNodes{ "RightWandNode", "NPC R Hand [RHnd]", "NPC R Finger02 [RF02]" };
 
-		// Deliberately not a member. The pacing thread outlives nothing else it can reach:
-		// the singleton is a function-local static and is destroyed while that thread may
-		// still be between two sleeps, so the thread reads this and hands every reading
-		// that touches the mod to the game's own queue, which stops being drained first.
-		std::atomic<bool> g_polling{ false };
-
-		// Ten times a second. Four was enough to watch a hand, and not enough to catch the
-		// press that follows it: a button squeezed within the gap saw no slot in reach and
-		// was passed over without a word, which is the one answer a run must never get.
-		constexpr auto kPollEvery = std::chrono::milliseconds(100);
+		// How often each pouch is told again what to show. Slow on purpose: it costs a
+		// walk of the inventory, and the only thing it has to outpace is VRIK rebuilding
+		// the picture after a load.
+		constexpr std::int64_t kDisplayEvery = 2000;
 
 		// How long to give HIGGS before asking whether the hand really closed on the
 		// bottle. Long enough for a frame or two, short enough to be about that bottle.
@@ -79,7 +72,15 @@ namespace BodyPouches
 		_higgs.OnConsumed(&Mod::OnConsumed);
 		_higgs.OnStashed(&Mod::OnStashed);
 		_higgs.OnDropped(&Mod::OnDropped);
+		_higgs.OnGrabbed(&Mod::OnGrabbed);
 		Loc::Info(Keys::kHiggsSubscribed);
+
+		// The frame, and with it the end of this mod having a thread of its own.
+		_higgs.OnFrame(&Mod::OnFrame);
+
+		// And an action in VRIK's own gesture menu, so that taking a bottle out can be a
+		// gesture the player chose rather than a button this mod took.
+		_vrik.AddGesture(&Mod::OnGesture, "Body Pouches: take out");
 	}
 
 	void Mod::OnDataLoaded()
@@ -89,52 +90,22 @@ namespace BodyPouches
 		Loc::Load(Paths::LangDir(), _settings.language);
 		BuildPouches(_settings);
 		WatchInput();
-		StartPolling();
 	}
 
-	void Mod::StartPolling()
+	void Mod::OnFrame()
 	{
-		if (g_polling || !Working()) {
+		auto& mod = GetSingleton();
+		if (!mod.Working()) {
 			return;
 		}
-		if (auto* tasks = SKSE::GetTaskInterface(); tasks != nullptr) {
-			g_polling = true;
-			Loc::Info(Keys::kReachWatch);
-			std::thread(&Mod::PollLoop).detach();
-		}
-	}
 
-	void Mod::PollReach()
-	{
-		// WHAT NOT TO DO HERE, LEARNED THE HARD WAY.
-		//
-		// This function used to end by putting itself back on the game's task queue,
-		// with a comment claiming that made it run once a frame. It does not. The game
-		// drains that queue before it finishes the frame, so a task that re-adds itself
-		// is drained forever and the frame never ends. Version 0.1.4 hung Skyrim VR on
-		// the loading screen twice, with a hundred WaitForTrackingData timeouts in the
-		// compositor's log and no crash: the game was alive and never gave a frame back.
-		//
-		// The pace therefore comes from a thread that sleeps, and this task only ever
-		// does one reading and returns.
-		auto& mod = GetSingleton();
-		if (mod.Working()) {
-			mod.NoteReach();
+		if (!mod._frameSeen) {
+			mod._frameSeen = true;
+			Loc::Info(Keys::kFrameAlive);
 		}
-	}
 
-	void Mod::PollLoop()
-	{
-		while (g_polling) {
-			std::this_thread::sleep_for(kPollEvery);
-
-			// VRIK may only be asked anything on the game's own thread, so this thread
-			// asks nothing itself - it hands over one reading and goes back to sleep. It
-			// touches nothing of the mod's either: see g_polling.
-			if (auto* tasks = SKSE::GetTaskInterface(); tasks != nullptr) {
-				tasks->AddTask(&Mod::PollReach);
-			}
-		}
+		mod.NoteReach();
+		mod.RefreshDisplay();
 	}
 
 	void Mod::NoteReach()
@@ -144,17 +115,12 @@ namespace BodyPouches
 		for (int hand = 0; hand < 2; ++hand) {
 			const bool secondary = hand == 1;
 
-			// A bottle was handed to this hand a moment ago; say whether it stayed there.
-			// GrabObject takes no answer and returns none, so "HIGGS was asked" is all the
-			// draw itself can honestly claim - and a run that reads "pouch 13 gave a bottle
-			// to the right hand" while the bottle lies on the floor is a run that has been
-			// told the wrong thing. Done here because here is already a place that runs on
-			// the game thread a little later; a task that queues a task is drained inside
-			// the same frame and would ask before HIGGS had a chance to answer.
+			// A bottle handed to this hand and never taken. The other ending - the hand did
+			// close on it - arrives as an event of its own and clears this, so what is left
+			// here when the time is up is a failure and nothing else.
 			if (_checkGrabAt[hand] != 0 && now >= _checkGrabAt[hand]) {
 				_checkGrabAt[hand] = 0;
-				Loc::Info(Keys::kGrabResult, _drawnFrom[hand], HandName(IsLeftHand(secondary)),
-					_higgs.IsHolding(IsLeftHand(secondary)));
+				Loc::Warn(Keys::kGrabFailed, HandName(IsLeftHand(secondary)), _drawnFrom[hand]);
 			}
 
 			const int slot = _vrik.SlotInReach(secondary);
@@ -176,6 +142,54 @@ namespace BodyPouches
 			_reach[hand] = slot;
 			Loc::Info(Keys::kReachChanged, HandName(IsLeftHand(secondary)), slot,
 				_vrik.CanBeHolstered(secondary));
+		}
+	}
+
+	void Mod::RefreshDisplay()
+	{
+		const auto now = Now();
+		if (now < _displayAt) {
+			return;
+		}
+		_displayAt = now + kDisplayEvery;
+
+		std::scoped_lock guard(_lock);
+		for (const auto& setting : _settings.pouches) {
+			// ONLY A POUCH THAT HAS BEEN SET UP. An empty one is still whatever VRIK made
+			// of that slot, and emptying somebody else's slot to show our nothing would be
+			// exactly the kind of quiet meddling this mod refuses everywhere else.
+			// AND ONLY ONE THE SLOT WAS GIVEN OVER TO. A shared slot is still VRIK's: it
+			// shows the sword kept there, and painting our bottle over that would take away
+			// something the player put there themselves. Exclusive slots are suspended and
+			// hold nothing of VRIK's, so there is nothing of anyone else's to overwrite.
+			const auto* pouch = _pouches.Find(setting.slot);
+			if (pouch == nullptr || !pouch->IsAssigned() ||
+				pouch->PouchMode() != Core::Mode::Exclusive) {
+				continue;
+			}
+
+			const auto   shown = _pouches.Display(setting.slot, _pack);
+			RE::TESForm* form = shown.anything ? Game::Lookup(shown.item) : nullptr;
+
+			// Said again every beat, whether or not it changed: VRIK's Papyrus side rebuilds
+			// what a slot shows out of an array of its own after every load, and a picture
+			// set once would quietly disappear with no way to tell from here that it had.
+			_vrik.ShowInSlot(setting.slot, form);
+
+			// The saying is every beat; the log line is only when it becomes something else.
+			const std::uint32_t id = form != nullptr ? form->GetFormID() : 0;
+			const auto          seen = _shown.find(setting.slot);
+			if (seen != _shown.end() && seen->second == id) {
+				continue;
+			}
+			_shown[setting.slot] = id;
+
+			if (form == nullptr) {
+				Loc::Info(Keys::kShownNothing, setting.slot);
+			} else {
+				const auto* name = form->GetName();
+				Loc::Info(Keys::kShown, setting.slot, name != nullptr ? name : "", shown.count);
+			}
 		}
 	}
 
@@ -223,13 +237,13 @@ namespace BodyPouches
 		// arrived" from "it arrived and every step of it quietly did nothing".
 		Loc::Info(Keys::kGameLoaded, _settings.pouches.size());
 		ApplySlots();
-		StartPolling();
 	}
 
 	void Mod::BuildPouches(const Settings& a_settings)
 	{
 		std::scoped_lock guard(_lock);
 		_pouches.Clear();
+		_shown.clear();
 		for (const auto& setting : a_settings.pouches) {
 			_pouches.Set(Core::Pouch(setting.slot, Settings::ModeFromText(setting.mode)));
 			Loc::Info(Keys::kPouchConfigured, setting.slot, setting.mode);
@@ -648,11 +662,7 @@ namespace BodyPouches
 		if (!mod._slotsArranged) {
 			if (auto* tasks = SKSE::GetTaskInterface(); tasks != nullptr) {
 				Loc::Warn(Keys::kSlotsLate);
-				tasks->AddTask([]() {
-					auto& late = GetSingleton();
-					late.ApplySlots();
-					late.StartPolling();
-				});
+				tasks->AddTask([]() { GetSingleton().ApplySlots(); });
 			}
 		}
 
@@ -740,6 +750,50 @@ namespace BodyPouches
 			Loc::Info(Keys::kPouchReturned, *slot);
 			mod._pouches.NoteSettled(a_isLeft);
 		}
+	}
+
+	void Mod::OnGrabbed(bool a_isLeft, ::TESObjectREFR*)
+	{
+		auto&     mod = GetSingleton();
+		const int hand = IsSecondaryHand(a_isLeft) ? 1 : 0;
+
+		// This fires for everything the player picks up, so it is only worth a word when
+		// a bottle of ours is waiting to be told whether it was taken.
+		if (mod._checkGrabAt[hand] == 0) {
+			Loc::Debug(Keys::kHiggsEvent, "grabbed", HandName(a_isLeft));
+			return;
+		}
+
+		mod._checkGrabAt[hand] = 0;
+		Loc::Info(Keys::kGrabConfirmed, HandName(a_isLeft), mod._drawnFrom[hand]);
+	}
+
+	void Mod::OnGesture(int a_pressCount)
+	{
+		auto& mod = GetSingleton();
+		if (!mod.Working()) {
+			return;
+		}
+
+		// VRIK says how many presses and nothing else - not which hand, not where it was.
+		// So the hand is found the way everything else here is found: by asking where
+		// each one is. A hand at a pouch with nothing in it is the one that meant this.
+		for (const bool isLeft : { false, true }) {
+			const int slot = mod.PouchAtHand(isLeft, false);
+			if (slot == 0 || mod._higgs.IsHolding(isLeft)) {
+				continue;
+			}
+
+			Loc::Info(Keys::kGestureMade, a_pressCount, HandName(isLeft), slot);
+			if (auto* tasks = SKSE::GetTaskInterface(); tasks != nullptr) {
+				tasks->AddTask([slot, isLeft]() { GetSingleton().DrawAt(slot, isLeft); });
+			}
+			return;
+		}
+
+		// Said out loud rather than swallowed: a gesture the player made on purpose and
+		// that did nothing is exactly the thing a run has to be able to explain.
+		Loc::Info(Keys::kGestureNowhere, a_pressCount);
 	}
 
 	void Mod::OnDropped(bool a_isLeft, ::TESObjectREFR* a_refr)

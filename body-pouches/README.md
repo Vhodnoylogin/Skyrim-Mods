@@ -37,27 +37,39 @@ drawn or put away, and for a pouch of potions that is never. Six sessions in the
 So the place comes from VRIK and the moment comes from elsewhere:
 
     putting in   HIGGS lets go of something while the hand is at a pouch
-    taking out   a button is pressed by a hand at a pouch (grip by default)
+    taking out   a gesture bound in VRIK's own menu, or a button (grip by default)
 
 Neither needs anything of VRIK beyond the question "which slot is this hand at", and the pouch
 keeps working the day VRIK starts raising an event of its own.
 
-The two halves share a button, and that is not an oversight: the squeeze that draws is the squeeze
-HIGGS holds a thing with. A tap is therefore a draw and a put-back in one movement, too quick to
-see. A release at the pouch within `settleMs` of a draw is named for what it is - the end of that
-gesture rather than a fresh reach - and said so out loud, which is the whole difference between
-"the button did nothing" and "the button did both halves at once".
+**The gesture is the better of the two, and it is VRIK's own.** `addGestureAction` puts an action
+named "Body Pouches: take out" into VRIK's gesture menu, and the player binds it there to
+whatever they like, beside everything else they have bound. Nothing about it is this mod's to
+choose, which is the point: no button taken from somebody else, no number to guess at. VRIK says
+only that the gesture happened and how many presses - not which hand - so the hand is found the
+way everything else here is, by asking VRIK where each one is and taking the free one at a pouch.
+
+The button remains as the plainer way in, and it has a catch worth knowing: the squeeze that draws
+is the squeeze HIGGS holds a thing with, so a tap is a draw and a put-back in one movement, too
+quick to see. A release at the pouch within `settleMs` of a draw is named for what it is - the end
+of that gesture rather than a fresh reach - which is the difference between "the button did
+nothing" and "the button did both halves at once". The gesture has no such catch.
+
+## What a pouch shows
+
+The kind of potion it would hand over, drawn in the slot, and only for a pouch the slot was given
+over to entirely - a shared slot still shows the sword VRIK keeps there, and painting over that
+would take away something the player put there themselves.
+
+`VrikSetSlotWeaponType` takes a form and not a type, whatever its name says, so a potion can be
+named to a slot as readily as a sword. What is named is whatever would come out next, so the belt
+shows the pack rather than a bottle of its own: drink the last healing potion and the slot empties
+by itself. It is said again every two seconds rather than once, because VRIK's Papyrus side
+rebuilds a slot's picture from an array of its own after every load.
 
 ## What is not written yet
 
-Two things a reader would reasonably expect and will not find.
-
-**Nothing appears on the body.** A pouch shows no bottle and no icon. The rule that works out
-what ought to be shown is written and under test - `PouchSet::Display` answers with the kind of
-potion and how many of them the pack holds - but nothing asks VRIK to draw it. What a VRIK slot
-displays is owned by its Papyrus side, which rebuilds it from its own array after every load, so
-a picture set from a DLL may not survive; that is a piece of work with an open question in front
-of it rather than an oversight.
+One thing a reader would reasonably expect and will not find.
 
 **A press by a full hand puts nothing away.** Putting in is a release, taking out is a press, and
 that is deliberate: one gesture each, and neither can be mistaken for the other. A press at a

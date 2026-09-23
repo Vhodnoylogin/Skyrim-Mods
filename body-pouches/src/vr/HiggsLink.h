@@ -32,6 +32,22 @@ namespace BodyPouches::VR
 		void OnStashed(HiggsPluginAPI::IHiggsInterface001::StashedCallback a_callback);
 		void OnDropped(HiggsPluginAPI::IHiggsInterface001::DroppedCallback a_callback);
 
+		// And its beginning: the hand really did close on something. GrabObject takes no
+		// answer and returns none, so this is the only way to learn that the asking
+		// worked - and it fires for every grab the player makes, ours or not.
+		void OnGrabbed(HiggsPluginAPI::IHiggsInterface001::GrabbedCallback a_callback);
+
+		// A call once a frame, on the game's own thread, after both VRIK and HIGGS have
+		// done their work for it.
+		//
+		// THIS IS WHY THIS MOD NO LONGER HAS A THREAD OF ITS OWN. VRIK may only be asked
+		// anything from the game thread, and it raises no event when a hand reaches a
+		// slot, so the question has to be put over and over. That used to be a thread
+		// that slept and handed a task to the game every hundred milliseconds - two
+		// moving parts, a pace that was always either too slow or too costly, and one
+		// version that hung the game outright. HIGGS gives the frame away for free.
+		void OnFrame(HiggsPluginAPI::IHiggsInterface001::NoArgCallback a_callback);
+
 	private:
 		HiggsPluginAPI::IHiggsInterface001* _api{ nullptr };
 		unsigned int                        _build{ 0 };

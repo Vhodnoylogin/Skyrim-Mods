@@ -6,10 +6,9 @@
 #include "vr/HiggsLink.h"
 #include "vr/VrikLink.h"
 
-#include <atomic>
 #include <cstdint>
+#include <map>
 #include <mutex>
-#include <thread>
 
 namespace BodyPouches
 {
@@ -77,6 +76,12 @@ namespace BodyPouches
 		static void OnConsumed(bool a_isLeft, ::TESForm* a_form);
 		static void OnStashed(bool a_isLeft, ::TESForm* a_form);
 		static void OnDropped(bool a_isLeft, ::TESObjectREFR* a_refr);
+		static void OnGrabbed(bool a_isLeft, ::TESObjectREFR* a_refr);
+
+		// VRIK's own gesture menu calls this when the player makes whichever gesture they
+		// bound to us. It says how many presses and nothing else - not even which hand -
+		// so the hand is worked out here.
+		static void OnGesture(int a_pressCount);
 
 		// --- the work itself, always on the game's own thread ---
 		bool Draw(int a_slot, bool a_isLeft, const Core::FormKey& a_item);
@@ -102,19 +107,22 @@ namespace BodyPouches
 
 		void BuildPouches(const Settings& a_settings);
 
-		// Ask VRIK, every frame, which slot each hand has reached, and say so whenever
-		// the answer changes. This is how a hand held at a slot that raises no holster
-		// attempt can be told from a hand VRIK does not see at that slot at all - the
-		// two look exactly alike from the callback, and look nothing alike from here.
-		//
-		// It re-queues itself on the game's task queue, so it runs on the game's own
-		// thread and stops costing anything the moment the mod is idle.
-		// One reading, on the game's thread. Never re-queues itself: see PollReach.
-		static void PollReach();
-		// The pace, on a thread of its own - sleep, hand over one reading, sleep.
-		static void PollLoop();
-		void        NoteReach();
-		void        StartPolling();
+		// Once a frame, on the game's own thread, given to us by HIGGS. Everything that
+		// has to be asked over and over rather than waited for happens here: which slot
+		// each hand has reached, whether a bottle just handed over was taken, and what
+		// the pouches should be showing.
+		static void OnFrame();
+
+		// Ask VRIK which slot each hand has reached, and say so whenever the answer
+		// changes. This is how a hand held at a slot that raises no holster attempt can
+		// be told from a hand VRIK does not see at that slot at all - the two look
+		// exactly alike from the callback, and look nothing alike from here.
+		void NoteReach();
+
+		// What each pouch should be showing, said to VRIK. On a slow beat and not only
+		// when it changes: VRIK's Papyrus side rebuilds a slot's picture from an array of
+		// its own after every load, so a picture set once quietly goes away.
+		void RefreshDisplay();
 		// Switch on the slots the pouches sit in, then suspend the exclusive ones. Runs
 		// after every load: both halves live in VRIK's memory and not in its files.
 		void ApplySlots();
@@ -139,6 +147,11 @@ namespace BodyPouches
 		// When to look back and see whether the hand really closed on the bottle. HIGGS
 		// takes no answer and gives none, so the only honest report is one made afterwards.
 		std::int64_t        _checkGrabAt[2]{ 0, 0 };
+		// What each slot was last told to show, by form id, so that only a change is said
+		// out loud while the telling itself goes on every beat.
+		std::map<int, std::uint32_t> _shown;
+		std::int64_t        _displayAt{ 0 };
+		bool                _frameSeen{ false };
 		Input               _input;
 		bool                _slotsArranged{ false };
 		bool                _watchingInput{ false };

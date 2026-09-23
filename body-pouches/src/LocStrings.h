@@ -58,7 +58,8 @@ namespace BodyPouches::Keys
 	inline constexpr auto kNoTasks = "task.no_interface";
 	inline constexpr auto kDrawStart = "draw.start";
 	inline constexpr auto kGrabAsked = "draw.grab_asked";
-	inline constexpr auto kGrabResult = "draw.grab_result";
+	inline constexpr auto kGrabConfirmed = "draw.grab_confirmed";
+	inline constexpr auto kGrabFailed = "draw.grab_failed";
 	inline constexpr auto kStowStart = "stow.start";
 	inline constexpr auto kNothingHeld = "stow.nothing_held";
 	inline constexpr auto kHeldNotPotion = "stow.not_a_potion";
@@ -66,7 +67,6 @@ namespace BodyPouches::Keys
 	inline constexpr auto kHeldNoBase = "stow.no_base";
 	inline constexpr auto kHiggsEvent = "higgs.event";
 	inline constexpr auto kSkseMessage = "skse.message";
-	inline constexpr auto kReachWatch = "reach.watch";
 	inline constexpr auto kReachChanged = "reach.changed";
 	inline constexpr auto kSlotsLate = "slots.late";
 
@@ -78,6 +78,12 @@ namespace BodyPouches::Keys
 	inline constexpr auto kButtonElsewhere = "input.button_elsewhere";
 	inline constexpr auto kHandState = "input.hand_state";
 	inline constexpr auto kHandedness = "game.handedness";
+	inline constexpr auto kFrameAlive = "frame.alive";
+	inline constexpr auto kGestureOffered = "gesture.offered";
+	inline constexpr auto kGestureMade = "gesture.made";
+	inline constexpr auto kGestureNowhere = "gesture.nowhere";
+	inline constexpr auto kShown = "slot.shown";
+	inline constexpr auto kShownNothing = "slot.shown_nothing";
 	inline constexpr auto kDropAtPouch = "drop.at_pouch";
 	inline constexpr auto kDropTaken = "drop.taken";
 	inline constexpr auto kDropNotOurs = "drop.not_ours";

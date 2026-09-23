@@ -42,6 +42,27 @@ namespace BodyPouches::VR
 		return true;
 	}
 
+	bool VrikLink::AddGesture(vrikPluginApi::IVrikInterface001::GestureCallback a_callback,
+		const char* a_menuName)
+	{
+		if (!Ready() || a_callback == nullptr || a_menuName == nullptr) {
+			return false;
+		}
+		_api->addGestureAction(a_callback, a_menuName);
+		Loc::Info(Keys::kGestureOffered, a_menuName);
+		return true;
+	}
+
+	void VrikLink::ShowInSlot(int a_slot, RE::TESForm* a_form)
+	{
+		if (!Ready()) {
+			return;
+		}
+		// The contract was written against another SDK, so the pointer changes vocabulary
+		// here and nowhere else.
+		_api->VrikSetSlotWeaponType(a_slot, reinterpret_cast<::TESForm*>(a_form));
+	}
+
 	bool VrikLink::SetSuspended(int a_slot, bool a_suspended)
 	{
 		if (!Ready()) {

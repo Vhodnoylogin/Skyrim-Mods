@@ -47,12 +47,28 @@ namespace BodyPouches::VR
 		[[nodiscard]] unsigned int Build() const noexcept { return _build; }
 
 		bool Subscribe(vrikPluginApi::IVrikInterface001::HolsterAttemptCallback a_callback);
+
+		// Put an action of our own into VRIK's own gesture menu, under this name. The
+		// player then binds it to whichever gesture they like, in the menu where they
+		// bind everything else - which is worth more than any button this mod could pick
+		// for them: no fight with HIGGS over the grip, and no guessing of button numbers.
+		// The callback says only how many presses; which hand is ours to work out.
+		bool AddGesture(vrikPluginApi::IVrikInterface001::GestureCallback a_callback, const char* a_menuName);
 		bool SetSuspended(int a_slot, bool a_suspended);
 		[[nodiscard]] bool IsSuspended(int a_slot);
 		[[nodiscard]] bool IsDisplayed(int a_slot);
 
-		// What VRIK draws in the slot. Whether it will draw a potion at all is the one
-		// thing about this mod that cannot be settled outside the game.
+		// What VRIK draws in the slot.
+		//
+		// VrikSetSlotWeaponType takes a form and not a type, whatever its name says, so a
+		// potion can be named to it as easily as a sword. Nothing is promised: VRIK's
+		// Papyrus side keeps the truth about a slot in an array of its own and rebuilds
+		// the picture from it after every load, so this is said again on a slow beat
+		// rather than once. Passing nullptr empties the slot.
+		void ShowInSlot(int a_slot, RE::TESForm* a_form);
+
+		// The other way VRIK can be told what to draw. Unused: an art object would have
+		// to be a record in a plugin of our own, and a potion is already a form.
 		void SetArt(int a_slot, RE::BGSArtObject* a_art);
 
 		// VRIK's own settings, the ones that live in vrikslots.ini and vrik.ini.

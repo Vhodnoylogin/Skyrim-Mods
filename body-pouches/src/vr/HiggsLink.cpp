@@ -81,4 +81,18 @@ namespace BodyPouches::VR
 			_api->AddDroppedCallback(a_callback);
 		}
 	}
+
+	void HiggsLink::OnGrabbed(HiggsPluginAPI::IHiggsInterface001::GrabbedCallback a_callback)
+	{
+		if (_api != nullptr && a_callback != nullptr) {
+			_api->AddGrabbedCallback(a_callback);
+		}
+	}
+
+	void HiggsLink::OnFrame(HiggsPluginAPI::IHiggsInterface001::NoArgCallback a_callback)
+	{
+		if (_api != nullptr && a_callback != nullptr) {
+			_api->AddPostVrikPostHiggsCallback(a_callback);
+		}
+	}
 }
