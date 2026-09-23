@@ -42,6 +42,12 @@ So the place comes from VRIK and the moment comes from elsewhere:
 Neither needs anything of VRIK beyond the question "which slot is this hand at", and the pouch
 keeps working the day VRIK starts raising an event of its own.
 
+The two halves share a button, and that is not an oversight: the squeeze that draws is the squeeze
+HIGGS holds a thing with. A tap is therefore a draw and a put-back in one movement, too quick to
+see. A release at the pouch within `settleMs` of a draw is named for what it is - the end of that
+gesture rather than a fresh reach - and said so out loud, which is the whole difference between
+"the button did nothing" and "the button did both halves at once".
+
 ## What made it possible
 
 The VRIK holster mechanic lived in Papyrus and was not exposed. Build 80700 (VRIK 0.8.7) ships a

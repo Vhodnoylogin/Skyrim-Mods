@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <iterator>
 #include <map>
 #include <string_view>
 
@@ -34,6 +35,8 @@ namespace BodyPouches
 				{ Keys::kConfigWritten, "settings written to {0}" },
 				{ Keys::kConfigRead, "settings read from {0}: {1} pouches" },
 				{ Keys::kPouchConfigured, "pouch on slot {0}, mode {1}" },
+				{ Keys::kConfigToppedUp, "this build knows a setting \"{0}\" that {1} has no line for, so the file has been written out again with every setting in it and nothing that was in it changed" },
+				{ Keys::kLangWritten, "{0} did not have a line for every message this build can put out, so it has been written out again" },
 				{ Keys::kConfigBad, "settings at {0} could not be read ({1}); built-in defaults are used" },
 
 				{ Keys::kPouchAssigned, "pouch {0} set up from what was put in it" },
@@ -71,9 +74,14 @@ namespace BodyPouches
 				{ Keys::kSlotsLate, "no load message ever arrived, so the slots are being arranged now, at the first reach" },
 				{ Keys::kInputWatch, "watching the controllers: button {0} at a pouch takes a bottle out" },
 				{ Keys::kButtonAtPouch, "the {0} hand pressed button {1} at slot {2}" },
+				{ Keys::kButtonAtSlot, "the {0} hand pressed button {1} at slot {2}, which is not a pouch" },
+				{ Keys::kButtonElsewhere, "the {0} hand pressed button {1}, away from every slot" },
+				{ Keys::kHandState, "the {0} hand: HIGGS holds something = {1}, HIGGS could take something = {2}" },
+				{ Keys::kHandedness, "bLeftHandedMode = {0}, so VRIK's secondary hand is read here as the {1} hand" },
 				{ Keys::kDropAtPouch, "the {0} hand let go of something at slot {1}" },
 				{ Keys::kDropTaken, "slot {0} took in what the {1} hand let go of" },
 				{ Keys::kDropNotOurs, "what the {0} hand let go of at slot {1} does not belong in that pouch" },
+				{ Keys::kDropBounced, "what the {0} hand let go of at slot {1} had come out of that very pouch {2} ms ago: the squeeze that draws is the squeeze that holds, so this is the same gesture ending and not a new one" },
 				{ Keys::kIdleHere, "a reach came in while the mod is idle; VRIK keeps the slot" },
 
 				{ Keys::kItemNotFound, "{0}|{1:08X} is not in this load order" },
@@ -113,6 +121,35 @@ namespace BodyPouches
 			const auto last = a_text.find_last_not_of(" \t\r\n");
 			return std::string(a_text.substr(first, last - first + 1));
 		}
+
+		// Whether a file on disk still speaks for every key this binary knows. Cheap, done
+		// once at load, and the only thing standing between a line changed in the code and
+		// a run that goes on reading the old one out of a file nobody remembers writing.
+		bool HasEveryKey(const std::filesystem::path& a_file)
+		{
+			std::ifstream in(a_file, std::ios::binary);
+			if (!in) {
+				return false;
+			}
+
+			std::map<std::string, bool> seen;
+			std::string                 line;
+			while (std::getline(in, line)) {
+				const auto trimmed = Trim(line);
+				const auto eq = trimmed.find('=');
+				if (trimmed.empty() || trimmed.front() == '#' || eq == std::string::npos) {
+					continue;
+				}
+				seen[Trim(std::string_view(trimmed).substr(0, eq))] = true;
+			}
+
+			for (const auto& [key, text] : Builtin()) {
+				if (!seen.contains(key)) {
+					return false;
+				}
+			}
+			return true;
+		}
 	}
 
 	void Loc::SetLevel(const std::string& a_level)
@@ -140,10 +177,18 @@ namespace BodyPouches
 
 		// English is the built-in table; the file is written so that it can be read,
 		// copied and translated, not because the mod needs to read it back.
+		// Written out when it is missing, and equally when it is older than the binary and
+		// short of a line. It is read back as an override, so a file left behind by an
+		// earlier build would go on speaking for every key it does have and silently hide
+		// any wording changed since - and a translator copying it would never see the keys
+		// added since either.
 		const auto english = a_dir / "english.txt";
 		std::error_code ec;
 		if (!std::filesystem::exists(english, ec)) {
 			WriteOut(english);
+		} else if (!HasEveryKey(english)) {
+			WriteOut(english);
+			Say(spdlog::level::info, Keys::kLangWritten, english.string());
 		}
 
 		const auto file = a_dir / (g_language + ".txt");

@@ -29,6 +29,8 @@ namespace BodyPouches::Keys
 	inline constexpr auto kConfigRead = "config.read";
 	inline constexpr auto kConfigBad = "config.bad";
 	inline constexpr auto kPouchConfigured = "config.pouch";
+	inline constexpr auto kConfigToppedUp = "config.topped_up";
+	inline constexpr auto kLangWritten = "lang.written";
 
 	// The pouches at work
 	inline constexpr auto kPouchAssigned = "pouch.assigned";
@@ -71,9 +73,14 @@ namespace BodyPouches::Keys
 	// give the moment. VRIK's own holster event never fires for anything but weapons.
 	inline constexpr auto kInputWatch = "input.watch";
 	inline constexpr auto kButtonAtPouch = "input.button_at_pouch";
+	inline constexpr auto kButtonAtSlot = "input.button_at_slot";
+	inline constexpr auto kButtonElsewhere = "input.button_elsewhere";
+	inline constexpr auto kHandState = "input.hand_state";
+	inline constexpr auto kHandedness = "game.handedness";
 	inline constexpr auto kDropAtPouch = "drop.at_pouch";
 	inline constexpr auto kDropTaken = "drop.taken";
 	inline constexpr auto kDropNotOurs = "drop.not_ours";
+	inline constexpr auto kDropBounced = "drop.bounced";
 	inline constexpr auto kIdleHere = "mod.idle_here";
 
 	// Things that can go wrong at the boundary with the game

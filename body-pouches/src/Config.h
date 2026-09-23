@@ -46,9 +46,19 @@ namespace BodyPouches
 		int drawButton{ 2 };
 
 		// How long after a hand leaves a slot a release still counts as happening there,
-		// in milliseconds. The hand is read four times a second, and a bottle dropped at
+		// in milliseconds. The hand is read ten times a second, and a bottle dropped at
 		// the stomach usually lands a moment after the hand has already moved on.
 		int reachMemoryMs{ 1200 };
+
+		// How long a bottle just taken out of a pouch is left alone, in milliseconds.
+		//
+		// The two gestures share a button and a place, so without this they collide: the
+		// squeeze that draws is also the squeeze HIGGS holds a thing with, and letting it
+		// go is what puts a thing away. Tap the button and the bottle is drawn and swallowed
+		// again in the same breath, with nothing to show for it. Inside this window a
+		// release at the same pouch is said out loud as a bounce, so that a run can tell
+		// "the button did nothing" from "the button did both halves at once".
+		int settleMs{ 800 };
 
 		// One pouch, on the stomach. VRIK counts its fourteen slots
 		//   1 Left Hip     2 Right Hip     3 Left Thigh    4 Right Thigh

@@ -32,6 +32,17 @@ namespace BodyPouches
 		// the controller actually is, and the skeleton hands follow them with a lag.
 		constexpr std::array kLeftNodes{ "LeftWandNode", "NPC L Hand [LHnd]", "NPC L Finger02 [LF02]" };
 		constexpr std::array kRightNodes{ "RightWandNode", "NPC R Hand [RHnd]", "NPC R Finger02 [RF02]" };
+
+		// Deliberately not a member. The pacing thread outlives nothing else it can reach:
+		// the singleton is a function-local static and is destroyed while that thread may
+		// still be between two sleeps, so the thread reads this and hands every reading
+		// that touches the mod to the game's own queue, which stops being drained first.
+		std::atomic<bool> g_polling{ false };
+
+		// Ten times a second. Four was enough to watch a hand, and not enough to catch the
+		// press that follows it: a button squeezed within the gap saw no slot in reach and
+		// was passed over without a word, which is the one answer a run must never get.
+		constexpr auto kPollEvery = std::chrono::milliseconds(100);
 	}
 
 	Mod& Mod::GetSingleton()
@@ -72,16 +83,17 @@ namespace BodyPouches
 		Loc::SetLevel(_settings.logLevel);
 		Loc::Load(Paths::LangDir(), _settings.language);
 		BuildPouches(_settings);
+		WatchInput();
 		StartPolling();
 	}
 
 	void Mod::StartPolling()
 	{
-		if (_polling || !Working()) {
+		if (g_polling || !Working()) {
 			return;
 		}
 		if (auto* tasks = SKSE::GetTaskInterface(); tasks != nullptr) {
-			_polling = true;
+			g_polling = true;
 			Loc::Info(Keys::kReachWatch);
 			std::thread(&Mod::PollLoop).detach();
 		}
@@ -108,15 +120,12 @@ namespace BodyPouches
 
 	void Mod::PollLoop()
 	{
-		using namespace std::chrono_literals;
-
-		auto& mod = GetSingleton();
-		while (mod._polling) {
-			std::this_thread::sleep_for(250ms);
+		while (g_polling) {
+			std::this_thread::sleep_for(kPollEvery);
 
 			// VRIK may only be asked anything on the game's own thread, so this thread
-			// asks nothing itself - it hands over one reading and goes back to sleep.
-			// Four times a second is far more than a hand moving to a holster needs.
+			// asks nothing itself - it hands over one reading and goes back to sleep. It
+			// touches nothing of the mod's either: see g_polling.
 			if (auto* tasks = SKSE::GetTaskInterface(); tasks != nullptr) {
 				tasks->AddTask(&Mod::PollReach);
 			}
@@ -155,17 +164,27 @@ namespace BodyPouches
 	{
 		const int hand = IsSecondaryHand(a_isLeft) ? 1 : 0;
 
-		if (_reach[hand] != 0) {
-			std::scoped_lock guard(_lock);
-			if (_pouches.Find(_reach[hand]) != nullptr) {
-				return _reach[hand];
-			}
+		// One lock over the whole answer, because the whole answer is made of what
+		// NoteReach writes under it.
+		std::scoped_lock guard(_lock);
+
+		if (_reach[hand] != 0 && _pouches.Find(_reach[hand]) != nullptr) {
+			return _reach[hand];
 		}
 
 		if (!a_remember || _lastPouch[hand] == 0) {
 			return 0;
 		}
 		return (Now() - _lastPouchAt[hand]) <= _settings.reachMemoryMs ? _lastPouch[hand] : 0;
+	}
+
+	std::int64_t Mod::SinceDrawnFrom(bool a_isLeft, int a_slot) const
+	{
+		const int hand = IsSecondaryHand(a_isLeft) ? 1 : 0;
+		if (_drawnFrom[hand] != a_slot || _drawnAt[hand] == 0) {
+			return -1;
+		}
+		return Now() - _drawnAt[hand];
 	}
 
 	bool Mod::IsSecondaryHand(bool a_isLeft)
@@ -222,7 +241,7 @@ namespace BodyPouches
 			facts.exclusive = pouch->PouchMode() == Core::Mode::Exclusive;
 			facts.maySwitchOn = _settings.mayEnableSlots;
 
-				const auto plan = Core::PlanFor(facts);
+			const auto plan = Core::PlanFor(facts);
 			if (plan.switchOn) {
 				_vrik.SwitchOn(setting.slot);
 			}
@@ -310,6 +329,13 @@ namespace BodyPouches
 		_higgs.Grab(dropped.get(), a_isLeft);
 		Loc::Info(Keys::kGrabAsked, HandName(a_isLeft));
 		_pouches.NoteDrawn(a_isLeft, a_slot, a_item);
+
+		// Remembered so that the release which ends this very squeeze is not read as a
+		// fresh reach to put something away. See SinceDrawnFrom.
+		const int hand = IsSecondaryHand(a_isLeft) ? 1 : 0;
+		_drawnFrom[hand] = a_slot;
+		_drawnAt[hand] = Now();
+
 		Loc::Info(Keys::kPouchDrawn, a_slot, HandName(a_isLeft));
 		return true;
 	}
@@ -383,6 +409,10 @@ namespace BodyPouches
 		reach.handOccupied = _higgs.IsHolding(a_isLeft);
 		reach.handCanHold = _higgs.CanGrab(a_isLeft);
 
+		// The two values every outcome below turns on, said before they decide anything.
+		// A refusal with neither of them in the log is a refusal nobody can explain.
+		Loc::Info(Keys::kHandState, HandName(a_isLeft), reach.handOccupied, reach.handCanHold);
+
 		Core::Decision decision;
 		{
 			std::scoped_lock guard(_lock);
@@ -396,11 +426,22 @@ namespace BodyPouches
 		case Core::Act::Draw:
 			Draw(decision.slot, a_isLeft, decision.item);
 			break;
+
+		case Core::Act::Stow:
+		case Core::Act::Assign:
+			// A press is how a bottle comes out. Putting one in is a release and not a
+			// press, so there is nothing to do here except say why nothing happened -
+			// otherwise a full hand pressing at a pouch is a silence like any other.
+			Loc::Info(Keys::kPouchHandBusy, HandName(a_isLeft));
+			break;
+
 		case Core::Act::Refuse:
 			if (decision.reason == Core::Reason::NothingInPack) {
 				Loc::Info(Keys::kPouchEmpty, decision.slot);
 			}
 			break;
+
+		case Core::Act::PassToVrik:
 		default:
 			break;
 		}
@@ -467,17 +508,37 @@ namespace BodyPouches
 			std::scoped_lock guard(_lock);
 			_pouches.NoteSettled(a_isLeft);
 		}
+
+		// Back where it came from, so the draw it came out of is over and the next release
+		// at this pouch is a new gesture rather than the tail of that one.
+		const int hand = IsSecondaryHand(a_isLeft) ? 1 : 0;
+		_drawnFrom[hand] = 0;
+		_drawnAt[hand] = 0;
+
 		Loc::Info(Keys::kDropTaken, a_slot, HandName(a_isLeft));
 	}
 
-	void Mod::OnInputLoaded()
+	void Mod::WatchInput()
 	{
+		if (_watchingInput) {
+			return;
+		}
 		auto* manager = RE::BSInputDeviceManager::GetSingleton();
 		if (manager == nullptr) {
 			return;
 		}
 		manager->AddEventSink(&_input);
+		_watchingInput = true;
 		Loc::Info(Keys::kInputWatch, _settings.drawButton);
+
+		// Which hand VRIK's "secondary" is taken to mean here, and the setting it is read
+		// from. Said out loud because the reading is ours and not VRIK's: its own scripts
+		// call the right hand primary whatever the game's left-handed setting says, so a
+		// left-handed player may well be told the wrong hand - and nobody can see that
+		// unless what was read is in the log beside what was done with it.
+		const auto* setting = RE::GetINISetting("bLeftHandedMode:VRInput");
+		Loc::Info(Keys::kHandedness, setting != nullptr && setting->GetBool(),
+			HandName(IsLeftHand(true)));
 	}
 
 	RE::BSEventNotifyControl Mod::Input::ProcessEvent(RE::InputEvent* const* a_event,
@@ -510,15 +571,24 @@ namespace BodyPouches
 				continue;  // keyboard, mouse, gamepad: not a hand at a pouch
 			}
 
-			// Only presses made at a pouch are of any interest, and only those are said
-			// out loud - with the id in the line, so that the button can be named from a
-			// run instead of guessed at from a table.
+			// Every press carries its real id into the log, so that the button can be
+			// named from a run instead of guessed at from a table. Where it is said
+			// depends on where the hand was: at a pouch and at any other slot of VRIK's
+			// out loud, because the first question a run has to answer is which ids this
+			// game sends at all, and a line that only ever appears at a pouch cannot
+			// answer it; everywhere else quietly, because that is every press in the game.
+			const int id = static_cast<int>(button->GetIDCode());
 			const int slot = mod.PouchAtHand(isLeft, false);
 			if (slot == 0) {
+				const int reached = mod._reach[IsSecondaryHand(isLeft) ? 1 : 0];
+				if (reached != 0) {
+					Loc::Info(Keys::kButtonAtSlot, HandName(isLeft), id, reached);
+				} else {
+					Loc::Debug(Keys::kButtonElsewhere, HandName(isLeft), id);
+				}
 				continue;
 			}
 
-			const int id = static_cast<int>(button->GetIDCode());
 			Loc::Info(Keys::kButtonAtPouch, HandName(isLeft), id, slot);
 			if (id != mod._settings.drawButton) {
 				continue;
@@ -662,7 +732,17 @@ namespace BodyPouches
 		// event VRIK never gives: its holster callback is part of its weapon logic and
 		// stays silent for a hand holding a potion, however long the hand is held there.
 		if (const int slot = mod.PouchAtHand(a_isLeft, true); slot != 0 && a_refr != nullptr) {
-			Loc::Info(Keys::kDropAtPouch, HandName(a_isLeft), slot);
+			// The squeeze that draws is the squeeze that holds, so letting go at the pouch
+			// a moment after drawing is the end of that gesture and not a new one. It is
+			// still taken in - the bottle belongs in the pack either way - but it is said
+			// under its own name, so that a run can tell "the press did nothing" from "the
+			// press did both halves at once, too quickly to see".
+			if (const auto since = mod.SinceDrawnFrom(a_isLeft, slot);
+				since >= 0 && since <= mod._settings.settleMs) {
+				Loc::Info(Keys::kDropBounced, HandName(a_isLeft), slot, since);
+			} else {
+				Loc::Info(Keys::kDropAtPouch, HandName(a_isLeft), slot);
+			}
 
 			// By id and not by pointer: the reference is handed to a task that runs
 			// later, and what HIGGS let go of may be gone by then.

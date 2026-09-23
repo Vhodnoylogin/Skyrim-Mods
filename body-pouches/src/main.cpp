@@ -76,11 +76,11 @@ namespace
 			// this plugin loses whenever it is loaded before the plugin it is asking.
 			BodyPouches::Mod::GetSingleton().Connect();
 			break;
-		case SKSE::MessagingInterface::kInputLoaded:
-			// The controllers exist from here on, and a press at a pouch is how a bottle
-			// is taken out - VRIK raises no event for that.
-			BodyPouches::Mod::GetSingleton().OnInputLoaded();
-			break;
+			// kInputLoaded deliberately does nothing beyond the line above. The controllers
+			// do exist from there on, but the settings do not - they are read two messages
+			// later - and a mod that subscribes before it knows which button it obeys can
+			// only announce the one it was built with. The controllers are taken up in
+			// OnDataLoaded instead, where both are known.
 		case SKSE::MessagingInterface::kDataLoaded:
 			BodyPouches::Mod::GetSingleton().OnDataLoaded();
 			break;

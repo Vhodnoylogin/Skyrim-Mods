@@ -36,10 +36,14 @@ namespace BodyPouches
 		// The game's data is up: settings can be read and pouches built.
 		void OnDataLoaded();
 
-		// The controllers exist: the mod can start listening for the press that draws
-		// from a pouch. VRIK's holster event is part of its weapon logic and never fires
-		// for a hand holding a potion, so the press is ours to notice.
-		void OnInputLoaded();
+		// Start listening for the press that draws from a pouch. VRIK's holster event is
+		// part of its weapon logic and never fires for a hand holding a potion, so the
+		// press is ours to notice.
+		//
+		// Called from OnDataLoaded and not from kInputLoaded, which arrives two messages
+		// earlier: the controllers do exist by then, but the settings do not, so the mod
+		// would announce the button it was built with rather than the one it will obey.
+		void WatchInput();
 
 		// A save was loaded or a new game started. Suspension in VRIK is runtime-only
 		// state by its author's design, so it has to be asked for again every time.
@@ -83,6 +87,11 @@ namespace BodyPouches
 		// A hand let go of something at a pouch: take it in, or set the pouch up with it.
 		void StowDropped(int a_slot, bool a_isLeft, RE::TESObjectREFR* a_object);
 
+		// How long ago this hand was given a bottle out of this very pouch, or -1. The two
+		// gestures share a button and a place, so a release that follows a draw closely
+		// enough is the end of that draw and not a new stow.
+		[[nodiscard]] std::int64_t SinceDrawnFrom(bool a_isLeft, int a_slot) const;
+
 		// Which pouch this hand is at, or 0. Answers from the last reading while the
 		// hand is still there, and for a short while after it has left - a bottle let go
 		// of at the stomach lands a moment later, by which time the hand has moved on.
@@ -123,9 +132,13 @@ namespace BodyPouches
 		int                 _reach[2]{ 0, 0 };
 		int                 _lastPouch[2]{ 0, 0 };
 		std::int64_t        _lastPouchAt[2]{ 0, 0 };
+		// Which pouch each hand was last given a bottle out of, and when. Indexed the same
+		// way: [0] primary, [1] secondary.
+		int                 _drawnFrom[2]{ 0, 0 };
+		std::int64_t        _drawnAt[2]{ 0, 0 };
 		Input               _input;
-		bool _slotsArranged{ false };
-		std::atomic<bool> _polling{ false };
+		bool                _slotsArranged{ false };
+		bool                _watchingInput{ false };
 
 		Core::PouchSet   _pouches;
 		Game::PlayerPack _pack;

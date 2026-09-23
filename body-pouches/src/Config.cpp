@@ -23,6 +23,7 @@ namespace BodyPouches
 				{ "mayEnableSlots", a_settings.mayEnableSlots },
 				{ "drawButton", a_settings.drawButton },
 				{ "reachMemoryMs", a_settings.reachMemoryMs },
+				{ "settleMs", a_settings.settleMs },
 				{ "pouches", pouches },
 			};
 		}
@@ -76,8 +77,9 @@ namespace BodyPouches
 			settings.language = json.value("language", settings.language);
 			settings.logLevel = json.value("logLevel", settings.logLevel);
 			settings.mayEnableSlots = json.value("mayEnableSlots", settings.mayEnableSlots);
-		settings.drawButton = json.value("drawButton", settings.drawButton);
-		settings.reachMemoryMs = json.value("reachMemoryMs", settings.reachMemoryMs);
+			settings.drawButton = json.value("drawButton", settings.drawButton);
+			settings.reachMemoryMs = json.value("reachMemoryMs", settings.reachMemoryMs);
+			settings.settleMs = json.value("settleMs", settings.settleMs);
 			for (const auto& entry : json.value("pouches", nlohmann::json::array())) {
 				Settings::PouchSetting pouch;
 				pouch.slot = entry.value("slot", 0);
@@ -88,6 +90,18 @@ namespace BodyPouches
 			}
 
 			Loc::Info(Keys::kConfigRead, file.string(), settings.pouches.size());
+
+			// A file written by an older build has no line for a setting added since, and a
+			// setting nobody can see is a setting nobody can change: its value is quietly the
+			// default and the only way to learn its name is to read the source. So the file is
+			// topped up in place the moment it is missing one, keeping everything set in it.
+			for (const auto& entry : ToJson(settings).items()) {
+				if (!json.contains(entry.key())) {
+					Loc::Info(Keys::kConfigToppedUp, entry.key(), file.string());
+					Write(file, settings);
+					break;
+				}
+			}
 			return settings;
 		} catch (const std::exception& e) {
 			Loc::Error(Keys::kConfigBad, file.string(), e.what());
