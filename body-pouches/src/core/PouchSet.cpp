@@ -2,6 +2,30 @@
 
 namespace BodyPouches::Core
 {
+	namespace
+	{
+		// Which of two matching potions is the one to spend. Read as "less precious".
+		bool Cheaper(const Item& a_lhs, const Item& a_rhs)
+		{
+			// Fewest effects first: a plain healing potion before a brew that also restores
+			// magicka and cures disease, because the brew is good for errands this one is
+			// not and spending it here throws the rest of it away.
+			if (a_lhs.effects.size() != a_rhs.effects.size()) {
+				return a_lhs.effects.size() < a_rhs.effects.size();
+			}
+			// Then the weaker of the two.
+			if (a_lhs.strength != a_rhs.strength) {
+				return a_lhs.strength < a_rhs.strength;
+			}
+			// Then by name, for no reason except that there has to be one: two potions
+			// alike in every way above must still come out in the same order every time.
+			if (a_lhs.key.plugin != a_rhs.key.plugin) {
+				return a_lhs.key.plugin < a_rhs.key.plugin;
+			}
+			return a_lhs.key.localId < a_rhs.key.localId;
+		}
+	}
+
 	void PouchSet::Set(Pouch a_pouch)
 	{
 		if (a_pouch.Slot() > 0) {
@@ -41,12 +65,19 @@ namespace BodyPouches::Core
 
 	const Item* PouchSet::Choose(const std::vector<Item>& a_candidates)
 	{
+		// WHY THIS IS NOT SIMPLY THE FIRST ONE. The pack answers in an order of its own,
+		// and in the game that order is a map keyed by where the form happens to sit in
+		// memory - so "the first" is a different bottle on a different day and no rule at
+		// all. Twelve healing potions in the pack would hand over whichever one, and the
+		// player would rightly call that a fault. Something has to be picked on purpose,
+		// and the purpose is to spend nothing rarer than the errand needs: see Cheaper.
+		const Item* best = nullptr;
 		for (const auto& item : a_candidates) {
-			if (item.count > 0) {
-				return &item;
+			if (item.count > 0 && (best == nullptr || Cheaper(item, *best))) {
+				best = &item;
 			}
 		}
-		return nullptr;
+		return best;
 	}
 
 	Decision PouchSet::Decide(const Reach& a_reach, const Pack& a_pack) const

@@ -48,6 +48,21 @@ see. A release at the pouch within `settleMs` of a draw is named for what it is 
 gesture rather than a fresh reach - and said so out loud, which is the whole difference between
 "the button did nothing" and "the button did both halves at once".
 
+## What is not written yet
+
+Two things a reader would reasonably expect and will not find.
+
+**Nothing appears on the body.** A pouch shows no bottle and no icon. The rule that works out
+what ought to be shown is written and under test - `PouchSet::Display` answers with the kind of
+potion and how many of them the pack holds - but nothing asks VRIK to draw it. What a VRIK slot
+displays is owned by its Papyrus side, which rebuilds it from its own array after every load, so
+a picture set from a DLL may not survive; that is a piece of work with an open question in front
+of it rather than an oversight.
+
+**A press by a full hand puts nothing away.** Putting in is a release, taking out is a press, and
+that is deliberate: one gesture each, and neither can be mistaken for the other. A press at a
+pouch by an occupied hand therefore says so in the log and does nothing else.
+
 ## What made it possible
 
 The VRIK holster mechanic lived in Papyrus and was not exposed. Build 80700 (VRIK 0.8.7) ships a

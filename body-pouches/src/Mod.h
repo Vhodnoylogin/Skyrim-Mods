@@ -136,6 +136,9 @@ namespace BodyPouches
 		// way: [0] primary, [1] secondary.
 		int                 _drawnFrom[2]{ 0, 0 };
 		std::int64_t        _drawnAt[2]{ 0, 0 };
+		// When to look back and see whether the hand really closed on the bottle. HIGGS
+		// takes no answer and gives none, so the only honest report is one made afterwards.
+		std::int64_t        _checkGrabAt[2]{ 0, 0 };
 		Input               _input;
 		bool                _slotsArranged{ false };
 		bool                _watchingInput{ false };

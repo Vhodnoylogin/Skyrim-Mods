@@ -7,6 +7,7 @@
 
 #include <SKSE/SKSE.h>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdint>
@@ -43,6 +44,10 @@ namespace BodyPouches
 		// press that follows it: a button squeezed within the gap saw no slot in reach and
 		// was passed over without a word, which is the one answer a run must never get.
 		constexpr auto kPollEvery = std::chrono::milliseconds(100);
+
+		// How long to give HIGGS before asking whether the hand really closed on the
+		// bottle. Long enough for a frame or two, short enough to be about that bottle.
+		constexpr std::int64_t kGrabCheckMs = 200;
 	}
 
 	Mod& Mod::GetSingleton()
@@ -138,7 +143,21 @@ namespace BodyPouches
 
 		for (int hand = 0; hand < 2; ++hand) {
 			const bool secondary = hand == 1;
-			const int  slot = _vrik.SlotInReach(secondary);
+
+			// A bottle was handed to this hand a moment ago; say whether it stayed there.
+			// GrabObject takes no answer and returns none, so "HIGGS was asked" is all the
+			// draw itself can honestly claim - and a run that reads "pouch 13 gave a bottle
+			// to the right hand" while the bottle lies on the floor is a run that has been
+			// told the wrong thing. Done here because here is already a place that runs on
+			// the game thread a little later; a task that queues a task is drained inside
+			// the same frame and would ask before HIGGS had a chance to answer.
+			if (_checkGrabAt[hand] != 0 && now >= _checkGrabAt[hand]) {
+				_checkGrabAt[hand] = 0;
+				Loc::Info(Keys::kGrabResult, _drawnFrom[hand], HandName(IsLeftHand(secondary)),
+					_higgs.IsHolding(IsLeftHand(secondary)));
+			}
+
+			const int slot = _vrik.SlotInReach(secondary);
 
 			// Remembered while the hand is there, because the moment that matters comes
 			// afterwards: a bottle let go of at the stomach lands a beat later, by which
@@ -335,6 +354,7 @@ namespace BodyPouches
 		const int hand = IsSecondaryHand(a_isLeft) ? 1 : 0;
 		_drawnFrom[hand] = a_slot;
 		_drawnAt[hand] = Now();
+		_checkGrabAt[hand] = _drawnAt[hand] + kGrabCheckMs;
 
 		Loc::Info(Keys::kPouchDrawn, a_slot, HandName(a_isLeft));
 		return true;
@@ -371,7 +391,7 @@ namespace BodyPouches
 		}
 
 		auto item = Game::Describe(potion);
-		item.count = 1;
+		item.count = std::max(1, held->extraList.GetCount());
 
 		const auto decision = _pouches.Offer(a_slot, a_isLeft, item);
 		if (a_assigning) {
@@ -385,16 +405,13 @@ namespace BodyPouches
 			return false;
 		}
 
-		// Back into the pack, and the bottle in the world is gone. The pouch keeps no
-		// count of its own, so there is nothing else to put right.
+		// Back into the pack, by the engine's own means and counting what is really
+		// there - see the note in StowDropped.
 		auto* player = RE::PlayerCharacter::GetSingleton();
-		auto* bound = base->As<RE::TESBoundObject>();
-		if (player == nullptr || bound == nullptr) {
+		if (player == nullptr) {
 			return false;
 		}
-		player->AddObjectToContainer(bound, nullptr, 1, nullptr);
-		held->Disable();
-		held->SetDelete(true);
+		player->PickUpObject(held, std::max(1, held->extraList.GetCount()), false, true);
 
 		_pouches.NoteSettled(a_isLeft);
 		Loc::Info(Keys::kPouchStowed, a_slot, HandName(a_isLeft));
@@ -470,8 +487,12 @@ namespace BodyPouches
 			return;
 		}
 
+		// A reference in the world is not always one bottle. Asked once, here, and used
+		// both for the decision and for the picking up.
+		const int count = std::max(1, a_object->extraList.GetCount());
+
 		auto item = Game::Describe(potion);
-		item.count = 1;
+		item.count = count;
 
 		bool taken = false;
 		{
@@ -493,16 +514,18 @@ namespace BodyPouches
 		}
 
 		auto* player = RE::PlayerCharacter::GetSingleton();
-		auto* bound = base->As<RE::TESBoundObject>();
-		if (player == nullptr || bound == nullptr) {
+		if (player == nullptr) {
 			return;
 		}
 
-		// Into the pack, and the bottle in the world is gone. The pouch keeps no count
-		// of its own, so there is nothing else to put right.
-		player->AddObjectToContainer(bound, nullptr, 1, nullptr);
-		a_object->Disable();
-		a_object->SetDelete(true);
+		// THE ENGINE ALREADY KNOWS HOW TO PICK A THING UP, AND THIS USED NOT TO USE IT.
+		// What stood here was AddObjectToContainer for one, then Disable and SetDelete on
+		// the reference - which looks like the same thing and is not. A reference in the
+		// world can stand for more than one bottle, so a pile of five went into the pack
+		// as one and the other four were deleted: the mod took the player's potions away.
+		// PickUpObject counts, keeps whatever else the reference carried, and makes the
+		// sound the game makes when anything else is picked up.
+		player->PickUpObject(a_object, count, false, true);
 
 		{
 			std::scoped_lock guard(_lock);
@@ -515,7 +538,7 @@ namespace BodyPouches
 		_drawnFrom[hand] = 0;
 		_drawnAt[hand] = 0;
 
-		Loc::Info(Keys::kDropTaken, a_slot, HandName(a_isLeft));
+		Loc::Info(Keys::kDropTaken, a_slot, HandName(a_isLeft), count);
 	}
 
 	void Mod::WatchInput()

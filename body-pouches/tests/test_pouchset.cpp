@@ -237,3 +237,65 @@ TEST(the_hand_remembers_which_pouch_it_drew_from)
 	CHECK(!set.SlotOfHand(true).has_value());
 }
 
+
+// WHICH OF SEVERAL MATCHING POTIONS. The pack answers in an order of its own - in the
+// game, a map keyed by where the form happens to sit in memory - so a rule that takes
+// "the first" takes a different bottle on a different day, and the player sees a rare
+// brew spent on a scratch. Given the same three potions in any order, the same one has
+// to come out: the plainest first, then the weakest.
+TEST(the_plainest_and_weakest_matching_potion_is_the_one_drawn)
+{
+	Item weak = Healing();
+	weak.strength = 25.0f;
+
+	Item strong = Healing();
+	strong.key = FormKey{ "Skyrim.esm", 0x03EADF };
+	strong.strength = 100.0f;
+
+	// Weaker than either, and still not the one to spend: it also restores magicka,
+	// and that half of it would be thrown away here.
+	Item brew = Healing();
+	brew.key = FormKey{ "Skyrim.esm", 0x03EAE0 };
+	brew.effects = { kRestoreHealth, kRestoreMagicka };
+	brew.strength = 10.0f;
+
+	const PouchSet set = HealingAt(kHip);
+
+	FakePack first;
+	first.Put(brew);
+	first.Put(strong);
+	first.Put(weak);
+
+	FakePack second;
+	second.Put(weak);
+	second.Put(strong);
+	second.Put(brew);
+
+	FakePack third;
+	third.Put(strong);
+	third.Put(brew);
+	third.Put(weak);
+
+	const Pack* packs[]{ &first, &second, &third };
+	for (const Pack* pack : packs) {
+		const auto decision = set.Decide(EmptyHandAt(kHip), *pack);
+		CHECK(decision.act == Act::Draw);
+		CHECK(decision.item == weak.key);
+	}
+}
+
+// A pouch with one matching potion left still hands that one over, however plain or
+// strong it is: the rule above orders candidates, it does not turn any of them away.
+TEST(the_only_matching_potion_is_drawn_whatever_it_is)
+{
+	Item brew = Healing();
+	brew.effects = { kRestoreHealth, kRestoreMagicka };
+	brew.strength = 500.0f;
+
+	FakePack pack;
+	pack.Put(brew);
+
+	const auto decision = HealingAt(kHip).Decide(EmptyHandAt(kHip), pack);
+	CHECK(decision.act == Act::Draw);
+	CHECK(decision.item == brew.key);
+}

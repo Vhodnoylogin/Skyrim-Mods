@@ -1,5 +1,7 @@
 #include "game/Forms.h"
 
+#include <algorithm>
+
 namespace BodyPouches::Game
 {
 	Core::FormKey KeyOf(const RE::TESForm* a_form)
@@ -48,6 +50,9 @@ namespace BodyPouches::Game
 		for (const auto* effect : a_potion->effects) {
 			if (effect != nullptr && effect->baseEffect != nullptr) {
 				item.effects.push_back(KeyOf(effect->baseEffect));
+				// The strongest thing it does, which is as close to "how big a bottle is
+				// this" as the game will say without being asked about a particular effect.
+				item.strength = std::max(item.strength, effect->GetMagnitude());
 			}
 		}
 		return item;

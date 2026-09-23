@@ -49,5 +49,10 @@ namespace BodyPouches::Core
 		std::vector<FormKey> effects;   // every magic effect on it, in the game's order
 		bool                 harmful{}; // a poison: it goes on a blade, it is not drunk
 		int                  count{};   // how many are in the pack right now
+
+		// The largest magnitude among its effects, as the game states it. Not a judgement
+		// of worth and not comparable between unlike potions - only enough to tell the
+		// small bottle of a kind from the large one, so that the small one is spent first.
+		float                strength{};
 	};
 }

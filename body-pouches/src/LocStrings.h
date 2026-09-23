@@ -58,6 +58,7 @@ namespace BodyPouches::Keys
 	inline constexpr auto kNoTasks = "task.no_interface";
 	inline constexpr auto kDrawStart = "draw.start";
 	inline constexpr auto kGrabAsked = "draw.grab_asked";
+	inline constexpr auto kGrabResult = "draw.grab_result";
 	inline constexpr auto kStowStart = "stow.start";
 	inline constexpr auto kNothingHeld = "stow.nothing_held";
 	inline constexpr auto kHeldNotPotion = "stow.not_a_potion";
