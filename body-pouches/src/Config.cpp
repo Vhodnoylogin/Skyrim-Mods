@@ -21,9 +21,6 @@ namespace BodyPouches
 				{ "language", a_settings.language },
 				{ "logLevel", a_settings.logLevel },
 				{ "mayEnableSlots", a_settings.mayEnableSlots },
-				{ "drawButton", a_settings.drawButton },
-				{ "reachMemoryMs", a_settings.reachMemoryMs },
-				{ "settleMs", a_settings.settleMs },
 				{ "pouches", pouches },
 			};
 		}
@@ -77,9 +74,6 @@ namespace BodyPouches
 			settings.language = json.value("language", settings.language);
 			settings.logLevel = json.value("logLevel", settings.logLevel);
 			settings.mayEnableSlots = json.value("mayEnableSlots", settings.mayEnableSlots);
-			settings.drawButton = json.value("drawButton", settings.drawButton);
-			settings.reachMemoryMs = json.value("reachMemoryMs", settings.reachMemoryMs);
-			settings.settleMs = json.value("settleMs", settings.settleMs);
 			for (const auto& entry : json.value("pouches", nlohmann::json::array())) {
 				Settings::PouchSetting pouch;
 				pouch.slot = entry.value("slot", 0);

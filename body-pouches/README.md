@@ -23,57 +23,54 @@ for it.
 
 ## Where the mechanic comes from
 
-VRIK owns the place on the body, and `GetHolsterSlotInReach(secondaryHand)` answers for any hand
-whatever it holds - that part is flawless and is what this mod leans on. What VRIK does not give
-is a moment. Its holster callback is part of its weapon logic: it fires when a weapon could be
-drawn or put away, and for a pouch of potions that is never. Six sessions in the game settled it:
+VRIK owns the place on the body and the moment of taking out; HIGGS owns the moment of putting in.
+How VRIK behaves was settled by a reading of its own code (`claude-skyrim-vr/knowledge/vrik-holster-api.md`
+in the project journal), and the mod is built on exactly that:
 
-| what the hand held | slot 13 in reach | holster callback |
-|---|---|---|
-| a two-hander | yes | yes, twice |
-| a potion, either hand, four tries | yes, every time | never |
-| nothing, at an empty slot | yes, six times | never |
+    taking out    close the grip inside the pouch and pull the hand out with it still closed:
+                  VRIK raises a holster attempt for the empty hand, and the mod puts a bottle in it
+    putting in    let go of the bottle inside the pouch: HIGGS says "dropped", VRIK says the hand
+                  is at the pouch at that very moment, and the bottle goes back into the pack
+    carrying off  a hand holding a bottle that leaves the pouch with the grip closed keeps it
 
-So the place comes from VRIK and the moment comes from elsewhere:
+The pouch's slot is suspended, and that does three things at once: VRIK neither draws a weapon from
+it nor holsters one into it; an empty hand sees the slot at all, where without suspension VRIK looks
+straight past a free hand at an empty slot; and the controller buzzes as a hand enters it.
+Suspension lasts until the game is closed and is set at the first frame of play, because a new game
+sends a plugin no message to set it on.
 
-    putting in   HIGGS lets go of something while the hand is at a pouch
-    taking out   a gesture bound in VRIK's own menu, or a button (grip by default)
-
-Neither needs anything of VRIK beyond the question "which slot is this hand at", and the pouch
-keeps working the day VRIK starts raising an event of its own.
-
-**The gesture is the better of the two, and it is VRIK's own.** `addGestureAction` puts an action
-named "Body Pouches: take out" into VRIK's gesture menu, and the player binds it there to
-whatever they like, beside everything else they have bound. Nothing about it is this mod's to
-choose, which is the point: no button taken from somebody else, no number to guess at. VRIK says
-only that the gesture happened and how many presses - not which hand - so the hand is found the
-way everything else here is, by asking VRIK where each one is and taking the free one at a pouch.
-
-The button remains as the plainer way in, and it has a catch worth knowing: the squeeze that draws
-is the squeeze HIGGS holds a thing with, so a tap is a draw and a put-back in one movement, too
-quick to see. A release at the pouch within `settleMs` of a draw is named for what it is - the end
-of that gesture rather than a fresh reach - which is the difference between "the button did
-nothing" and "the button did both halves at once". The gesture has no such catch.
+There is no button and no gesture of the mod's own any more, and no memory of where a hand was a
+moment ago. Run 7 showed what they cost: a press drew a bottle, the hand leaving the pouch with it
+was taken for putting it back, and a bottle let go of a second after the hand had left still
+counted as put away.
 
 ## What a pouch shows
 
-The kind of potion it would hand over, drawn in the slot, and only for a pouch the slot was given
-over to entirely - a shared slot still shows the sword VRIK keeps there, and painting over that
-would take away something the player put there themselves.
+The potion it would hand over, hanging on the body where the pouch is - and only for a pouch the
+slot was given over to entirely; a shared slot still shows the sword VRIK keeps there.
 
-`VrikSetSlotWeaponType` takes a form and not a type, whatever its name says, so a potion can be
-named to a slot as readily as a sword. What is named is whatever would come out next, so the belt
-shows the pack rather than a bottle of its own: drink the last healing potion and the slot empties
-by itself. It is said again every two seconds rather than once, because VRIK's Papyrus side
-rebuilds a slot's picture from an array of its own after every load.
+VRIK draws a thing in a slot only as an art object played on the player: its DLL catches the moment
+the art's model is set up, hangs the model on the slot's bone and keeps it in the middle of the
+slot. So the mod carries a small plugin, `BodyPouches.esp`, written by `tools\make-esp.py`: an art,
+a constant effect whose hit effect is that art, and an ability made of the effect. The DLL gives
+VRIK the art once per game (`VrikSetSlotForArt`), gives the art the model of the potion that would
+come out next, and adds the ability to the player - or takes it away when the pack has none left.
+Changing the potion is taking the ability off, waiting until VRIK says the old model is gone
+(`VrikGetSlotDisplayed`), and putting it on again.
+
+`VrikSetSlotWeaponType` was tried first and could not have worked: for anything but a weapon, a
+shield or a torch it records "empty".
 
 ## What is not written yet
 
-One thing a reader would reasonably expect and will not find.
+**A pouch forgets what it is for when the game is closed.** It is set up by letting go of a bottle
+in it, and that choice lives in memory only.
 
-**A press by a full hand puts nothing away.** Putting in is a release, taking out is a press, and
-that is deliberate: one gesture each, and neither can be mistaken for the other. A press at a
-pouch by an occupied hand therefore says so in the log and does nothing else.
+**The pouch sits wherever VRIK's Stomach slot sits.** In the author's build that is up at the chest,
+close to HIGGS's mouth, where a bottle meant for the pouch can be drunk instead. The slot is moved
+in VRIK's own configuration - the copy of `vrikslots.ini` in the build's VRIK config mod - and the
+numbers come from the game: every squeeze of an empty hand's grip writes into the log the
+`posX13`, `posY13` and `posZ13` that would put the pouch exactly where the hand is.
 
 ## What made it possible
 
@@ -100,10 +97,10 @@ is still a sword and is drawn by VRIK, while a flask is drawn by us.
     contract\      foreign contracts as they came: vrikinterface001.h (build 80700), higgsinterface001.h
     src\core\      the core: slots, their contents and the rule of handing over. Not a line about VR, SKSE or the game
     src\vr\        two adapters: VRIK (subscription and slot state) and HIGGS (hand-over, drinking)
-    src\           the SKSE entry points, settings, log
-    localization\  every line of text the mod puts out, by key
+    src\game\      the game side: the pack, forms, where a slot is on the body, the picture
+    src\           the SKSE entry points, settings, the log and its texts (Loc.cpp, by key)
     tests\         checks of the core, built and run without the game
-    docs\          the reasoning and the decisions
+    tools\         staging and packing, and make-esp.py, which writes BodyPouches.esp
 
 The core builds and is checked without SKSE and without the game — the game is attached as the layer
 above. That buys a second way out as well: in flat Skyrim a slot may hand the item over differently,
@@ -124,36 +121,29 @@ The settings file and the table of text are written by the plugin on first run i
 
 ## State
 
-The simple variant is written and builds. One pouch, on the stomach (slot 13), shows one
-bottle, the contents come straight from the pack, and setting up is done by hand.
+Version 0.1.8. One pouch, on the stomach slot (13), given over to the mod entirely: it draws on
+VRIK's own holster attempt, stows when a bottle is let go of inside it, and shows the potion it
+holds. Run 7 (0.1.7) proved the moment of drawing and every step of the hand-over; this version is
+the first to take out and put in by VRIK's rules rather than against them, and the first with a
+picture.
 
-The slot needs two things at once, and that is not a choice but a consequence of how VRIK
-works: a slot allowing no weapon type is not detected at all ("set all weapon types to 0 to
-disable a slot" is its author's own comment in `vrikslots.ini`), and the slots a build leaves
-free are switched off in exactly that way.
+The slot needs two things at once, and that is not a choice but a consequence of how VRIK works: a
+slot allowing no weapon type is not detected at all ("set all weapon types to 0 to disable a slot"
+is its author's own comment in `vrikslots.ini`), and the slots a build leaves free are switched off
+in exactly that way.
 
-**The mod does not change VRIK's settings.** It reads them, and when a slot is off it says so in
-the log and names where it is switched on: VRIK's MCM, the Weapon / Leg / Body / Arm Holsters
-pages, any one weapon type for that slot. Somebody else's setting is not ours to change on their
-behalf - not even in memory, not even reversibly: another mod may be arranging the same value,
-and the player would see one thing in the menu and get another in the game.
+**The mod's code does not change VRIK's settings.** It reads them, and when a slot is off it says
+so in the log and names where it is switched on: VRIK's MCM, the Weapon / Leg / Body / Arm Holsters
+pages, any one weapon type for that slot. Anyone who would rather the mod did it sets
+`mayEnableSlots: true` in `bodypouches.json`; the slot is then switched on from code, in memory, and
+every such change is written to the log. Off by default. What does have to change in VRIK's
+configuration - the pouch's place, for one - is changed openly, in the build's VRIK config mod.
 
-Anyone who would rather the mod did it sets `mayEnableSlots: true` in `bodypouches.json`; the
-slot is then switched on from code and every such change is written to the log. Off by default.
+What the next run settles:
 
-Suspension is unaffected: a slot given over to a pouch entirely is suspended after every load -
-that state VRIK keeps for plugins and, by its author's design, never saves.
-
-The first session in the game, on 20 September, settled nothing about the pouches and one thing
-about the handshake: the interfaces were asked for at `kPostLoad`, and both dispatches returned
-false because at that moment neither VRIK nor HIGGS had registered a listener yet. Load order
-decides who is ready first, so that moment is a race. The request now goes out at
-`kPostPostLoad`, and everything below is still what the next session settles:
-
-| What | Why it is unknown |
+| What | What says it |
 |---|---|
-| whether switching the slot on at runtime takes effect | `setSettingDouble` changes the setting in memory, but whether VRIK rereads it without waiting for a recalibration is not visible in the code |
-| whether VRIK will draw a potion in a slot | `VrikSetSlotForArt` takes an art object, but what it does with something that is not a weapon is not visible in the code |
-| whether "secondary hand" is read correctly | VRIK says secondary, HIGGS and the game say left; the translation is made from the left-handed setting and is untested |
-| which node the bottle appears at | `LeftWandNode`, the hand, the finger are tried in turn - which exists in VR shows only in the game |
-| whether HIGGS lets go of a bottle we put back in the pack | the reference is deleted out of its hand, and nothing says how it takes that |
+| whether the potion appears on the body, and where | `picture.up`, then `picture.on_body`: VRIK's own word that the model is on the bone |
+| whether a free hand still raises an attempt without `VrikSetSlotWeaponType` | `holster.offered` with `handOccupied = false` as the hand pulls out of the pouch |
+| whether HIGGS holds the bottle while VRIK keeps the grip from the game | `draw.grab_confirmed` rather than `draw.grab_failed` |
+| where the pouch should hang | `body.squeeze`: the numbers that would put it at the hand |

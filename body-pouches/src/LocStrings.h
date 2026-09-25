@@ -35,10 +35,7 @@ namespace BodyPouches::Keys
 	// The pouches at work
 	inline constexpr auto kPouchAssigned = "pouch.assigned";
 	inline constexpr auto kPouchDrawn = "pouch.drawn";
-	inline constexpr auto kPouchStowed = "pouch.stowed";
 	inline constexpr auto kPouchEmpty = "pouch.empty";
-	inline constexpr auto kPouchWrongItem = "pouch.wrong_item";
-	inline constexpr auto kPouchHandBusy = "pouch.hand_busy";
 	inline constexpr auto kPouchSuspended = "pouch.suspended";
 	inline constexpr auto kSuspendRefused = "pouch.suspend_refused";
 	inline constexpr auto kSlotSwitchedOn = "slot.switched_on";
@@ -60,35 +57,46 @@ namespace BodyPouches::Keys
 	inline constexpr auto kGrabAsked = "draw.grab_asked";
 	inline constexpr auto kGrabConfirmed = "draw.grab_confirmed";
 	inline constexpr auto kGrabFailed = "draw.grab_failed";
-	inline constexpr auto kStowStart = "stow.start";
-	inline constexpr auto kNothingHeld = "stow.nothing_held";
 	inline constexpr auto kHeldNotPotion = "stow.not_a_potion";
 	inline constexpr auto kHeldIs = "stow.held_is";
 	inline constexpr auto kHeldNoBase = "stow.no_base";
 	inline constexpr auto kHiggsEvent = "higgs.event";
 	inline constexpr auto kSkseMessage = "skse.message";
 	inline constexpr auto kReachChanged = "reach.changed";
-	inline constexpr auto kSlotsLate = "slots.late";
 
-	// The mechanic as it actually works: VRIK gives the place, HIGGS and the controller
-	// give the moment. VRIK's own holster event never fires for anything but weapons.
+	// The mechanic as it actually works: VRIK gives the place and the moment of taking
+	// out, HIGGS the moment of putting in. The controllers are only listened to.
 	inline constexpr auto kInputWatch = "input.watch";
-	inline constexpr auto kButtonAtPouch = "input.button_at_pouch";
 	inline constexpr auto kButtonAtSlot = "input.button_at_slot";
 	inline constexpr auto kButtonElsewhere = "input.button_elsewhere";
-	inline constexpr auto kHandState = "input.hand_state";
 	inline constexpr auto kHandedness = "game.handedness";
 	inline constexpr auto kFrameAlive = "frame.alive";
-	inline constexpr auto kGestureOffered = "gesture.offered";
-	inline constexpr auto kGestureMade = "gesture.made";
-	inline constexpr auto kGestureNowhere = "gesture.nowhere";
-	inline constexpr auto kShown = "slot.shown";
-	inline constexpr auto kShownNothing = "slot.shown_nothing";
 	inline constexpr auto kDropAtPouch = "drop.at_pouch";
 	inline constexpr auto kDropTaken = "drop.taken";
 	inline constexpr auto kDropNotOurs = "drop.not_ours";
-	inline constexpr auto kDropBounced = "drop.bounced";
 	inline constexpr auto kIdleHere = "mod.idle_here";
+	inline constexpr auto kSlotsFirstFrame = "slots.first_frame";
+
+	// What a pouch shows on the body: the potion in it, as an art VRIK hangs there
+	inline constexpr auto kPictureNoPlugin = "picture.no_plugin";
+	inline constexpr auto kPictureReady = "picture.ready";
+	inline constexpr auto kPictureGiven = "picture.given";
+	inline constexpr auto kPictureOnlyOne = "picture.only_one";
+	inline constexpr auto kPictureWanted = "picture.wanted";
+	inline constexpr auto kPictureUp = "picture.up";
+	inline constexpr auto kPictureTakenDown = "picture.taken_down";
+	inline constexpr auto kPictureGone = "picture.gone";
+	inline constexpr auto kPictureStuck = "picture.stuck";
+	inline constexpr auto kPictureOnBody = "picture.on_body";
+	inline constexpr auto kPictureOffBody = "picture.off_body";
+	inline constexpr auto kPictureReset = "picture.reset";
+
+	// Where the pouch is on the body, and where the hand is in the pouch's own numbers
+	inline constexpr auto kBoneMissing = "body.no_bone";
+	inline constexpr auto kSlotWhere = "body.slot_where";
+	inline constexpr auto kBoneAxes = "body.bone_axes";
+	inline constexpr auto kFacing = "body.facing";
+	inline constexpr auto kSqueezeMeasured = "body.squeeze";
 
 	// Things that can go wrong at the boundary with the game
 	inline constexpr auto kItemNotFound = "item.not_found";

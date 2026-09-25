@@ -14,9 +14,8 @@ namespace BodyPouches::Core
 	//
 	// Note what is NOT here: what the hand is holding. VRIK's callback says only
 	// whether the hand is occupied, and it wants its answer at once. So the fast
-	// question - "does VRIK act, or do we?" - is answered from this alone, and the
-	// slower question of what is in the hand is asked afterwards, by Offer, when the
-	// adapter has looked.
+	// question - "does VRIK act, or do we?" - is answered from this alone. What a hand
+	// lets go of at a pouch is another event and another question: Offer.
 	struct Reach
 	{
 		int  slot{};
@@ -56,8 +55,8 @@ namespace BodyPouches::Core
 		// The fast answer, the one VRIK is waiting for.
 		[[nodiscard]] Decision Decide(const Reach& a_reach, const Pack& a_pack) const;
 
-		// The slow half of a reach with a full hand, once the adapter has looked at what
-		// is in it: put it away here, set this pouch up with it, or none of our business.
+		// A bottle let go of at a pouch, once the adapter has looked at what it is: put
+		// it away here, set this pouch up with it, or none of our business.
 		[[nodiscard]] Decision Offer(int a_slot, bool a_leftHand, const Item& a_item) const;
 
 		// Carrying out an Act::Assign. Kept apart from Offer on purpose: deciding is a

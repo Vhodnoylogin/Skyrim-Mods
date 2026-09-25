@@ -33,7 +33,7 @@ namespace BodyPouches::Core
 		NothingInPack,   // the pouch is set up, the pack has run out
 		NotAssigned,     // the pouch has never been told what it is for
 		WrongItem,
-		HandBusy,
+		CarriedAway,     // a full hand leaving the pouch: it takes its bottle along
 		HandUnavailable
 	};
 
@@ -63,7 +63,7 @@ namespace BodyPouches::Core
 		case Reason::NothingInPack:   return "nothing-in-pack";
 		case Reason::NotAssigned:     return "not-assigned";
 		case Reason::WrongItem:       return "wrong-item";
-		case Reason::HandBusy:        return "hand-busy";
+		case Reason::CarriedAway:     return "carried-away";
 		case Reason::HandUnavailable: return "hand-unavailable";
 		default:                      return "?";
 		}

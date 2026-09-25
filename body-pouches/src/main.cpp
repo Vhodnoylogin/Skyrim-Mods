@@ -86,8 +86,10 @@ namespace
 			break;
 		case SKSE::MessagingInterface::kPostLoadGame:
 		case SKSE::MessagingInterface::kNewGame:
-			// Suspension in VRIK is runtime-only state by its author's design, so it
-			// has to be asked for again after every load. This is that moment.
+			// kNewGame has not reached this plugin in any run so far, so nothing may
+			// depend on it: the slots are arranged at the first frame of play whatever
+			// arrives. A load still matters for the picture - the ability that shows a
+			// potion comes back with the save, carrying the plugin's own model.
 			BodyPouches::Mod::GetSingleton().OnGameLoaded();
 			break;
 		default:
@@ -116,7 +118,7 @@ extern "C" __declspec(dllexport) bool SKSEAPI SKSEPlugin_Query(const SKSE::Query
 
 extern "C" __declspec(dllexport) constinit auto SKSEPlugin_Version = []() {
 	SKSE::PluginVersionData v;
-	v.PluginVersion(REL::Version{ 0, 1, 7 });
+	v.PluginVersion(REL::Version{ 0, 1, 8 });
 	v.PluginName(PLUGIN_NAME);
 	v.AuthorName(PLUGIN_AUTHOR);
 	v.UsesAddressLibrary(true);

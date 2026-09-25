@@ -29,6 +29,14 @@ $mod = Join-Path $dist $d.modName
 New-Item -ItemType Directory -Force (Join-Path $mod $d.dllTargetRel) | Out-Null
 Copy-Item -LiteralPath $dll -Destination (Join-Path $mod $d.dllTargetRel) -Force
 
+# The plugin is written by a script rather than kept: three records need no editor,
+# and the script says what is in them in words (tools\make-esp.py). It sits at the
+# root of the mod, where MO2 looks for plugins.
+$plugin = Expand-Path $d.plugin
+& python (Expand-Path $d.pluginScript) $plugin
+if ($LASTEXITCODE -ne 0) { throw "the plugin could not be written: $plugin" }
+Copy-Item -LiteralPath $plugin -Destination $mod -Force
+
 foreach ($doc in $d.docs) {
     $path = Expand-Path $doc
     if (Test-Path -LiteralPath $path) { Copy-Item -LiteralPath $path -Destination $mod -Force }

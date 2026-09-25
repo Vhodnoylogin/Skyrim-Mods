@@ -3,6 +3,7 @@
 #include "Loc.h"
 #include "Paths.h"
 #include "core/SlotPlan.h"
+#include "game/Body.h"
 #include "game/Forms.h"
 
 #include <SKSE/SKSE.h>
@@ -10,8 +11,10 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <span>
+#include <string>
 
 namespace BodyPouches
 {
@@ -33,14 +36,20 @@ namespace BodyPouches
 		constexpr std::array kLeftNodes{ "LeftWandNode", "NPC L Hand [LHnd]", "NPC L Finger02 [LF02]" };
 		constexpr std::array kRightNodes{ "RightWandNode", "NPC R Hand [RHnd]", "NPC R Finger02 [RF02]" };
 
-		// How often each pouch is told again what to show. Slow on purpose: it costs a
-		// walk of the inventory, and the only thing it has to outpace is VRIK rebuilding
-		// the picture after a load.
-		constexpr std::int64_t kDisplayEvery = 2000;
+		// How often the pouch is asked what it should show. It costs a walk of the
+		// inventory; a bottle drawn or put away asks at once, so this only has to catch
+		// what changes by other means - a potion bought, found, or drunk from the menu.
+		constexpr std::int64_t kDisplayEvery = 1000;
 
 		// How long to give HIGGS before asking whether the hand really closed on the
 		// bottle. Long enough for a frame or two, short enough to be about that bottle.
 		constexpr std::int64_t kGrabCheckMs = 200;
+
+		// The grip, as the VR controllers number their buttons. Not a setting: nothing is
+		// done on it any more but a measurement.
+		constexpr int kGripButton = 2;
+
+		constexpr auto kHeadBone = "NPC Head [Head]";
 	}
 
 	Mod& Mod::GetSingleton()
@@ -77,10 +86,6 @@ namespace BodyPouches
 
 		// The frame, and with it the end of this mod having a thread of its own.
 		_higgs.OnFrame(&Mod::OnFrame);
-
-		// And an action in VRIK's own gesture menu, so that taking a bottle out can be a
-		// gesture the player chose rather than a button this mod took.
-		_vrik.AddGesture(&Mod::OnGesture, "Body Pouches: take out");
 	}
 
 	void Mod::OnDataLoaded()
@@ -90,6 +95,26 @@ namespace BodyPouches
 		Loc::Load(Paths::LangDir(), _settings.language);
 		BuildPouches(_settings);
 		WatchInput();
+
+		// The picture. Our plugin has one art, so one pouch can show what it holds: the
+		// first one a slot was given over to. A shared slot goes on showing whatever
+		// VRIK keeps there - painting a bottle over the player's own sword would take
+		// away something they put there themselves.
+		for (const auto& setting : _settings.pouches) {
+			if (Settings::ModeFromText(setting.mode) != Core::Mode::Exclusive) {
+				continue;
+			}
+			if (_picture.Slot() != 0) {
+				Loc::Info(Keys::kPictureOnlyOne, setting.slot, _picture.Slot());
+				continue;
+			}
+			if (_picture.Load(setting.slot) && Working()) {
+				// Once for the whole game: VRIK keeps this in its DLL's memory, and after
+				// a load its scripts give it back only their own arts, never anyone else's.
+				_vrik.SetArt(setting.slot, _picture.Art());
+				Loc::Info(Keys::kPictureGiven, setting.slot);
+			}
+		}
 	}
 
 	void Mod::OnFrame()
@@ -101,11 +126,27 @@ namespace BodyPouches
 
 		if (!mod._frameSeen) {
 			mod._frameSeen = true;
-			Loc::Info(Keys::kFrameAlive);
+			mod.FirstFrame();
 		}
 
 		mod.NoteReach();
 		mod.RefreshDisplay();
+	}
+
+	void Mod::FirstFrame()
+	{
+		Loc::Info(Keys::kFrameAlive);
+
+		// A new game raises no message this plugin ever receives: run 7 started one and
+		// the slot stayed dead for twelve minutes, until the first reach VRIK let through.
+		// Suspension lasts until the game is closed, so once, here, is enough.
+		if (!_slotsArranged) {
+			Loc::Info(Keys::kSlotsFirstFrame);
+			ApplySlots();
+		}
+
+		DescribeSlots();
+		_picture.Reset(Now());
 	}
 
 	void Mod::NoteReach()
@@ -124,20 +165,8 @@ namespace BodyPouches
 			}
 
 			const int slot = _vrik.SlotInReach(secondary);
-
-			// Remembered while the hand is there, because the moment that matters comes
-			// afterwards: a bottle let go of at the stomach lands a beat later, by which
-			// time the hand has usually moved on.
-			if (slot != 0) {
-				std::scoped_lock guard(_lock);
-				if (_pouches.Find(slot) != nullptr) {
-					_lastPouch[hand] = slot;
-					_lastPouchAt[hand] = now;
-				}
-			}
-
 			if (slot == _reach[hand]) {
-				continue;  // only changes are worth a line; this runs four times a second
+				continue;  // only changes are worth a line; this runs every frame
 			}
 			_reach[hand] = slot;
 			Loc::Info(Keys::kReachChanged, HandName(IsLeftHand(secondary)), slot,
@@ -147,77 +176,46 @@ namespace BodyPouches
 
 	void Mod::RefreshDisplay()
 	{
-		const auto now = Now();
-		if (now < _displayAt) {
+		if (!_picture.Ready()) {
 			return;
 		}
-		_displayAt = now + kDisplayEvery;
 
-		std::scoped_lock guard(_lock);
-		for (const auto& setting : _settings.pouches) {
-			// ONLY A POUCH THAT HAS BEEN SET UP. An empty one is still whatever VRIK made
-			// of that slot, and emptying somebody else's slot to show our nothing would be
-			// exactly the kind of quiet meddling this mod refuses everywhere else.
-			// AND ONLY ONE THE SLOT WAS GIVEN OVER TO. A shared slot is still VRIK's: it
-			// shows the sword kept there, and painting our bottle over that would take away
-			// something the player put there themselves. Exclusive slots are suspended and
-			// hold nothing of VRIK's, so there is nothing of anyone else's to overwrite.
-			const auto* pouch = _pouches.Find(setting.slot);
-			if (pouch == nullptr || !pouch->IsAssigned() ||
-				pouch->PouchMode() != Core::Mode::Exclusive) {
-				continue;
+		const auto now = Now();
+		const int  slot = _picture.Slot();
+
+		if (now >= _displayAt) {
+			_displayAt = now + kDisplayEvery;
+
+			// The picture says "there is a bottle here to take", so it is only ever what
+			// the pack really holds for this pouch - up while there is one, down the moment
+			// there is not, and nothing at all for a pouch nobody has set up yet.
+			std::string model;
+			std::string what;
+			{
+				std::scoped_lock guard(_lock);
+				const auto shown = _pouches.Display(slot, _pack);
+				auto*      form = shown.anything ? Game::Lookup(shown.item) : nullptr;
+				if (auto* potion = form != nullptr ? form->As<RE::AlchemyItem>() : nullptr; potion != nullptr) {
+					const char* path = potion->GetModel();
+					const char* name = potion->GetName();
+					model = path != nullptr ? path : "";
+					what = name != nullptr ? name : "";
+				}
 			}
-
-			const auto   shown = _pouches.Display(setting.slot, _pack);
-			RE::TESForm* form = shown.anything ? Game::Lookup(shown.item) : nullptr;
-
-			// Said again every beat, whether or not it changed: VRIK's Papyrus side rebuilds
-			// what a slot shows out of an array of its own after every load, and a picture
-			// set once would quietly disappear with no way to tell from here that it had.
-			_vrik.ShowInSlot(setting.slot, form);
-
-			// The saying is every beat; the log line is only when it becomes something else.
-			const std::uint32_t id = form != nullptr ? form->GetFormID() : 0;
-			const auto          seen = _shown.find(setting.slot);
-			if (seen != _shown.end() && seen->second == id) {
-				continue;
-			}
-			_shown[setting.slot] = id;
-
-			if (form == nullptr) {
-				Loc::Info(Keys::kShownNothing, setting.slot);
-			} else {
-				const auto* name = form->GetName();
-				Loc::Info(Keys::kShown, setting.slot, name != nullptr ? name : "", shown.count);
-			}
+			_picture.Want(model, what);
 		}
+
+		_picture.Tick(now, _vrik.IsDisplayed(slot));
 	}
 
-	int Mod::PouchAtHand(bool a_isLeft, bool a_remember)
+	int Mod::PouchAt(bool a_isLeft)
 	{
-		const int hand = IsSecondaryHand(a_isLeft) ? 1 : 0;
-
-		// One lock over the whole answer, because the whole answer is made of what
-		// NoteReach writes under it.
-		std::scoped_lock guard(_lock);
-
-		if (_reach[hand] != 0 && _pouches.Find(_reach[hand]) != nullptr) {
-			return _reach[hand];
-		}
-
-		if (!a_remember || _lastPouch[hand] == 0) {
+		const int slot = _vrik.SlotInReach(IsSecondaryHand(a_isLeft));
+		if (slot == 0) {
 			return 0;
 		}
-		return (Now() - _lastPouchAt[hand]) <= _settings.reachMemoryMs ? _lastPouch[hand] : 0;
-	}
-
-	std::int64_t Mod::SinceDrawnFrom(bool a_isLeft, int a_slot) const
-	{
-		const int hand = IsSecondaryHand(a_isLeft) ? 1 : 0;
-		if (_drawnFrom[hand] != a_slot || _drawnAt[hand] == 0) {
-			return -1;
-		}
-		return Now() - _drawnAt[hand];
+		std::scoped_lock guard(_lock);
+		return _pouches.Find(slot) != nullptr ? slot : 0;
 	}
 
 	bool Mod::IsSecondaryHand(bool a_isLeft)
@@ -237,13 +235,13 @@ namespace BodyPouches
 		// arrived" from "it arrived and every step of it quietly did nothing".
 		Loc::Info(Keys::kGameLoaded, _settings.pouches.size());
 		ApplySlots();
+		_picture.Reset(Now());
 	}
 
 	void Mod::BuildPouches(const Settings& a_settings)
 	{
 		std::scoped_lock guard(_lock);
 		_pouches.Clear();
-		_shown.clear();
 		for (const auto& setting : a_settings.pouches) {
 			_pouches.Set(Core::Pouch(setting.slot, Settings::ModeFromText(setting.mode)));
 			Loc::Info(Keys::kPouchConfigured, setting.slot, setting.mode);
@@ -285,13 +283,74 @@ namespace BodyPouches
 			}
 			if (plan.suspend) {
 				// So that VRIK detects the hand but neither draws a weapon from the slot
-				// nor holsters one into it. Suspension is runtime-only by its author's
-				// design, which is why this runs after every load.
+				// nor holsters one into it. A suspended slot is also one an empty hand
+				// sees at all: without this, VRIK looks straight past a free hand at an
+				// empty slot and the pouch raises nothing.
 				_vrik.SetSuspended(setting.slot, true);
 			}
 		}
 
 		_slotsArranged = true;
+	}
+
+	void Mod::DescribeSlots()
+	{
+		auto*       player = RE::PlayerCharacter::GetSingleton();
+		const float feet = player != nullptr ? player->GetPositionZ() : 0.0f;
+		const auto  head = Game::Body::BoneNamed(kHeadBone);
+
+		for (const auto& setting : _settings.pouches) {
+			const char* boneName = Game::Body::BoneOf(setting.slot);
+			const auto  bone = Game::Body::Bone(setting.slot);
+			if (!bone) {
+				Loc::Warn(Keys::kBoneMissing, setting.slot, boneName != nullptr ? boneName : "?");
+				continue;
+			}
+
+			// Where VRIK has the slot, in its own numbers and as heights a person can
+			// picture: "a hand below the head" says more than three coordinates do.
+			const auto pos = _vrik.SlotPosition(setting.slot);
+			const auto centre = Game::Body::ToWorld(*bone, pos);
+			Loc::Info(Keys::kSlotWhere, setting.slot, boneName, pos.x, pos.y, pos.z, centre.z - feet,
+				head ? head->translate.z - centre.z : 0.0f, bone->scale);
+
+			// Which way the bone's own axes point. The numbers in vrikslots.ini are along
+			// these, and which of them runs down the body is up to the skeleton, not VRIK.
+			const auto x = Game::Body::Axis(*bone, 0);
+			const auto y = Game::Body::Axis(*bone, 1);
+			const auto z = Game::Body::Axis(*bone, 2);
+			Loc::Info(Keys::kBoneAxes, boneName, x.x, x.y, x.z, y.x, y.y, y.z, z.x, z.y, z.z);
+		}
+
+		if (player != nullptr) {
+			const float yaw = player->GetAngleZ();
+			Loc::Info(Keys::kFacing, std::sin(yaw), std::cos(yaw));
+		}
+	}
+
+	void Mod::Measure(bool a_isLeft)
+	{
+		RE::NiPoint3 hand;
+		const char*  node = HandAt(a_isLeft, hand);
+		if (node == nullptr) {
+			return;
+		}
+
+		auto*       player = RE::PlayerCharacter::GetSingleton();
+		const float feet = player != nullptr ? player->GetPositionZ() : 0.0f;
+
+		for (const auto& setting : _settings.pouches) {
+			const auto bone = Game::Body::Bone(setting.slot);
+			if (!bone) {
+				continue;
+			}
+			// The numbers to write into vrikslots.ini to put the pouch exactly where the
+			// hand is now, beside where the pouch is.
+			const auto here = Game::Body::ToSlot(*bone, hand);
+			const auto centre = Game::Body::ToWorld(*bone, _vrik.SlotPosition(setting.slot));
+			Loc::Info(Keys::kSqueezeMeasured, HandName(a_isLeft), setting.slot, here.x, here.y, here.z,
+				hand.GetDistance(centre), hand.z - feet, centre.z - feet, node);
+		}
 	}
 
 	bool Mod::IsLeftHand(bool a_secondaryHand)
@@ -305,27 +364,32 @@ namespace BodyPouches
 		return leftHanded ? !a_secondaryHand : a_secondaryHand;
 	}
 
-	bool Mod::HandPosition(bool a_isLeft, RE::NiPoint3& a_out)
+	const char* Mod::HandAt(bool a_isLeft, RE::NiPoint3& a_out)
 	{
 		auto* player = RE::PlayerCharacter::GetSingleton();
-		if (player == nullptr) {
-			return false;
-		}
-		auto* root = player->Get3D();
+		auto* root = player != nullptr ? player->Get3D() : nullptr;
 		if (root == nullptr) {
-			return false;
+			return nullptr;
 		}
 
 		for (const char* name : (a_isLeft ? std::span<const char* const>(kLeftNodes) : std::span<const char* const>(kRightNodes))) {
 			if (auto* node = root->GetObjectByName(name); node != nullptr) {
 				a_out = node->world.translate;
-				Loc::Info(Keys::kHandNode, HandName(a_isLeft), name);
-				return true;
+				return name;
 			}
 		}
+		return nullptr;
+	}
 
-		Loc::Warn(Keys::kHandNotFound, HandName(a_isLeft));
-		return false;
+	bool Mod::HandPosition(bool a_isLeft, RE::NiPoint3& a_out)
+	{
+		const char* node = HandAt(a_isLeft, a_out);
+		if (node == nullptr) {
+			Loc::Warn(Keys::kHandNotFound, HandName(a_isLeft));
+			return false;
+		}
+		Loc::Info(Keys::kHandNode, HandName(a_isLeft), node);
+		return true;
 	}
 
 	bool Mod::Draw(int a_slot, bool a_isLeft, const Core::FormKey& a_item)
@@ -343,7 +407,7 @@ namespace BodyPouches
 			return false;
 		}
 
-		auto* player = RE::PlayerCharacter::GetSingleton();
+		auto*        player = RE::PlayerCharacter::GetSingleton();
 		RE::NiPoint3 rotation{};
 
 		// One call does both halves of what we need: the potion leaves the inventory and
@@ -361,121 +425,18 @@ namespace BodyPouches
 
 		_higgs.Grab(dropped.get(), a_isLeft);
 		Loc::Info(Keys::kGrabAsked, HandName(a_isLeft));
-		_pouches.NoteDrawn(a_isLeft, a_slot, a_item);
+		{
+			std::scoped_lock guard(_lock);
+			_pouches.NoteDrawn(a_isLeft, a_slot, a_item);
+		}
 
-		// Remembered so that the release which ends this very squeeze is not read as a
-		// fresh reach to put something away. See SinceDrawnFrom.
 		const int hand = IsSecondaryHand(a_isLeft) ? 1 : 0;
 		_drawnFrom[hand] = a_slot;
-		_drawnAt[hand] = Now();
-		_checkGrabAt[hand] = _drawnAt[hand] + kGrabCheckMs;
+		_checkGrabAt[hand] = Now() + kGrabCheckMs;
+		_displayAt = 0;  // the last bottle of its kind may just have left the pack
 
 		Loc::Info(Keys::kPouchDrawn, a_slot, HandName(a_isLeft));
 		return true;
-	}
-
-	bool Mod::TakeBack(int a_slot, bool a_isLeft, bool a_assigning)
-	{
-		Loc::Info(Keys::kStowStart, a_slot, HandName(a_isLeft));
-
-		auto* held = _higgs.Held(a_isLeft);
-		if (held == nullptr) {
-			Loc::Info(Keys::kNothingHeld, HandName(a_isLeft));
-			return false;
-		}
-
-		auto* base = held->GetBaseObject();
-		if (base == nullptr) {
-			Loc::Warn(Keys::kHeldNoBase, HandName(a_isLeft), held->GetFormID());
-			return false;
-		}
-
-		// Said whether the thing turns out to be a potion or not. Run 5 got as far as
-		// here and stopped at "not a potion", and that line alone could not tell a real
-		// sword in the hand from a stale reference HIGGS had already let go of - which
-		// is why what is in the hand is now named outright.
-		const auto* name = base->GetName();
-		Loc::Info(Keys::kHeldIs, HandName(a_isLeft), name != nullptr ? name : "",
-			RE::FormTypeToString(base->GetFormType()), base->GetFormID(), held->GetFormID());
-
-		auto* potion = base->As<RE::AlchemyItem>();
-		if (potion == nullptr) {
-			Loc::Info(Keys::kHeldNotPotion, HandName(a_isLeft));
-			return false;
-		}
-
-		auto item = Game::Describe(potion);
-		item.count = std::max(1, held->extraList.GetCount());
-
-		const auto decision = _pouches.Offer(a_slot, a_isLeft, item);
-		if (a_assigning) {
-			if (decision.act != Core::Act::Assign || !_pouches.Assign(a_slot, item)) {
-				Loc::Info(Keys::kPouchWrongItem, a_slot);
-				return false;
-			}
-			Loc::Info(Keys::kPouchAssigned, a_slot);
-		} else if (decision.act != Core::Act::Stow) {
-			Loc::Info(Keys::kPouchWrongItem, a_slot);
-			return false;
-		}
-
-		// Back into the pack, by the engine's own means and counting what is really
-		// there - see the note in StowDropped.
-		auto* player = RE::PlayerCharacter::GetSingleton();
-		if (player == nullptr) {
-			return false;
-		}
-		player->PickUpObject(held, std::max(1, held->extraList.GetCount()), false, true);
-
-		_pouches.NoteSettled(a_isLeft);
-		Loc::Info(Keys::kPouchStowed, a_slot, HandName(a_isLeft));
-		return true;
-	}
-
-	void Mod::DrawAt(int a_slot, bool a_isLeft)
-	{
-		Core::Reach reach;
-		reach.slot = a_slot;
-		reach.leftHand = a_isLeft;
-		reach.handOccupied = _higgs.IsHolding(a_isLeft);
-		reach.handCanHold = _higgs.CanGrab(a_isLeft);
-
-		// The two values every outcome below turns on, said before they decide anything.
-		// A refusal with neither of them in the log is a refusal nobody can explain.
-		Loc::Info(Keys::kHandState, HandName(a_isLeft), reach.handOccupied, reach.handCanHold);
-
-		Core::Decision decision;
-		{
-			std::scoped_lock guard(_lock);
-			decision = _pouches.Decide(reach, _pack);
-		}
-
-		Loc::Info(Keys::kDecision, decision.slot, Core::Name(decision.act),
-			Core::Name(decision.reason), HandName(a_isLeft), decision.LetVrikAct());
-
-		switch (decision.act) {
-		case Core::Act::Draw:
-			Draw(decision.slot, a_isLeft, decision.item);
-			break;
-
-		case Core::Act::Stow:
-		case Core::Act::Assign:
-			// A press is how a bottle comes out. Putting one in is a release and not a
-			// press, so there is nothing to do here except say why nothing happened -
-			// otherwise a full hand pressing at a pouch is a silence like any other.
-			Loc::Info(Keys::kPouchHandBusy, HandName(a_isLeft));
-			break;
-
-		case Core::Act::Refuse:
-			if (decision.reason == Core::Reason::NothingInPack) {
-				Loc::Info(Keys::kPouchEmpty, decision.slot);
-			}
-			break;
-
-		case Core::Act::PassToVrik:
-		default:
-			break;
-		}
 	}
 
 	void Mod::StowDropped(int a_slot, bool a_isLeft, RE::TESObjectREFR* a_object)
@@ -546,11 +507,8 @@ namespace BodyPouches
 			_pouches.NoteSettled(a_isLeft);
 		}
 
-		// Back where it came from, so the draw it came out of is over and the next release
-		// at this pouch is a new gesture rather than the tail of that one.
-		const int hand = IsSecondaryHand(a_isLeft) ? 1 : 0;
-		_drawnFrom[hand] = 0;
-		_drawnAt[hand] = 0;
+		_drawnFrom[IsSecondaryHand(a_isLeft) ? 1 : 0] = 0;
+		_displayAt = 0;  // a pouch just set up has something to show at once
 
 		Loc::Info(Keys::kDropTaken, a_slot, HandName(a_isLeft), count);
 	}
@@ -566,13 +524,11 @@ namespace BodyPouches
 		}
 		manager->AddEventSink(&_input);
 		_watchingInput = true;
-		Loc::Info(Keys::kInputWatch, _settings.drawButton);
+		Loc::Info(Keys::kInputWatch, kGripButton);
 
 		// Which hand VRIK's "secondary" is taken to mean here, and the setting it is read
-		// from. Said out loud because the reading is ours and not VRIK's: its own scripts
-		// call the right hand primary whatever the game's left-handed setting says, so a
-		// left-handed player may well be told the wrong hand - and nobody can see that
-		// unless what was read is in the log beside what was done with it.
+		// from. Said out loud because the reading is ours and not VRIK's, and nobody can
+		// check it unless what was read is in the log beside what was done with it.
 		const auto* setting = RE::GetINISetting("bLeftHandedMode:VRInput");
 		Loc::Info(Keys::kHandedness, setting != nullptr && setting->GetBool(),
 			HandName(IsLeftHand(true)));
@@ -605,36 +561,26 @@ namespace BodyPouches
 				isLeft = false;
 				break;
 			default:
-				continue;  // keyboard, mouse, gamepad: not a hand at a pouch
+				continue;  // keyboard, mouse, gamepad: not a hand
 			}
 
-			// Every press carries its real id into the log, so that the button can be
-			// named from a run instead of guessed at from a table. Where it is said
-			// depends on where the hand was: at a pouch and at any other slot of VRIK's
-			// out loud, because the first question a run has to answer is which ids this
-			// game sends at all, and a line that only ever appears at a pouch cannot
-			// answer it; everywhere else quietly, because that is every press in the game.
+			// Every press carries its real id into the log: out loud at any slot of VRIK's,
+			// quietly everywhere else, because everywhere else is every press in the game.
 			const int id = static_cast<int>(button->GetIDCode());
-			const int slot = mod.PouchAtHand(isLeft, false);
-			if (slot == 0) {
-				const int reached = mod._reach[IsSecondaryHand(isLeft) ? 1 : 0];
-				if (reached != 0) {
-					Loc::Info(Keys::kButtonAtSlot, HandName(isLeft), id, reached);
-				} else {
-					Loc::Debug(Keys::kButtonElsewhere, HandName(isLeft), id);
+			const int reached = mod._reach[IsSecondaryHand(isLeft) ? 1 : 0];
+			if (reached != 0) {
+				Loc::Info(Keys::kButtonAtSlot, HandName(isLeft), id, reached);
+			} else {
+				Loc::Debug(Keys::kButtonElsewhere, HandName(isLeft), id);
+			}
+
+			// The grip of an empty hand is measured wherever the hand is: the place the
+			// player reaches for is exactly the place the pouch is not yet. Out of the
+			// input handler and onto the game queue, like everything that reads the body.
+			if (id == kGripButton && !mod._higgs.IsHolding(isLeft)) {
+				if (auto* tasks = SKSE::GetTaskInterface(); tasks != nullptr) {
+					tasks->AddTask([isLeft]() { GetSingleton().Measure(isLeft); });
 				}
-				continue;
-			}
-
-			Loc::Info(Keys::kButtonAtPouch, HandName(isLeft), id, slot);
-			if (id != mod._settings.drawButton) {
-				continue;
-			}
-
-			// Out of the input handler and onto the game queue: taking an item out of
-			// the inventory is not work to start inside an event of somebody else.
-			if (auto* tasks = SKSE::GetTaskInterface(); tasks != nullptr) {
-				tasks->AddTask([slot, isLeft]() { GetSingleton().DrawAt(slot, isLeft); });
 			}
 		}
 
@@ -653,17 +599,6 @@ namespace BodyPouches
 		if (!mod.Working()) {
 			Loc::Debug(Keys::kIdleHere);
 			return true;  // not our business: let VRIK do what it always did
-		}
-
-		// Run 3 ended with the slots never arranged, because neither kNewGame nor
-		// kPostLoadGame ever reached this plugin. Whatever the reason for that turns out
-		// to be, a reach proves a game is running, and it is a better moment to notice
-		// than never.
-		if (!mod._slotsArranged) {
-			if (auto* tasks = SKSE::GetTaskInterface(); tasks != nullptr) {
-				Loc::Warn(Keys::kSlotsLate);
-				tasks->AddTask([]() { GetSingleton().ApplySlots(); });
-			}
 		}
 
 		const bool isLeft = IsLeftHand(a_secondaryHand);
@@ -689,8 +624,7 @@ namespace BodyPouches
 		// and the doing is put on the game's task queue. Removing an item from the
 		// inventory and placing a reference is not work to start inside somebody else's
 		// callback.
-		switch (decision.act) {
-		case Core::Act::Draw:
+		if (decision.act == Core::Act::Draw) {
 			if (auto* tasks = SKSE::GetTaskInterface(); tasks != nullptr) {
 				tasks->AddTask([slot = decision.slot, isLeft, item = decision.item]() {
 					GetSingleton().Draw(slot, isLeft, item);
@@ -699,30 +633,10 @@ namespace BodyPouches
 			} else {
 				Loc::Error(Keys::kNoTasks, decision.slot);
 			}
-			break;
-
-		case Core::Act::Stow:
-		case Core::Act::Assign:
-			if (auto* tasks = SKSE::GetTaskInterface(); tasks != nullptr) {
-				const bool assigning = decision.act == Core::Act::Assign;
-				tasks->AddTask([slot = decision.slot, isLeft, assigning]() {
-					GetSingleton().TakeBack(slot, isLeft, assigning);
-				});
-				Loc::Info(Keys::kTaskQueued, decision.slot);
-			} else {
-				Loc::Error(Keys::kNoTasks, decision.slot);
-			}
-			break;
-
-		case Core::Act::Refuse:
-			if (decision.reason == Core::Reason::NothingInPack) {
-				Loc::Debug(Keys::kPouchEmpty, decision.slot);
-			}
-			break;
-
-		case Core::Act::PassToVrik:
-		default:
-			break;
+		} else if (decision.act == Core::Act::Refuse && decision.reason == Core::Reason::NothingInPack) {
+			// An empty hand pulled out of the pouch and came back with nothing: worth its
+			// own line, because to the player it looks exactly like a pouch that is broken.
+			Loc::Info(Keys::kPouchEmpty, decision.slot);
 		}
 
 		return decision.LetVrikAct();
@@ -749,6 +663,7 @@ namespace BodyPouches
 		if (const auto slot = mod._pouches.SlotOfHand(a_isLeft); slot.has_value()) {
 			Loc::Info(Keys::kPouchReturned, *slot);
 			mod._pouches.NoteSettled(a_isLeft);
+			mod._displayAt = 0;  // the bottle is back in the pack, and may be the only one
 		}
 	}
 
@@ -768,34 +683,6 @@ namespace BodyPouches
 		Loc::Info(Keys::kGrabConfirmed, HandName(a_isLeft), mod._drawnFrom[hand]);
 	}
 
-	void Mod::OnGesture(int a_pressCount)
-	{
-		auto& mod = GetSingleton();
-		if (!mod.Working()) {
-			return;
-		}
-
-		// VRIK says how many presses and nothing else - not which hand, not where it was.
-		// So the hand is found the way everything else here is found: by asking where
-		// each one is. A hand at a pouch with nothing in it is the one that meant this.
-		for (const bool isLeft : { false, true }) {
-			const int slot = mod.PouchAtHand(isLeft, false);
-			if (slot == 0 || mod._higgs.IsHolding(isLeft)) {
-				continue;
-			}
-
-			Loc::Info(Keys::kGestureMade, a_pressCount, HandName(isLeft), slot);
-			if (auto* tasks = SKSE::GetTaskInterface(); tasks != nullptr) {
-				tasks->AddTask([slot, isLeft]() { GetSingleton().DrawAt(slot, isLeft); });
-			}
-			return;
-		}
-
-		// Said out loud rather than swallowed: a gesture the player made on purpose and
-		// that did nothing is exactly the thing a run has to be able to explain.
-		Loc::Info(Keys::kGestureNowhere, a_pressCount);
-	}
-
 	void Mod::OnDropped(bool a_isLeft, ::TESObjectREFR* a_refr)
 	{
 		Loc::Info(Keys::kHiggsEvent, "dropped", HandName(a_isLeft));
@@ -805,21 +692,12 @@ namespace BodyPouches
 			return;
 		}
 
-		// Letting go of something at a pouch is how something goes into it. This is the
-		// event VRIK never gives: its holster callback is part of its weapon logic and
-		// stays silent for a hand holding a potion, however long the hand is held there.
-		if (const int slot = mod.PouchAtHand(a_isLeft, true); slot != 0 && a_refr != nullptr) {
-			// The squeeze that draws is the squeeze that holds, so letting go at the pouch
-			// a moment after drawing is the end of that gesture and not a new one. It is
-			// still taken in - the bottle belongs in the pack either way - but it is said
-			// under its own name, so that a run can tell "the press did nothing" from "the
-			// press did both halves at once, too quickly to see".
-			if (const auto since = mod.SinceDrawnFrom(a_isLeft, slot);
-				since >= 0 && since <= mod._settings.settleMs) {
-				Loc::Info(Keys::kDropBounced, HandName(a_isLeft), slot, since);
-			} else {
-				Loc::Info(Keys::kDropAtPouch, HandName(a_isLeft), slot);
-			}
+		// Letting go of something inside a pouch is how it goes in. VRIK is asked where
+		// the hand is at this very moment, and nothing is remembered: the second and a
+		// fifth of memory this used to have turned bottles carried away from the pouch
+		// into bottles put back.
+		if (const int slot = mod.PouchAt(a_isLeft); slot != 0 && a_refr != nullptr) {
+			Loc::Info(Keys::kDropAtPouch, HandName(a_isLeft), slot);
 
 			// By id and not by pointer: the reference is handed to a task that runs
 			// later, and what HIGGS let go of may be gone by then.

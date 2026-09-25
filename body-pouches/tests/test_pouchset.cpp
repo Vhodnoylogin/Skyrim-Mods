@@ -156,10 +156,11 @@ TEST(a_bottle_pushed_into_an_unassigned_pouch_sets_it_up)
 	// An empty hand at an unassigned pouch leaves the slot to VRIK...
 	CHECK(set.Decide(EmptyHandAt(kHip), pack).act == Act::PassToVrik);
 
-	// ...while a full one is how the pouch gets its meaning.
+	// ...and so does a full one leaving it: that hand is carrying its bottle off. The
+	// pouch gets its meaning from a bottle let go of in it, which is Offer's question.
 	const auto fast = set.Decide(FullHandAt(kHip), pack);
-	CHECK(fast.act == Act::Assign);
-	CHECK(fast.reason == Reason::NotAssigned);
+	CHECK(fast.act == Act::PassToVrik);
+	CHECK(fast.reason == Reason::CarriedAway);
 
 	const auto offer = set.Offer(kHip, true, Healing());
 	CHECK(offer.act == Act::Assign);
@@ -185,15 +186,23 @@ TEST(running_out_does_not_unassign_the_pouch)
 	CHECK(set.Find(kHip)->IsAssigned());
 }
 
-TEST(a_full_hand_at_a_set_up_pouch_claims_the_event_and_the_offer_decides)
+// Run 7: every bottle drawn went straight back in, because VRIK's reach for a full hand
+// leaving the pouch was read as putting it away. Leaving is carrying off; letting go is
+// what stows.
+TEST(a_full_hand_leaving_a_pouch_keeps_its_bottle_and_letting_go_is_what_stows)
 {
 	FakePack pack;
 	pack.Put(Healing());
 	const auto set = HealingAt(kHip);
 
 	const auto fast = set.Decide(FullHandAt(kHip), pack);
-	CHECK(fast.act == Act::Stow);
-	CHECK(fast.reason == Reason::HandBusy);
+	CHECK(fast.act == Act::PassToVrik);
+	CHECK(fast.reason == Reason::CarriedAway);
+
+	// An exclusive pouch keeps the reach, so that nothing of VRIK's happens either.
+	const auto kept = HealingAt(kHip, Mode::Exclusive).Decide(FullHandAt(kHip), pack);
+	CHECK(kept.act == Act::Refuse);
+	CHECK(kept.reason == Reason::CarriedAway);
 
 	CHECK(set.Offer(kHip, true, Healing()).act == Act::Stow);
 

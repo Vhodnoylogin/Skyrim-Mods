@@ -2,12 +2,12 @@
 
 #include "Config.h"
 #include "core/PouchSet.h"
+#include "game/Picture.h"
 #include "game/PlayerPack.h"
 #include "vr/HiggsLink.h"
 #include "vr/VrikLink.h"
 
 #include <cstdint>
-#include <map>
 #include <mutex>
 
 namespace BodyPouches
@@ -28,24 +28,23 @@ namespace BodyPouches
 	public:
 		static Mod& GetSingleton();
 
-		// Ask VRIK and HIGGS for their interfaces and subscribe. Called at PostLoad,
-		// the earliest moment both authors sanction.
+		// Ask VRIK and HIGGS for their interfaces and subscribe. Called at PostPostLoad,
+		// when every plugin that answers messages is certain to be listening.
 		void Connect();
 
-		// The game's data is up: settings can be read and pouches built.
+		// The game's data is up: settings can be read, pouches built and our plugin's
+		// records found.
 		void OnDataLoaded();
 
-		// Start listening for the press that draws from a pouch. VRIK's holster event is
-		// part of its weapon logic and never fires for a hand holding a potion, so the
-		// press is ours to notice.
-		//
-		// Called from OnDataLoaded and not from kInputLoaded, which arrives two messages
-		// earlier: the controllers do exist by then, but the settings do not, so the mod
-		// would announce the button it was built with rather than the one it will obey.
+		// Start listening to the controllers. No button draws anything any more - VRIK
+		// raises that moment itself - but every squeeze of the grip by an empty hand is
+		// still worth a line: it says where the hand was in each pouch's own numbers,
+		// which is how a pouch is moved to where the player's hand actually goes.
 		void WatchInput();
 
-		// A save was loaded or a new game started. Suspension in VRIK is runtime-only
-		// state by its author's design, so it has to be asked for again every time.
+		// A save was loaded. Suspension in VRIK lasts until the game is closed, so this
+		// only matters for the picture - but it is also the one load message that has
+		// ever arrived, and the slots are arranged here as well as at the first frame.
 		void OnGameLoaded();
 
 		[[nodiscard]] bool Working() const noexcept { return _vrik.Ready() && _higgs.Ready(); }
@@ -53,17 +52,16 @@ namespace BodyPouches
 	private:
 		Mod() = default;
 
-		// WHERE THE MECHANIC ACTUALLY COMES FROM.
+		// WHERE THE MECHANIC COMES FROM, as the reading of VRIK's own code settled it
+		// (claude-skyrim-vr/knowledge/vrik-holster-api.md).
 		//
-		// VRIK owns the place on the body and answers GetHolsterSlotInReach for any hand
-		// and any contents - that part is flawless. What it does not do is raise an
-		// event: its holster callback fires only when a weapon could be drawn or put
-		// away, which for a pouch of potions means never. Six runs in the game settled
-		// that beyond doubt.
-		//
-		// So the place comes from VRIK and the moment comes from elsewhere: putting
-		// something in is HIGGS letting go of it at a slot, and taking something out is
-		// a button pressed by an empty hand at a slot.
+		// VRIK owns the place on the body and says which slot each hand is at. For a
+		// suspended slot it also raises the moment of taking something out: a hand that
+		// closes its grip inside the pouch and leaves it with the grip still closed makes
+		// a holster attempt, and an empty hand's attempt is a draw. Putting something in
+		// is not VRIK's: a bottle goes in when the hand lets go of it inside the pouch,
+		// and letting go is HIGGS's event. A full hand leaving the pouch is carrying its
+		// bottle away, and VRIK's attempt for it is answered with nothing.
 		class Input final : public RE::BSTEventSink<RE::InputEvent*>
 		{
 		public:
@@ -78,29 +76,15 @@ namespace BodyPouches
 		static void OnDropped(bool a_isLeft, ::TESObjectREFR* a_refr);
 		static void OnGrabbed(bool a_isLeft, ::TESObjectREFR* a_refr);
 
-		// VRIK's own gesture menu calls this when the player makes whichever gesture they
-		// bound to us. It says how many presses and nothing else - not even which hand -
-		// so the hand is worked out here.
-		static void OnGesture(int a_pressCount);
-
 		// --- the work itself, always on the game's own thread ---
 		bool Draw(int a_slot, bool a_isLeft, const Core::FormKey& a_item);
-		bool TakeBack(int a_slot, bool a_isLeft, bool a_assigning);
-
-		// A hand reached a pouch and pressed: give it what the pouch holds.
-		void DrawAt(int a_slot, bool a_isLeft);
-		// A hand let go of something at a pouch: take it in, or set the pouch up with it.
+		// A hand let go of something inside a pouch: take it in, or set the pouch up with it.
 		void StowDropped(int a_slot, bool a_isLeft, RE::TESObjectREFR* a_object);
 
-		// How long ago this hand was given a bottle out of this very pouch, or -1. The two
-		// gestures share a button and a place, so a release that follows a draw closely
-		// enough is the end of that draw and not a new stow.
-		[[nodiscard]] std::int64_t SinceDrawnFrom(bool a_isLeft, int a_slot) const;
-
-		// Which pouch this hand is at, or 0. Answers from the last reading while the
-		// hand is still there, and for a short while after it has left - a bottle let go
-		// of at the stomach lands a moment later, by which time the hand has moved on.
-		[[nodiscard]] int PouchAtHand(bool a_isLeft, bool a_remember);
+		// Which pouch this hand is at this very moment, or 0. Asked of VRIK and not
+		// remembered: a bottle let go of after the hand has left the pouch is a bottle
+		// dropped, not one put away.
+		[[nodiscard]] int PouchAt(bool a_isLeft);
 
 		// VRIK says "secondary hand", HIGGS says "left". This is the way back.
 		[[nodiscard]] static bool IsSecondaryHand(bool a_isLeft);
@@ -110,54 +94,63 @@ namespace BodyPouches
 		// Once a frame, on the game's own thread, given to us by HIGGS. Everything that
 		// has to be asked over and over rather than waited for happens here: which slot
 		// each hand has reached, whether a bottle just handed over was taken, and what
-		// the pouches should be showing.
+		// the pouch should be showing.
 		static void OnFrame();
 
+		// The first frame of play. A new game sends this plugin no message at all - run 7
+		// waited twelve minutes for one - so this is where the slots are arranged and the
+		// picture is set straight, whatever did or did not arrive before.
+		void FirstFrame();
+
 		// Ask VRIK which slot each hand has reached, and say so whenever the answer
-		// changes. This is how a hand held at a slot that raises no holster attempt can
-		// be told from a hand VRIK does not see at that slot at all - the two look
-		// exactly alike from the callback, and look nothing alike from here.
+		// changes.
 		void NoteReach();
 
-		// What each pouch should be showing, said to VRIK. On a slow beat and not only
-		// when it changes: VRIK's Papyrus side rebuilds a slot's picture from an array of
-		// its own after every load, so a picture set once quietly goes away.
+		// What the pouch should be showing, worked out on a slow beat or at once after a
+		// bottle came out or went in, and one step of putting it up every frame.
 		void RefreshDisplay();
-		// Switch on the slots the pouches sit in, then suspend the exclusive ones. Runs
-		// after every load: both halves live in VRIK's memory and not in its files.
+
+		// Switch on the slots the pouches sit in, then suspend the exclusive ones.
 		void ApplySlots();
+
+		// Where each pouch is, in VRIK's numbers and in the world, and which way its
+		// bone's axes point. Said at the first frame.
+		void DescribeSlots();
+
+		// Where this hand is in each pouch's own numbers: the posX, posY and posZ that
+		// would put the pouch right there, and how far that is from where it is now.
+		void Measure(bool a_isLeft);
 
 		// VRIK says "the secondary hand"; HIGGS and the game say "the left hand". The
 		// two only agree for a right-handed player, so the translation is made once,
 		// here, out of the game's own left-handed setting.
 		[[nodiscard]] static bool IsLeftHand(bool a_secondaryHand);
 
-		// Where to put a bottle so that a hand can close around it.
+		// Where a hand is in the world, and the name of the node that said so; nullptr
+		// when the hand has no node at all.
+		[[nodiscard]] static const char* HandAt(bool a_isLeft, RE::NiPoint3& a_out);
+
+		// Where to put a bottle so that a hand can close around it. Says which node.
 		[[nodiscard]] static bool HandPosition(bool a_isLeft, RE::NiPoint3& a_out);
 
 		// What the last poll saw, so that only changes are said. Indexed by hand the way
 		// VRIK counts them: [0] primary, [1] secondary.
-		int                 _reach[2]{ 0, 0 };
-		int                 _lastPouch[2]{ 0, 0 };
-		std::int64_t        _lastPouchAt[2]{ 0, 0 };
-		// Which pouch each hand was last given a bottle out of, and when. Indexed the same
-		// way: [0] primary, [1] secondary.
-		int                 _drawnFrom[2]{ 0, 0 };
-		std::int64_t        _drawnAt[2]{ 0, 0 };
+		int          _reach[2]{ 0, 0 };
+		// Which pouch each hand was last given a bottle out of. Indexed the same way.
+		int          _drawnFrom[2]{ 0, 0 };
 		// When to look back and see whether the hand really closed on the bottle. HIGGS
 		// takes no answer and gives none, so the only honest report is one made afterwards.
-		std::int64_t        _checkGrabAt[2]{ 0, 0 };
-		// What each slot was last told to show, by form id, so that only a change is said
-		// out loud while the telling itself goes on every beat.
-		std::map<int, std::uint32_t> _shown;
-		std::int64_t        _displayAt{ 0 };
-		bool                _frameSeen{ false };
-		Input               _input;
-		bool                _slotsArranged{ false };
-		bool                _watchingInput{ false };
+		std::int64_t _checkGrabAt[2]{ 0, 0 };
+		// When the pouch is next asked what it should show. Zero means at once.
+		std::int64_t _displayAt{ 0 };
+		bool         _frameSeen{ false };
+		Input        _input;
+		bool         _slotsArranged{ false };
+		bool         _watchingInput{ false };
 
 		Core::PouchSet   _pouches;
 		Game::PlayerPack _pack;
+		Game::Picture    _picture;
 		VR::VrikLink     _vrik;
 		VR::HiggsLink    _higgs;
 		Settings         _settings;

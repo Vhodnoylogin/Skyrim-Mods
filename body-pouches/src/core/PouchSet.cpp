@@ -90,20 +90,23 @@ namespace BodyPouches::Core
 			return Answer(a_reach.slot, a_reach.leftHand, Act::PassToVrik, Reason::NotOurs);
 		}
 
-		// A pouch nobody has set up yet. With a full hand this is how it gets set up -
-		// push a bottle in and the pouch takes its meaning from it. With an empty hand
-		// there is nothing to take, so the slot goes on working as VRIK's.
-		if (!pouch->IsAssigned()) {
-			return a_reach.handOccupied
-				? Answer(a_reach.slot, a_reach.leftHand, Act::Assign, Reason::NotAssigned)
-				: Answer(a_reach.slot, a_reach.leftHand, Act::PassToVrik, Reason::NotAssigned);
+		// A FULL HAND IS NEVER PUTTING SOMETHING IN, NOT FROM HERE. VRIK raises a reach
+		// for a hand holding a thing when that hand leaves the pouch with its grip still
+		// closed - which is a hand carrying its bottle away. Run 7 read it the other way
+		// and put back every bottle the moment it came out. A bottle goes in when the
+		// hand lets go of it inside the pouch; that is HIGGS's event and Offer's question.
+		// An exclusive pouch keeps the reach to itself so that nothing of VRIK's happens
+		// either; a shared one leaves it to VRIK, whose slot it also is.
+		if (a_reach.handOccupied) {
+			return exclusive
+				? Answer(a_reach.slot, a_reach.leftHand, Act::Refuse, Reason::CarriedAway)
+				: Answer(a_reach.slot, a_reach.leftHand, Act::PassToVrik, Reason::CarriedAway);
 		}
 
-		// A full hand is a reach to put something away. We cannot yet say whether it
-		// belongs here - that is Offer's question - but we can already say whose event
-		// it is.
-		if (a_reach.handOccupied) {
-			return Answer(a_reach.slot, a_reach.leftHand, Act::Stow, Reason::HandBusy);
+		// A pouch nobody has set up yet has nothing to give, so the slot goes on working
+		// as VRIK's. It is set up by letting go of a bottle in it - see Offer.
+		if (!pouch->IsAssigned()) {
+			return Answer(a_reach.slot, a_reach.leftHand, Act::PassToVrik, Reason::NotAssigned);
 		}
 
 		const auto  candidates = a_pack.Matching(pouch->PouchFilter());

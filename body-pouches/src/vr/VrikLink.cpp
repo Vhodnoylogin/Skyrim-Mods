@@ -42,27 +42,6 @@ namespace BodyPouches::VR
 		return true;
 	}
 
-	bool VrikLink::AddGesture(vrikPluginApi::IVrikInterface001::GestureCallback a_callback,
-		const char* a_menuName)
-	{
-		if (!Ready() || a_callback == nullptr || a_menuName == nullptr) {
-			return false;
-		}
-		_api->addGestureAction(a_callback, a_menuName);
-		Loc::Info(Keys::kGestureOffered, a_menuName);
-		return true;
-	}
-
-	void VrikLink::ShowInSlot(int a_slot, RE::TESForm* a_form)
-	{
-		if (!Ready()) {
-			return;
-		}
-		// The contract was written against another SDK, so the pointer changes vocabulary
-		// here and nowhere else.
-		_api->VrikSetSlotWeaponType(a_slot, reinterpret_cast<::TESForm*>(a_form));
-	}
-
 	bool VrikLink::SetSuspended(int a_slot, bool a_suspended)
 	{
 		if (!Ready()) {
@@ -97,6 +76,15 @@ namespace BodyPouches::VR
 		// The contract declares its own BGSArtObject - it was written against another
 		// SDK - so the pointer changes vocabulary here and nowhere else.
 		_api->VrikSetSlotForArt(a_slot, reinterpret_cast<::BGSArtObject*>(a_art));
+	}
+
+	RE::NiPoint3 VrikLink::SlotPosition(int a_slot)
+	{
+		return {
+			static_cast<float>(GetSetting(std::format("posX{}", a_slot).c_str())),
+			static_cast<float>(GetSetting(std::format("posY{}", a_slot).c_str())),
+			static_cast<float>(GetSetting(std::format("posZ{}", a_slot).c_str())),
+		};
 	}
 
 	double VrikLink::GetSetting(const char* a_name)
