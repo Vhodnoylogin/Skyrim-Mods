@@ -89,7 +89,7 @@ namespace BodyPouches
 				{ Keys::kPictureOnBody, "slot {0}: VRIK has the model of {1} on the bone and in place - there is a bottle to see" },
 				{ Keys::kPictureOffBody, "slot {0}: VRIK has no model on the bone any more" },
 				{ Keys::kPictureReset, "slot {0}: the picture is set straight after a load (the ability had come back with the save = {1})" },
-				{ Keys::kBoneMissing, "slot {0} hangs on {1}, and the player's body has no such bone right now" },
+				{ Keys::kBoneMissing, "slot {0} is at posX = {2:.3f}, posY = {3:.3f}, posZ = {4:.3f} on {1}, and the player's body has no such bone right now to say where that is" },
 				{ Keys::kSlotWhere, "slot {0} hangs on {1} at posX = {2:.3f}, posY = {3:.3f}, posZ = {4:.3f}: {5:.1f} units above the feet and {6:.1f} below the head bone (bone scale {7:.3f})" },
 				{ Keys::kBoneAxes, "the axes of {0} point, in the world: X ({1:.2f}, {2:.2f}, {3:.2f}), Y ({4:.2f}, {5:.2f}, {6:.2f}), Z ({7:.2f}, {8:.2f}, {9:.2f})" },
 				{ Keys::kFacing, "the player faces ({0:.2f}, {1:.2f}) on the ground, to read those axes against" },

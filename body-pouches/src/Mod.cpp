@@ -235,6 +235,9 @@ namespace BodyPouches
 		// arrived" from "it arrived and every step of it quietly did nothing".
 		Loc::Info(Keys::kGameLoaded, _settings.pouches.size());
 		ApplySlots();
+		// Again here and not only at the first frame: that frame may come in the start
+		// cave, where the player has no body yet to measure the slot against.
+		DescribeSlots();
 		_picture.Reset(Now());
 	}
 
@@ -302,14 +305,17 @@ namespace BodyPouches
 		for (const auto& setting : _settings.pouches) {
 			const char* boneName = Game::Body::BoneOf(setting.slot);
 			const auto  bone = Game::Body::Bone(setting.slot);
+
+			// Where VRIK has the slot, in its own numbers - said even without a body, since
+			// they are what shows whether VRIK read a moved slot at all - and, with a body,
+			// as heights a person can picture: "a hand below the head" says more than three
+			// coordinates do.
+			const auto pos = _vrik.SlotPosition(setting.slot);
 			if (!bone) {
-				Loc::Warn(Keys::kBoneMissing, setting.slot, boneName != nullptr ? boneName : "?");
+				Loc::Warn(Keys::kBoneMissing, setting.slot, boneName != nullptr ? boneName : "?",
+					pos.x, pos.y, pos.z);
 				continue;
 			}
-
-			// Where VRIK has the slot, in its own numbers and as heights a person can
-			// picture: "a hand below the head" says more than three coordinates do.
-			const auto pos = _vrik.SlotPosition(setting.slot);
 			const auto centre = Game::Body::ToWorld(*bone, pos);
 			Loc::Info(Keys::kSlotWhere, setting.slot, boneName, pos.x, pos.y, pos.z, centre.z - feet,
 				head ? head->translate.z - centre.z : 0.0f, bone->scale);
